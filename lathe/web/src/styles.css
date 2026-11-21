@@ -1,0 +1,985 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
+/*
+ * The one stylesheet of both pages: the design tokens, the page backdrop, and the few components
+ * whose look utilities cannot say in a class list (glows, masked rings, the native dialog, the
+ * radio cards). Layout stays in the markup as Tailwind utilities.
+ *
+ * An element takes its tint from `--accent`, which an app card sets to its catalog color and
+ * everything else inherits as the brand's orange.
+ */
+
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+
+@theme {
+  --font-sans:
+    'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
+  --color-ink-950: #05050a;
+  --color-ink-900: #0a0a11;
+  --color-ink-800: #101019;
+  --color-ink-700: #181824;
+  --color-fg: #f5f5f8;
+  --color-muted: #a9a9b8;
+  --color-faint: #858595;
+  --color-line: rgb(255 255 255 / 0.09);
+  --color-line-strong: rgb(255 255 255 / 0.16);
+  --color-ember: #ff7a1a;
+  --color-ember-200: #ffc79e;
+  --color-ember-300: #ffa861;
+  --color-iris: #8b5cf6;
+  --color-iris-300: #c4b1ff;
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-bad: #ff8f8f;
+
+  --animate-rise: rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-float: float 7s ease-in-out infinite;
+}
+
+@layer base {
+  :root {
+    --accent: var(--color-ember);
+    color-scheme: dark;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    /* Clears the sticky navigation when a link jumps to a section. */
+    scroll-padding-top: 5.5rem;
+    background: var(--color-ink-950);
+  }
+
+  /* A page under an open dialog does not scroll behind it. */
+  html:has(dialog[open]) {
+    overflow: hidden;
+  }
+
+  body {
+    min-height: 100dvh;
+    background: var(--color-ink-950);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv11', 'ss03';
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: rgb(255 122 26 / 0.35);
+    color: #fff;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ember-300);
+    outline-offset: 3px;
+    border-radius: 0.5rem;
+  }
+
+  button:not(:disabled),
+  summary,
+  label:has(input:not(:disabled)) {
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  /* Page backdrop: a fixed gradient mesh under a film of noise, so flat areas never band. */
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(62rem 38rem at 12% -8%, rgb(255 122 26 / 0.17), transparent 62%),
+      radial-gradient(54rem 36rem at 92% -4%, rgb(139 92 246 / 0.2), transparent 62%),
+      radial-gradient(70rem 40rem at 50% 115%, rgb(139 92 246 / 0.1), transparent 60%), var(--color-ink-950);
+  }
+
+  .backdrop::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0.07;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Decorative glows reach past the viewport; `clip` hides them without breaking `position: sticky`. */
+  .page {
+    position: relative;
+    overflow-x: clip;
+  }
+
+  .shell {
+    width: 100%;
+    max-width: 74rem;
+    margin-inline: auto;
+    padding-inline: 1.25rem;
+  }
+
+  @media (min-width: 640px) {
+    .shell {
+      padding-inline: 2rem;
+    }
+  }
+
+  /* Positioned, so a section paints over the hero's rings where they reach into it. */
+  .section {
+    position: relative;
+    padding-block: 4.5rem;
+  }
+
+  @media (min-width: 768px) {
+    .section {
+      padding-block: 7rem;
+    }
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-ember-300);
+  }
+
+  .display {
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    line-height: 1.04;
+    text-wrap: balance;
+  }
+
+  .lede {
+    color: var(--color-muted);
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+
+  .text-gradient {
+    background: linear-gradient(96deg, #ffc48f 0%, #ff7a1a 38%, #e65fb1 68%, #a678ff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    /* Descenders of the clipped text fall outside the line box at a tight leading. */
+    padding-bottom: 0.08em;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 2.75rem;
+    padding-inline: 1.15rem;
+    border: 1px solid transparent;
+    border-radius: 9999px;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    transition:
+      transform 0.18s ease,
+      box-shadow 0.25s ease,
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      filter 0.2s ease;
+  }
+
+  .btn:focus-visible {
+    border-radius: 9999px;
+  }
+
+  .btn:disabled,
+  .btn[aria-disabled='true'] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-sm {
+    height: 2.25rem;
+    padding-inline: 0.9rem;
+    font-size: 0.875rem;
+  }
+
+  .btn-lg {
+    height: 3.25rem;
+    padding-inline: 1.6rem;
+    font-size: 1rem;
+  }
+
+  .btn-primary {
+    color: #1c0d02;
+    background: linear-gradient(135deg, #ffbe85 0%, #ff8a2e 42%, #ff6a2a 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.45),
+      0 10px 34px -8px rgb(255 122 26 / 0.6),
+      0 0 70px -14px rgb(255 122 26 / 0.55);
+  }
+
+  .btn-primary:not(:disabled):hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.5),
+      0 14px 44px -8px rgb(255 122 26 / 0.75),
+      0 0 90px -10px rgb(255 122 26 / 0.7);
+  }
+
+  .btn-primary:not(:disabled):active {
+    transform: translateY(0);
+  }
+
+  .btn-ghost {
+    color: var(--color-fg);
+    background: rgb(255 255 255 / 0.05);
+    border-color: var(--color-line-strong);
+  }
+
+  .btn-ghost:not(:disabled):hover {
+    background: rgb(255 255 255 / 0.1);
+    border-color: rgb(255 255 255 / 0.28);
+  }
+
+  .btn-quiet {
+    color: var(--color-muted);
+  }
+
+  .btn-quiet:not(:disabled):hover {
+    color: var(--color-fg);
+    background: rgb(255 255 255 / 0.06);
+  }
+
+  .btn-danger {
+    color: var(--color-bad);
+    background: rgb(255 90 90 / 0.08);
+    border-color: rgb(255 120 120 / 0.28);
+  }
+
+  .btn-danger:not(:disabled):hover {
+    background: rgb(255 90 90 / 0.16);
+    border-color: rgb(255 120 120 / 0.5);
+  }
+
+  .link {
+    color: var(--color-ember-300);
+    text-decoration: underline;
+    text-decoration-color: rgb(255 168 97 / 0.4);
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.15s ease;
+  }
+
+  .link:hover {
+    text-decoration-color: currentColor;
+  }
+
+  /* Surfaces */
+  .glass {
+    border: 1px solid var(--color-line);
+    border-radius: 1.25rem;
+    background: linear-gradient(180deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.018));
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+  }
+
+  .glass-hover {
+    transition:
+      transform 0.25s ease,
+      border-color 0.25s ease,
+      box-shadow 0.25s ease;
+  }
+
+  .glass-hover:hover {
+    transform: translateY(-3px);
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.08),
+      0 30px 70px -40px color-mix(in oklab, var(--accent) 80%, transparent);
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    height: 1.75rem;
+    padding-inline: 0.7rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 9999px;
+    background: rgb(10 10 17 / 0.6);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    backdrop-filter: blur(10px);
+  }
+
+  .icon-tile {
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    flex: none;
+    border: 1px solid color-mix(in oklab, var(--accent) 38%, transparent);
+    border-radius: 0.9rem;
+    background: radial-gradient(
+      120% 120% at 20% 0%,
+      color-mix(in oklab, var(--accent) 34%, transparent),
+      color-mix(in oklab, var(--accent) 8%, transparent)
+    );
+    color: color-mix(in oklab, var(--accent) 55%, white);
+    box-shadow: 0 0 34px -10px var(--accent);
+  }
+
+  /* A pulsing status dot: the ring expands from the dot and fades. */
+  .dot {
+    position: relative;
+    width: 0.5rem;
+    height: 0.5rem;
+    flex: none;
+    border-radius: 9999px;
+    background: var(--dot, var(--color-ok));
+    box-shadow: 0 0 10px var(--dot, var(--color-ok));
+  }
+
+  .dot-live::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: inherit;
+    animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  .dot-ember {
+    --dot: var(--color-ember);
+  }
+
+  .dot-warn {
+    --dot: var(--color-warn);
+  }
+
+  .dot-idle {
+    --dot: var(--color-faint);
+    box-shadow: none;
+  }
+
+  .dot-bad {
+    --dot: var(--color-bad);
+  }
+
+  /* Art: a frame paints the accent gradient, and the image fades in over it once it has loaded,
+     so a missing or slow file leaves a finished-looking panel. */
+  .art {
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(110% 90% at 18% 8%, color-mix(in oklab, var(--accent) 50%, transparent), transparent 62%),
+      radial-gradient(90% 80% at 92% 100%, color-mix(in oklab, var(--accent) 26%, #8b5cf6 30%), transparent 66%),
+      var(--color-ink-800);
+  }
+
+  .art-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition:
+      opacity 0.6s ease,
+      transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1),
+      filter 0.4s ease;
+  }
+
+  .art-image[data-loaded='true'] {
+    opacity: 1;
+  }
+
+  /* App cards */
+  .app-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid color-mix(in oklab, var(--accent) 20%, rgb(255 255 255 / 0.09));
+    border-radius: 1.4rem;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 7%, var(--color-ink-800)), var(--color-ink-900) 70%);
+    transition:
+      transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+      border-color 0.3s ease,
+      box-shadow 0.3s ease;
+  }
+
+  .app-card:hover {
+    transform: translateY(-4px);
+    border-color: color-mix(in oklab, var(--accent) 60%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--accent) 22%, transparent),
+      0 36px 80px -44px var(--accent);
+  }
+
+  .app-card:hover .art-image {
+    transform: scale(1.04);
+  }
+
+  .app-card-live {
+    border-color: color-mix(in oklab, var(--accent) 48%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--accent) 16%, transparent),
+      0 40px 90px -50px var(--accent);
+  }
+
+  /* An app that is not live yet steps back without looking broken. */
+  .app-card-soon .art-image {
+    filter: saturate(0.6) brightness(0.78);
+  }
+
+  .app-card-soon:hover .art-image {
+    filter: saturate(0.9) brightness(0.92);
+  }
+
+  .art-scrim::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgb(5 5 10 / 0.35) 0%, transparent 34%, transparent 62%, rgb(10 10 17 / 0.82) 100%);
+    pointer-events: none;
+  }
+
+  /* The hero's streaming window and the rings turning behind it. */
+  .stream-window {
+    position: relative;
+    border-radius: 1.25rem;
+    background: var(--color-ink-900);
+    box-shadow:
+      0 0 0 1px rgb(255 255 255 / 0.1),
+      0 30px 80px -30px rgb(0 0 0 / 0.9);
+  }
+
+  @media (min-width: 640px) {
+    .stream-window {
+      border-radius: 1.6rem;
+    }
+  }
+
+  /* The light the frame sits in: orange from the left, violet from the right, like the art. */
+  .stream-glow {
+    position: absolute;
+    inset: 8% -7% -9%;
+    background:
+      radial-gradient(46% 56% at 26% 58%, rgb(255 122 26 / 0.5), transparent 72%),
+      radial-gradient(48% 58% at 76% 52%, rgb(139 92 246 / 0.55), transparent 72%);
+    filter: blur(64px);
+    pointer-events: none;
+  }
+
+  /* A lit arc travels the frame's edge: a conic gradient masked down to the border. */
+  .stream-window::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    z-index: 1;
+    padding: 1.5px;
+    border-radius: inherit;
+    background: conic-gradient(
+      from var(--sweep),
+      transparent 0 52%,
+      rgb(255 122 26 / 0.95) 66%,
+      rgb(214 110 255 / 0.95) 80%,
+      transparent 94%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box exclude,
+      linear-gradient(#000 0 0);
+    pointer-events: none;
+    animation: sweep 9s linear infinite;
+  }
+
+  /* The rings share the window's center, and a mask decides where they show: beside the hero's
+     text and around the frame, never across the text or the logos above it. The first layer dims
+     them with distance; it is intersected with the union of the other three, the two flanks
+     outside the page's column and a band from the frame's top edge to just under it. The band is
+     placed from the frame's own height, which follows from its width and its aspect ratio. */
+  .rings {
+    --size: clamp(56rem, 126vw, 114rem);
+    --center: calc(var(--size) / 2);
+    --window-half: calc((100vw - 2.5rem) * 0.375 + 1.25rem);
+    --flank: max(0px, calc(var(--center) - 36rem));
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: var(--size);
+    height: var(--size);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    mask-image:
+      radial-gradient(closest-side, #000 34%, rgb(0 0 0 / 0.55) 60%, transparent 92%),
+      linear-gradient(to right, #000 calc(100% - 6rem), transparent),
+      linear-gradient(to left, #000 calc(100% - 6rem), transparent),
+      linear-gradient(to bottom, transparent, #000 3rem, #000 calc(100% - 6rem), transparent);
+    mask-size:
+      100% 100%,
+      var(--flank) 100%,
+      var(--flank) 100%,
+      100% calc(var(--window-half) * 2 + 6.5rem);
+    mask-position:
+      0 0,
+      0 0,
+      100% 0,
+      0 calc(var(--center) - var(--window-half));
+    mask-repeat: no-repeat;
+    mask-composite: intersect, add, add;
+  }
+
+  @media (min-width: 640px) {
+    .rings {
+      --window-half: calc(min(100vw - 4rem, 64rem) * 0.28125 + 1.375rem);
+    }
+  }
+
+  .ring {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: var(--d);
+    height: var(--d);
+    margin: calc(var(--d) / -2) 0 0 calc(var(--d) / -2);
+    border: 1px solid rgb(255 255 255 / 0.07);
+    border-radius: 9999px;
+    animation: turn var(--speed) linear infinite var(--direction, normal);
+  }
+
+  /* The arc: brightest at its head, which sits at the top of the ring before it turns. */
+  .ring::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    padding: 1.5px;
+    border-radius: inherit;
+    background: conic-gradient(from 0deg, transparent 0 62%, var(--glow) 100%);
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box exclude,
+      linear-gradient(#000 0 0);
+  }
+
+  .ring::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 9999px;
+    background: #fff;
+    box-shadow:
+      0 0 12px 3px var(--glow),
+      0 0 30px 8px var(--glow);
+    transform: translate(-50%, -50%);
+  }
+
+  .ring-1 {
+    --d: clamp(24rem, 62vw, 56rem);
+    --speed: 26s;
+    --glow: rgb(255 122 26 / 0.9);
+  }
+
+  .ring-2 {
+    --d: clamp(33rem, 80vw, 72rem);
+    --speed: 38s;
+    --direction: reverse;
+    --glow: rgb(166 120 255 / 0.9);
+  }
+
+  .ring-3 {
+    --d: clamp(43rem, 100vw, 90rem);
+    --speed: 54s;
+    --glow: rgb(255 140 60 / 0.8);
+  }
+
+  .ring-4 {
+    --d: clamp(54rem, 122vw, 110rem);
+    --speed: 72s;
+    --direction: reverse;
+    --glow: rgb(166 120 255 / 0.7);
+  }
+
+  /* The stand-in for the hero art: the rings of a turned form, each one's dashes circling. */
+  .lathe-ring {
+    stroke-dasharray: 14 9;
+    animation: dash 3.2s linear infinite;
+  }
+
+  .lathe-ring:nth-child(even) {
+    animation-duration: 4.6s;
+    animation-direction: reverse;
+  }
+
+  /* Code and terminal blocks */
+  .terminal {
+    overflow: hidden;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 1rem;
+    background: linear-gradient(180deg, #0d0d15, #08080e);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.05),
+      0 30px 80px -50px rgb(255 122 26 / 0.7);
+  }
+
+  .terminal code {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+
+  /* Forms */
+  .field {
+    width: 100%;
+    height: 2.9rem;
+    padding-inline: 0.9rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.8rem;
+    background: rgb(255 255 255 / 0.04);
+    color: var(--color-fg);
+    /* 16px keeps iOS from zooming the page on focus. */
+    font-size: 1rem;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease,
+      background-color 0.15s ease;
+  }
+
+  .field::placeholder {
+    color: var(--color-faint);
+  }
+
+  .field:hover {
+    border-color: rgb(255 255 255 / 0.28);
+  }
+
+  .field:focus-visible {
+    outline: none;
+    border-color: var(--color-ember-300);
+    background: rgb(255 255 255 / 0.06);
+    box-shadow: 0 0 0 3px rgb(255 122 26 / 0.28);
+  }
+
+  select.field {
+    appearance: none;
+    padding-right: 2.4rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23a9a9b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+    background-position: right 0.85rem center;
+    background-repeat: no-repeat;
+  }
+
+  select.field option {
+    background: var(--color-ink-800);
+    color: var(--color-fg);
+  }
+
+  /* A radio drawn as a card: the input is visually hidden, and the label takes its states. */
+  .choice {
+    position: relative;
+    display: flex;
+    border: 1px solid var(--color-line);
+    border-radius: 1rem;
+    background: rgb(255 255 255 / 0.025);
+    transition:
+      border-color 0.18s ease,
+      background-color 0.18s ease,
+      box-shadow 0.18s ease;
+  }
+
+  .choice:has(input:not(:disabled)):hover {
+    border-color: rgb(255 255 255 / 0.24);
+    background: rgb(255 255 255 / 0.05);
+  }
+
+  button.choice:not(:disabled):hover {
+    border-color: color-mix(in oklab, var(--accent) 70%, transparent);
+    background: color-mix(in oklab, var(--accent) 8%, transparent);
+    box-shadow: 0 18px 50px -30px var(--accent);
+  }
+
+  button.choice:disabled {
+    opacity: 0.6;
+  }
+
+  .choice:has(input:checked) {
+    border-color: color-mix(in oklab, var(--accent) 75%, transparent);
+    background: color-mix(in oklab, var(--accent) 9%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--accent) 35%, transparent),
+      0 18px 50px -30px var(--accent);
+  }
+
+  .choice:has(input:focus-visible) {
+    outline: 2px solid var(--color-ember-300);
+    outline-offset: 3px;
+  }
+
+  .choice:has(input:disabled) {
+    opacity: 0.55;
+  }
+
+  .choice-mark {
+    display: grid;
+    place-items: center;
+    width: 1.15rem;
+    height: 1.15rem;
+    flex: none;
+    border: 1.5px solid rgb(255 255 255 / 0.28);
+    border-radius: 9999px;
+    transition:
+      border-color 0.18s ease,
+      background-color 0.18s ease;
+  }
+
+  .choice-mark::after {
+    content: '';
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 9999px;
+    background: #1c0d02;
+    opacity: 0;
+    transform: scale(0.4);
+    transition:
+      opacity 0.18s ease,
+      transform 0.18s ease;
+  }
+
+  .choice:has(input:checked) .choice-mark {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+
+  .choice:has(input:checked) .choice-mark::after {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  /* Messages */
+  .notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.9rem;
+    background: rgb(255 255 255 / 0.04);
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .notice-bad {
+    border-color: rgb(255 120 120 / 0.35);
+    background: rgb(255 80 80 / 0.08);
+    color: #ffc2c2;
+  }
+
+  .notice-warn {
+    border-color: rgb(251 191 36 / 0.35);
+    background: rgb(251 191 36 / 0.07);
+    color: #fde3a3;
+  }
+
+  .notice-ok {
+    border-color: rgb(74 222 128 / 0.3);
+    background: rgb(74 222 128 / 0.07);
+    color: #c3f5d4;
+  }
+
+  .notice-info {
+    border-color: rgb(166 120 255 / 0.4);
+    background: rgb(139 92 246 / 0.1);
+    color: #ddd2ff;
+  }
+
+  /* An indeterminate progress bar for a session that is starting. */
+  .progress {
+    position: relative;
+    height: 0.3rem;
+    overflow: hidden;
+    border-radius: 9999px;
+    background: rgb(255 255 255 / 0.08);
+  }
+
+  .progress::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: 40%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, transparent, #ff7a1a, #c26bff, transparent);
+    animation: slide 1.6s ease-in-out infinite;
+  }
+
+  .spinner {
+    width: 1rem;
+    height: 1rem;
+    flex: none;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 9999px;
+    animation: turn 0.7s linear infinite;
+  }
+
+  /* The native modal dialog. Preflight zeroes every margin, which is what centers a dialog. */
+  dialog.dialog {
+    width: min(100vw - 1.5rem, var(--dialog-width, 27rem));
+    max-width: none;
+    max-height: min(100dvh - 1.5rem, 48rem);
+    margin: auto;
+    padding: 0;
+    overflow: auto;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 1.5rem;
+    background: linear-gradient(180deg, #15151f, #0c0c13);
+    color: var(--color-fg);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.07),
+      0 40px 120px -20px rgb(0 0 0 / 0.95),
+      0 0 140px -40px rgb(255 122 26 / 0.5);
+  }
+
+  dialog.dialog-wide {
+    --dialog-width: 44rem;
+  }
+
+  dialog.dialog[open] {
+    animation: dialog-in 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  dialog.dialog::backdrop {
+    background: rgb(4 4 8 / 0.74);
+    backdrop-filter: blur(8px);
+    animation: fade-in 0.2s ease;
+  }
+
+  /* The FAQ's disclosure: the chevron turns and the row lights when it is open. */
+  .faq summary {
+    list-style: none;
+  }
+
+  .faq summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .faq[open] {
+    border-color: rgb(255 255 255 / 0.2);
+    background: linear-gradient(180deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.025));
+  }
+
+  .faq[open] .faq-chevron {
+    transform: rotate(180deg);
+    color: var(--color-ember-300);
+  }
+}
+
+@property --sweep {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes sweep {
+  to {
+    --sweep: 360deg;
+  }
+}
+
+@keyframes turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ping {
+  75%,
+  100% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+@keyframes float {
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -46;
+  }
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(260%);
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Motion is decoration here: with it turned down, everything rests in its final state. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,57 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Netlify builds the Lathe site (lathe/web) from this file alone: connecting the repository needs no
+# setting in the dashboard. The Supabase project and the control plane's address are the site's
+# environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, VITE_LATHE_API_URL); the site
+# builds and renders in full without them, with sign-up shown as opening soon.
+
+[build]
+  base = "lathe/web"
+  command = "npm run build"
+  # Relative to the base directory.
+  publish = "dist"
+  # The repository is mostly not this site, so a push that touches none of the site, the catalog it
+  # reads, or this file is not rebuilt. Exit status 0 skips the build; the comparison only yields it
+  # when both commits are known and differ, so a first build, or one whose previous commit is not in
+  # the clone, always runs.
+  ignore = '[ -n "$CACHED_COMMIT_REF" ] && [ "$CACHED_COMMIT_REF" != "$COMMIT_REF" ] && git diff --quiet "$CACHED_COMMIT_REF" "$COMMIT_REF" -- . ../catalog.json ../../netlify.toml'
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Both pages are files (dist/index.html and dist/app/index.html), so / and /app/ are real paths and
+# need no rewrite; any other path is a 404.
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Scripts and styles come from the site itself. Styles also allow inline, for the style
+    # attributes that carry each app's accent color. Connections are open to any HTTPS origin
+    # because the Supabase project and the control plane are named by the build's environment,
+    # which this file cannot read.
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    # This host only: a site moved to a domain of its own decides for that domain's other hosts itself
+    Strict-Transport-Security = "max-age=31536000"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+
+# Vite names every file under assets/ after a hash of its content, so one can be cached for good.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Art and logos keep their names when they change, so they are cached for a day and revalidated.
+[[headers]]
+  for = "/media/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"
+
+[[headers]]
+  for = "/logos/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"

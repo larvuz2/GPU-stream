@@ -59,7 +59,7 @@ and set:
 | `LATHE_TIERS` | The tier ids users may start, `cpu` unless set; add `t4,l4,a10` once the Modal account can start GPUs |
 | `LATHE_CAPACITY` | Sessions that may run at once across all users, `10` unless set; more are queued |
 | `LATHE_SITE_URL` | The site's address, which a finished payment returns to |
-| `LATHE_PIN_REGIONS` | `true` to pin a session to the region its user picked, which Modal bills at a higher rate; unset, Modal places it |
+| `LATHE_PIN_REGIONS` | `false` to let Modal place every session; unset, a session whose user picked a region is pinned to it, which Modal bills at a higher rate, and one left on automatic is not |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Stripe's, to sell credit packs; point a Stripe webhook for `checkout.session.completed` at `<api>/v1/billing/webhook` |
 
 Then build the session image and deploy:
@@ -76,7 +76,8 @@ The deploy prints the API's address. A change to the Secret reaches new
 containers; deploy again to have it take effect at once.
 
 **Netlify.** Connect the repository; `netlify.toml` holds the build. Set
-`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (the project's public key),
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` (the project's
+publishable key, `sb_publishable_...`; a legacy `anon` key works too),
 and `VITE_LATHE_API_URL` (the API's address, no trailing slash), then deploy.
 Without them the site still builds and shows sign-ups as opening soon.
 

@@ -1,0 +1,173 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
+/**
+ * The landing page's pricing: every tier with its hourly price, and the credit packs.
+ *
+ * No figure is written here. A tier's price per hour is its credits per minute times sixty times
+ * what a credit is worth; a pack's bonus is what its credits exceed its price by at that worth.
+ * @module
+ */
+import { ArrowRight, Check, Gift } from 'lucide-react';
+import {
+  brand,
+  catalog,
+  cheapestTier,
+  gpuLabel,
+  hourlyUsd,
+  minutesFor,
+  packBonus,
+  type CreditPack,
+  type Tier,
+} from '../lib/catalog';
+import { creditCount, minutesText, percentage, price, usd } from '../lib/format';
+import { SectionHeading } from './SectionHeading';
+
+/**
+ * Renders the pricing section.
+ *
+ * @returns The section.
+ */
+export function Pricing() {
+  return (
+    <section id="pricing" className="section" aria-labelledby="pricing-title">
+      <div className="shell">
+        <SectionHeading
+          id="pricing-title"
+          eyebrow="Pricing"
+          title="Pay by the minute. Stop whenever."
+          lede={`No subscription. 1 credit is ${usd(catalog.credit_usd)}, and a session spends credits by the minute on the tier you pick.`}
+        />
+
+        <ul className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          {catalog.tiers.map((tier) => (
+            <li key={tier.id} className="flex">
+              <TierCard tier={tier} />
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-5 grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,2fr)]">
+          <div className="glass relative overflow-hidden p-7">
+            <div
+              className="pointer-events-none absolute -top-24 -left-16 size-64 rounded-full bg-ember/25 blur-3xl"
+              aria-hidden="true"
+            />
+            <div className="relative">
+              <span className="icon-tile">
+                <Gift className="size-5" aria-hidden="true" />
+              </span>
+              <h3 className="display mt-5 text-3xl">
+                {creditCount(catalog.signup_credits)} credits, <span className="text-gradient">free</span>
+              </h3>
+              <p className="lede mt-3 text-[0.9375rem]">
+                Every new {brand} account starts with them
+                {cheapestTier === undefined
+                  ? '.'
+                  : `: ${minutesText(minutesFor(catalog.signup_credits, cheapestTier))} on ${cheapestTier.name} to try a real session before you spend anything.`}
+              </p>
+              <a href="#signup" className="btn btn-primary mt-6">
+                Start free
+                <ArrowRight className="size-4" aria-hidden="true" />
+              </a>
+            </div>
+          </div>
+
+          <div className="glass p-7">
+            <h3 className="text-lg font-semibold tracking-tight">Credit packs</h3>
+            <p className="mt-1 text-sm text-muted">
+              Top up when you need more. Bigger packs carry a bonus, and each shows the session time it buys.
+            </p>
+            <ul className="mt-5 grid gap-3 sm:grid-cols-3">
+              {catalog.credit_packs.map((pack) => (
+                <li key={pack.id}>
+                  <PackCard pack={pack} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** Props of {@link TierCard}. */
+interface TierCardProps {
+  /** The tier the card prices. */
+  tier: Tier;
+}
+
+/**
+ * Renders one tier: its price per hour, its rate in credits, and its hardware.
+ *
+ * @param props The component's props.
+ * @returns The card.
+ */
+function TierCard({ tier }: TierCardProps) {
+  const specs = [gpuLabel(tier), `${tier.cpu} vCPU`, `${tier.memory_gb} GB memory`];
+  return (
+    <article className="glass glass-hover flex w-full flex-col p-6">
+      <h3 className="text-sm font-semibold tracking-[0.14em] text-ember-300 uppercase">{tier.name}</h3>
+      <p className="mt-4 flex items-baseline gap-1.5">
+        <span className="display text-[2.6rem]">{price(hourlyUsd(tier))}</span>
+        <span className="text-sm text-muted">/ hour</span>
+      </p>
+      <p className="mt-1 text-sm text-faint">
+        {creditCount(tier.credits_per_minute)} {tier.credits_per_minute === 1 ? 'credit' : 'credits'} per minute
+      </p>
+      <p className="lede mt-4 flex-1 text-sm">{tier.blurb}</p>
+      <ul className="mt-5 grid gap-2.5 border-t border-line pt-5 text-sm">
+        {specs.map((spec) => (
+          <li key={spec} className="flex items-center gap-2.5">
+            <Check className="size-4 flex-none text-ember-300" aria-hidden="true" />
+            {spec}
+          </li>
+        ))}
+      </ul>
+    </article>
+  );
+}
+
+/** How many tiers, cheapest first, a pack spells its session time out for. */
+const PACK_EXAMPLE_TIERS = 2;
+
+/** Props of {@link PackCard}. */
+interface PackCardProps {
+  /** The credit pack the card shows. */
+  pack: CreditPack;
+}
+
+/**
+ * Renders one credit pack: its credits, its price, its bonus when it has one, and the session time
+ * it buys on the first tiers.
+ *
+ * @param props The component's props.
+ * @returns The card.
+ */
+function PackCard({ pack }: PackCardProps) {
+  const bonus = packBonus(pack);
+  return (
+    <div className="relative flex h-full flex-col rounded-2xl border border-line bg-white/[0.03] p-5">
+      {bonus > 0 ? (
+        <span className="pill absolute top-3.5 right-3.5 h-6 border-ember/40 bg-ember/10 text-[0.6875rem] text-ember-200 backdrop-blur-none">
+          +{percentage(bonus)}
+        </span>
+      ) : null}
+      <p className="display text-3xl">{usd(pack.usd)}</p>
+      <p className="mt-2 text-sm font-medium">{creditCount(pack.credits)} credits</p>
+      <p className="mt-0.5 text-xs text-faint">{bonus > 0 ? 'Bonus credits included' : 'The plain rate'}</p>
+      <ul className="mt-4 grid gap-1.5 border-t border-line pt-4 text-xs text-muted">
+        {catalog.tiers.slice(0, PACK_EXAMPLE_TIERS).map((tier) => (
+          <li key={tier.id} className="flex items-baseline justify-between gap-2">
+            <span>{tier.name}</span>
+            <span className="font-medium text-fg tabular-nums">{minutesText(minutesFor(pack.credits, tier))}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
