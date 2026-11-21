@@ -1,0 +1,28 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Runs the launcher (sandbox.py) with the Modal client it is written against,
+# installed on first use into a virtual environment of its own, so a machine or
+# a cloud session that has only Python runs it with one command. The
+# environment is keyed by the requirements file, so a changed pin gets a new
+# one. The Modal token is the client's own to find: MODAL_TOKEN_ID and
+# MODAL_TOKEN_SECRET, or the file `modal token new` writes.
+set -eu
+
+here="$(cd "$(dirname "$0")" && pwd)"
+key="$(cksum < "${here}/requirements.txt" | cut -d ' ' -f 1)"
+venv="${XDG_CACHE_HOME:-${HOME}/.cache}/selkies-modal/venv-${key}"
+
+if [ ! -x "${venv}/bin/modal" ]; then
+  echo "selkies-modal: installing the Modal client into ${venv}" >&2
+  python3 -m venv "${venv}"
+  "${venv}/bin/pip" install --quiet --disable-pip-version-check -r "${here}/requirements.txt"
+fi
+
+if [ "${1-}" = "modal" ]; then
+  shift
+  exec "${venv}/bin/modal" "$@"
+fi
+exec "${venv}/bin/python" "${here}/sandbox.py" "$@"

@@ -1,0 +1,11 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Run by the Selkies window manager once it is up, as the session's
+# application, installed as /etc/xdg/openbox/autostart, which both backends
+# read: Blender, started in the workspace so its file dialogs open on the
+# directory that outlives the Sandbox.
+cd "${SELKIES_MODAL_WORKSPACE:-${HOME}}" 2> /dev/null || true
+exec blender
