@@ -78,6 +78,9 @@ SESSION_ENV = {
     "SELKIES_MODAL_ACTIVITY_FILE": ACTIVITY_FILE,
     "SELKIES_MODAL_PID_FILE": PID_FILE,
     "SELKIES_MODAL_WORKSPACE": WORKSPACE,
+    # Where the page's uploads land and its downloads come from: the directory that outlives the
+    # Sandbox, where the server's own default is the desktop of a home that does not
+    "SELKIES_FILE_MANAGER_PATH": WORKSPACE,
     "SELKIES_MODAL_BLENDER_SPOOL": BLENDER_SPOOL,
     # Blender's preferences, add-ons, and extensions, and its auto-saves and last scene, on the
     # Volume with the work they belong to
