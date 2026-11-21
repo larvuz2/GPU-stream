@@ -57,7 +57,7 @@ def config() -> Any:
         site_url=os.environ.get("LATHE_SITE_URL", "").rstrip("/"),
         capacity=int(os.environ.get("LATHE_CAPACITY", "10")),
         tiers=frozenset(filter(None, os.environ.get("LATHE_TIERS", "cpu").split(","))),
-        pin_regions=os.environ.get("LATHE_PIN_REGIONS", "false").lower() == "true",
+        pin_regions=os.environ.get("LATHE_PIN_REGIONS", "true").lower() == "true",
     )
 
 
