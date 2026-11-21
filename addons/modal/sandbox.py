@@ -162,7 +162,7 @@ def up(args: argparse.Namespace) -> int:
         app=app,
         name=args.name,
         image=image,
-        gpu=args.gpu,
+        gpu=None if args.gpu == "none" else args.gpu,
         cpu=args.cpu,
         memory=args.memory,
         timeout=round(args.lifetime_hours * 3600),
@@ -172,7 +172,8 @@ def up(args: argparse.Namespace) -> int:
         tags={"session": args.name, "gpu": args.gpu},
         readiness_probe=modal.Probe.with_tcp(PORT),
     )
-    say(f"{args.name} is {sandbox.object_id} on {args.gpu}; waiting for Selkies")
+    where = "without a GPU" if args.gpu == "none" else f"on {args.gpu}"
+    say(f"{args.name} is {sandbox.object_id} {where}; waiting for Selkies")
     sandbox.wait_until_ready(timeout=args.ready_timeout)
     say(
         f"Selkies listens after {time.monotonic() - started:.0f} s; the session ends after "
@@ -256,7 +257,11 @@ def parser() -> argparse.ArgumentParser:
         return sub
 
     start = named(command("up", up, "Start a session, or return the one running, and print its link."))
-    start.add_argument("--gpu", default="T4", help="a GPU type Modal offers, such as T4, L4, or A10 (default: %(default)s)")
+    start.add_argument(
+        "--gpu",
+        default="T4",
+        help="a GPU type Modal offers, such as T4, L4, or A10, or none to render and encode in software (default: %(default)s)",
+    )
     start.add_argument("--cpu", type=float, default=2.0, help="CPU cores reserved; more are used as needed (default: %(default)s)")
     start.add_argument("--memory", type=int, default=4096, help="MiB of memory reserved (default: %(default)s)")
     start.add_argument(
@@ -284,9 +289,17 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    """Parse the command line and run its subcommand."""
+    """Parse the command line and run its subcommand.
+
+    What Modal refuses (no token, a GPU on an account without a payment method,
+    a quota) is the user's to act on, so it is printed as Modal words it rather
+    than as a traceback.
+    """
     args = parser().parse_args()
-    return args.handler(args)
+    try:
+        return args.handler(args)
+    except modal.exception.Error as error:
+        raise SystemExit(f"selkies-modal: {error}") from None
 
 
 if __name__ == "__main__":
