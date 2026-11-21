@@ -88,8 +88,9 @@ it.
 
 `/home/ubuntu/workspace` is the Modal Volume `selkies-workspace`, which
 outlives every Sandbox: Blender starts in it, and what is saved there is there
-in the next session. The rest of the filesystem is the image's and is gone when
-the session ends.
+in the next session. A file the page uploads lands there too, and the page's
+file list and downloads are of it. The rest of the filesystem is the image's
+and is gone when the session ends.
 
 Blender's own state is in the workspace too, under `.blender`: its
 preferences, add-ons, and extensions, and its auto-saves, which File > Recover
