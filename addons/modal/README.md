@@ -12,9 +12,12 @@ addons/modal/selkies-modal up
 ```text
 selkies-modal: image im-... ready after 1 s
 selkies-modal: blender is sb-... on T4; waiting for Selkies
-selkies-modal: Selkies listens after ... s; the session ends after 10 min unused, or 8 h in all
+selkies-modal: Selkies listens after 4 s; the session ends after 10 min unused, or 8 h in all
 https://....w.modal.host/?_modal_connect_token=...#token=...
 ```
+
+The first `up` or `build` builds the image, which takes a few minutes; Modal
+keeps it, and a session then starts in seconds.
 
 `selkies-modal` installs the Modal client it is written against into a virtual
 environment of its own the first time it runs, so it needs only Python 3. The
@@ -66,9 +69,11 @@ stops itself rather than wait to be stopped:
   second.
 
 `--gpu` picks the GPU (`T4` unless given; `L4` and `A10` are the next steps
-up, and any type Modal lists works). `--cpu` and `--memory` are what the
-session reserves, 2 cores and 4096 MiB unless given, and it uses more as
-Blender needs it.
+up, and any type Modal lists works). Modal starts a GPU only for an account
+with a payment method. `--gpu none` runs the session without one, rendering
+and encoding in software. `--cpu` and `--memory` are what the session
+reserves, 2 cores and 4096 MiB unless given, and it uses more as Blender needs
+it.
 
 ## Files
 
