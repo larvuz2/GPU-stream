@@ -1,0 +1,14 @@
+{
+  "name": "lathe-supabase",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test.ts",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.16",
+    "@types/node": "^26.6.5",
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
+  }
+}
