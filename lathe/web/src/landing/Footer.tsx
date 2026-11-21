@@ -6,19 +6,35 @@
 
 /**
  * The end of the landing page: the last call to action and the footer, which carries the
- * trademark notice for the apps the page names by their owners' logos.
+ * trademark notice for the apps the page names by their owners' logos. Both takes of the landing
+ * page end here; the call to action takes each one's closing words.
  * @module
  */
 import { ArrowRight } from 'lucide-react';
 import { Brand } from '../components/Brand';
 import { brand, catalog } from '../lib/catalog';
 
+/** Props of {@link FinalCta}. */
+interface FinalCtaProps {
+  /** The opening words of the title. */
+  lead?: string;
+  /** The words of the title set in the gradient. */
+  accent?: string;
+  /** The sentence under the title, before the note on the free credits. */
+  body?: string;
+}
+
 /**
  * Renders the closing call to action.
  *
+ * @param props The component's props.
  * @returns The section.
  */
-export function FinalCta() {
+export function FinalCta({
+  lead = 'Your studio is',
+  accent = 'one tab away',
+  body = 'Create an account, pick an app, and open the tab.',
+}: FinalCtaProps) {
   return (
     <section className="section pt-6" aria-labelledby="cta-title">
       <div className="shell">
@@ -36,10 +52,10 @@ export function FinalCta() {
             aria-hidden="true"
           />
           <h2 id="cta-title" className="display mx-auto max-w-3xl text-[2.2rem] sm:text-6xl">
-            Your studio is <span className="text-gradient">one tab away</span>
+            {lead} <span className="text-gradient">{accent}</span>
           </h2>
           <p className="lede mx-auto mt-5 max-w-xl text-[1.0625rem] sm:text-lg">
-            Create an account, pick an app, and open the tab. The first {catalog.signup_credits} credits are on us.
+            {body} The first {catalog.signup_credits} credits are on us.
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <a href="#signup" className="btn btn-primary btn-lg w-full sm:w-auto">

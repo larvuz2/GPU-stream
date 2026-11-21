@@ -8,6 +8,11 @@
  * The landing page: its sections in the order a visitor is convinced in, and the sign-up dialog
  * they all lead to.
  *
+ * The page comes in two takes that differ only in those sections: the first, written out here,
+ * explains how the product works, and the second (`creative/CreativeLanding.tsx`) leads with what
+ * people make with it. A bar above the navigation switches between them (`CompareBar.tsx`,
+ * `option.ts`), and everything around the sections is one and the same.
+ *
  * The dialog is opened by the URL fragment (`lib/hash.ts`): every call to action is a link to
  * `#signup` or `#signin`, so no section needs a callback, and the dashboard sends a signed-out
  * visitor to `/#signin`. A visitor who is already signed in is taken to the dashboard instead of
@@ -21,11 +26,14 @@ import { DASHBOARD_PATH } from '../lib/supabase';
 import { useAuth } from '../lib/useAuth';
 import { AgentSection } from './AgentSection';
 import { Apps } from './Apps';
+import { CompareBar } from './CompareBar';
+import { CreativeLanding } from './creative/CreativeLanding';
 import { Faq } from './Faq';
 import { Features, HowItWorks, TrustStrip } from './Features';
 import { FinalCta, Footer } from './Footer';
 import { Hero } from './Hero';
 import { Nav } from './Nav';
+import { chooseLandingOption, useLandingOption } from './option';
 import { Pricing } from './Pricing';
 
 /** The fragment that opens the dialog on each of its forms. */
@@ -51,6 +59,7 @@ function authModeOf(hash: string): AuthMode | null {
  */
 export function Landing() {
   const requested = authModeOf(useHash());
+  const option = useLandingOption();
   const auth = useAuth();
   const signedIn = auth.status === 'signed-in';
 
@@ -65,21 +74,28 @@ export function Landing() {
       <div className="backdrop" aria-hidden="true" />
       <a
         href="#main"
-        className="btn btn-primary fixed top-3 left-3 z-50 -translate-y-20 focus-visible:translate-y-0"
+        className="btn btn-primary fixed top-3 left-3 z-[60] -translate-y-20 focus-visible:translate-y-0"
       >
         Skip to content
       </a>
+      <CompareBar option={option} onChoose={chooseLandingOption} />
       <Nav signedIn={signedIn} />
       <main id="main">
-        <Hero />
-        <TrustStrip />
-        <Apps />
-        <HowItWorks />
-        <AgentSection />
-        <Features />
-        <Pricing />
-        <Faq />
-        <FinalCta />
+        {option === 2 ? (
+          <CreativeLanding />
+        ) : (
+          <>
+            <Hero />
+            <TrustStrip />
+            <Apps />
+            <HowItWorks />
+            <AgentSection />
+            <Features />
+            <Pricing />
+            <Faq />
+            <FinalCta />
+          </>
+        )}
       </main>
       <Footer />
       <AuthDialog

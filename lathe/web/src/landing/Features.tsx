@@ -8,7 +8,8 @@
  * The landing page's plain statements about the product: the three facts under the hero, the
  * three steps of using it, and the grid of what a session comes with.
  *
- * Each says what the product does and nothing measured: no speeds, counts, or guarantees.
+ * Each says what the product does and nothing measured: no speeds, counts, or guarantees. The
+ * steps section is also the second take's, which gives it steps in its own words.
  * @module
  */
 import {
@@ -30,7 +31,7 @@ import { brand, catalog, IDLE_SHUTDOWN_MINUTES, namedRegions } from '../lib/cata
 import { SectionHeading } from './SectionHeading';
 
 /** A statement with an icon: a title and a sentence under it. */
-interface Point {
+export interface Point {
   /** The icon beside the title. */
   icon: LucideIcon;
   /** The statement. */
@@ -80,11 +81,11 @@ export function TrustStrip() {
 }
 
 /**
- * The three steps, written from the catalog's first and last tiers.
+ * The first take's three steps, written from the catalog's first and last tiers.
  *
  * @returns The steps in order.
  */
-function steps(): Point[] {
+function technicalSteps(): Point[] {
   const first = catalog.tiers[0];
   const last = catalog.tiers.at(-1);
   const range =
@@ -108,24 +109,34 @@ function steps(): Point[] {
   ];
 }
 
+/** Props of {@link HowItWorks}. */
+interface HowItWorksProps {
+  /** The section's title. */
+  title?: string;
+  /** The sentence under the title. */
+  lede?: string;
+  /** The steps, in order; the first take's when left out. */
+  steps?: Point[];
+}
+
 /**
  * Renders the "how it works" section: three numbered steps.
  *
+ * @param props The component's props.
  * @returns The section.
  */
-export function HowItWorks() {
+export function HowItWorks({
+  title = 'From zero to viewport in three steps',
+  lede = 'No installer, no driver hunt, no render box under the desk.',
+  steps = technicalSteps(),
+}: HowItWorksProps) {
   return (
     <section id="how" className="section" aria-labelledby="how-title">
       <div className="shell">
-        <SectionHeading
-          id="how-title"
-          eyebrow="How it works"
-          title="From zero to viewport in three steps"
-          lede="No installer, no driver hunt, no render box under the desk."
-        />
+        <SectionHeading id="how-title" eyebrow="How it works" title={title} lede={lede} />
         <ol className="mt-12 grid gap-5 md:grid-cols-3">
-          {steps().map(({ icon: Icon, title, body }, index) => (
-            <li key={title} className="glass glass-hover relative p-7">
+          {steps.map(({ icon: Icon, title: step, body }, index) => (
+            <li key={step} className="glass glass-hover relative p-7">
               <div className="flex items-center justify-between">
                 <span className="icon-tile size-12">
                   <Icon className="size-5" aria-hidden="true" />
@@ -134,7 +145,7 @@ export function HowItWorks() {
                   0{index + 1}
                 </span>
               </div>
-              <h3 className="mt-6 text-xl font-semibold tracking-tight">{title}</h3>
+              <h3 className="mt-6 text-xl font-semibold tracking-tight">{step}</h3>
               <p className="lede mt-2.5 text-[0.9375rem]">{body}</p>
             </li>
           ))}

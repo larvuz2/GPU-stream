@@ -43,7 +43,7 @@ export function Nav({ signedIn }: NavProps) {
 
   return (
     <header
-      className="sticky top-0 z-40 border-b border-line bg-ink-950/70 backdrop-blur-xl"
+      className="sticky top-(--compare-bar) z-40 border-b border-line bg-ink-950/70 backdrop-blur-xl"
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           closeMenu();

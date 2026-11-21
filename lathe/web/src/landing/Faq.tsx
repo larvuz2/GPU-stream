@@ -8,7 +8,8 @@
  * The landing page's questions and answers, each a native disclosure.
  *
  * The answers say what the product does today and stop there; what a number is comes from the
- * catalog.
+ * catalog. The questions written here are the first take's; the second take of the landing page
+ * renders the same section with its own (`creative/CreativeLanding.tsx`).
  * @module
  */
 import { ChevronDown } from 'lucide-react';
@@ -17,7 +18,7 @@ import { usd } from '../lib/format';
 import { SectionHeading } from './SectionHeading';
 
 /** A question and its answer. */
-interface Question {
+export interface Question {
   /** The question, as a visitor would ask it. */
   question: string;
   /** The answer. */
@@ -25,11 +26,11 @@ interface Question {
 }
 
 /**
- * The questions, written from the catalog.
+ * The first take's questions, written from the catalog.
  *
  * @returns The questions in the order they are shown.
  */
-function questions(): Question[] {
+function technicalQuestions(): Question[] {
   const app = liveApps[0]?.name ?? 'the app';
   return [
     {
@@ -61,26 +62,35 @@ function questions(): Question[] {
   ];
 }
 
+/** Props of {@link Faq}. */
+interface FaqProps {
+  /** The section's title. */
+  title?: string;
+  /** The sentence under the title. */
+  lede?: string;
+  /** The questions to answer, in order; the first take's when left out. */
+  questions?: Question[];
+}
+
 /**
  * Renders the FAQ section.
  *
+ * @param props The component's props.
  * @returns The section.
  */
-export function Faq() {
+export function Faq({
+  title = 'Fair questions, straight answers',
+  lede = 'The things people ask before they launch their first session.',
+  questions = technicalQuestions(),
+}: FaqProps) {
   return (
     <section id="faq" className="section" aria-labelledby="faq-title">
       <div className="shell grid grid-cols-[minmax(0,1fr)] gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] lg:gap-16">
-        <div className="lg:sticky lg:top-28 lg:self-start">
-          <SectionHeading
-            id="faq-title"
-            eyebrow="FAQ"
-            title="Fair questions, straight answers"
-            lede="The things people ask before they launch their first session."
-            start
-          />
+        <div className="lg:sticky lg:top-[calc(7rem+var(--compare-bar))] lg:self-start">
+          <SectionHeading id="faq-title" eyebrow="FAQ" title={title} lede={lede} start />
         </div>
         <div className="grid gap-3">
-          {questions().map(({ question, answer }) => (
+          {questions.map(({ question, answer }) => (
             <details key={question} className="faq glass group">
               <summary className="flex items-center justify-between gap-4 rounded-[inherit] p-5 text-[1.0625rem] font-semibold tracking-tight sm:px-6">
                 {question}

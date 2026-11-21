@@ -35,6 +35,9 @@ const APP_LOGOS: Readonly<Record<string, LogoFile>> = {
 /** The hero's art, 16:9. */
 export const HERO_ART = '/media/hero.webp';
 
+/** The art of the second landing page's hero, 16:9. */
+export const CREATIVE_HERO_ART = '/media/hero-creative.webp';
+
 /** The art beside the agent section's command, 3:2. */
 export const AGENT_ART = '/media/claude.webp';
 
@@ -46,6 +49,16 @@ export const AGENT_ART = '/media/claude.webp';
  */
 export function appImage(appId: string): string {
   return `/media/app-${encodeURIComponent(appId)}.webp`;
+}
+
+/**
+ * The art of a use case on the second landing page, 3:2.
+ *
+ * @param name The use case's short name, the stem its file is delivered under.
+ * @returns The address the image is served from.
+ */
+export function useCaseImage(name: string): string {
+  return `/media/use-${encodeURIComponent(name)}.webp`;
 }
 
 /**
