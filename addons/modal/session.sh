@@ -34,7 +34,10 @@
 # secure mode from its first request and the launcher needs no call into it
 # before handing out the link. The image names that file and the activity file
 # (SELKIES_MODAL_ACTIVITY_FILE), which is where the launcher's commands find
-# them too.
+# them too, and the file this script's process ID goes in
+# (SELKIES_MODAL_PID_FILE): terminating a Sandbox kills it outright, so the
+# launcher stops a session by signaling this script, which ends it the way the
+# idle timeout does, with Blender's scene kept.
 
 set -u
 
@@ -65,8 +68,8 @@ if [ -z "${SELKIES_MASTER_TOKEN-}" ]; then
   say "SELKIES_MASTER_TOKEN is not set, so the session would be open to anyone with its address" >&2
   exit 1
 fi
-if [ -z "${SELKIES_TOKENS_FILE-}" ] || [ -z "${SELKIES_MODAL_ACTIVITY_FILE-}" ]; then
-  say "SELKIES_TOKENS_FILE and SELKIES_MODAL_ACTIVITY_FILE name the files this session keeps; the image sets both" >&2
+if [ -z "${SELKIES_TOKENS_FILE-}" ] || [ -z "${SELKIES_MODAL_ACTIVITY_FILE-}" ] || [ -z "${SELKIES_MODAL_PID_FILE-}" ]; then
+  say "SELKIES_TOKENS_FILE, SELKIES_MODAL_ACTIVITY_FILE, and SELKIES_MODAL_PID_FILE name the files this session keeps; the image sets them" >&2
   exit 1
 fi
 case "${IDLE_TIMEOUT}" in
@@ -80,17 +83,35 @@ esac
   umask 077
   mkdir -p "${SELKIES_TOKENS_FILE%/*}" "${SELKIES_MODAL_ACTIVITY_FILE%/*}" &&
     printf '{"%s": {"role": "controller", "slot": null}}\n' "${SELKIES_MODAL_SESSION_TOKEN}" > "${SELKIES_TOKENS_FILE}" &&
-    : > "${SELKIES_MODAL_ACTIVITY_FILE}"
+    : > "${SELKIES_MODAL_ACTIVITY_FILE}" &&
+    echo "$$" > "${SELKIES_MODAL_PID_FILE}"
 ) || exit 1
 unset SELKIES_MODAL_SESSION_TOKEN
 
 /etc/container-entrypoint.sh &
 SESSION_PID=$!
 
-# Stops the entrypoint and exits with the given status. s6-svscan takes its
-# services down on SIGTERM; a session that outlasts the wait goes with the
-# Sandbox, which ends when this process does.
+# Has Blender quit, and keeps the scene it writes on its way out (quit.blend,
+# what File > Recover > Last Session opens) under this Sandbox's name, for the
+# next session's Blender to open (blender/session.py). Quitting is what makes
+# Blender write that scene as its own recovery reads it back; the name is what
+# keeps a Blender the window manager starts again here from taking it for
+# another session's.
+keep_scene() {
+  echo 'bpy.ops.wm.quit_blender()' | timeout 20 selkies-modal-blender 10 > /dev/null 2>&1 || return 1
+  for _ in $(seq 1 50); do
+    pgrep -x blender > /dev/null || break
+    sleep 0.2
+  done
+  rm -f "${SELKIES_MODAL_BLENDER_RECOVERY}"/resume-*.blend
+  mv "${SELKIES_MODAL_BLENDER_RECOVERY}/quit.blend" "${SELKIES_MODAL_BLENDER_RECOVERY}/resume-${MODAL_SANDBOX_ID}.blend"
+}
+
+# Stops the entrypoint and exits with the given status, once Blender has kept
+# its scene. s6-svscan takes its services down on SIGTERM; a session that
+# outlasts the wait goes with the Sandbox, which ends when this process does.
 end_session() {
+  keep_scene || say "Blender did not keep its scene; its last auto-save is what the workspace has"
   kill -TERM "${SESSION_PID}" 2> /dev/null
   for _ in $(seq 1 20); do
     kill -0 "${SESSION_PID}" 2> /dev/null || break

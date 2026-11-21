@@ -30,12 +30,21 @@ writes after you approve it in a browser.
 | `up` | Starts the session, or returns the one already running under that name, and prints its link |
 | `url` | Prints a new link to a running session |
 | `exec -- <command>` | Runs a command in the session's environment: on its display, with its GPU |
+| `blender` | Runs the Python on standard input inside the session's Blender, the one the page shows |
 | `ls` | Lists the running sessions |
-| `down` | Stops a session |
+| `down` | Stops a session, with the scene Blender has open kept for the next one |
 | `build` | Builds the image without starting a session |
 
 Every command but `ls` and `build` takes `--name` (`blender` unless given), so
 several sessions run side by side under names of their own.
+
+```bash
+echo 'bpy.ops.mesh.primitive_monkey_add()' | addons/modal/selkies-modal blender
+```
+
+The code runs as if from the 3D viewport, so operators work as they do there,
+and what it prints comes back; an exception comes back as its traceback with a
+status of 1.
 
 ## The link
 
@@ -81,6 +90,15 @@ it.
 outlives every Sandbox: Blender starts in it, and what is saved there is there
 in the next session. The rest of the filesystem is the image's and is gone when
 the session ends.
+
+Blender's own state is in the workspace too, under `.blender`: its
+preferences, add-ons, and extensions, and its auto-saves, which File > Recover
+> Auto Save lists. A session that ends with Blender open, by the idle timeout
+or `down`, has Blender quit first and keeps the scene it had open; the next
+session's Blender opens that scene again as Blender's own recovery does, an
+unsaved scene still unsaved and a saved file under its own path with the
+changes that were not saved. A Sandbox that is killed outright, at its
+lifetime or from Modal's dashboard, keeps only the last auto-save.
 
 ## The session
 

@@ -31,6 +31,7 @@ definition, the Sandbox, and the connect token are reached through.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import secrets
 import sys
@@ -58,6 +59,9 @@ PORT = 8080
 WORKSPACE = "/home/ubuntu/workspace"
 TOKENS_FILE = "/tmp/selkies-modal/tokens.json"
 ACTIVITY_FILE = "/tmp/selkies-modal/activity"
+PID_FILE = "/tmp/selkies-modal/pid"
+BLENDER_SPOOL = "/tmp/selkies-modal/blender"
+SHARE = "/usr/local/share/selkies-modal"
 
 # What the session is, whoever starts it. Modal terminates TLS and its connect
 # token guards the address, so Selkies serves plain HTTP with no login of its
@@ -72,7 +76,13 @@ SESSION_ENV = {
     "SELKIES_APP_RESTART": "true",
     "SELKIES_TOKENS_FILE": TOKENS_FILE,
     "SELKIES_MODAL_ACTIVITY_FILE": ACTIVITY_FILE,
+    "SELKIES_MODAL_PID_FILE": PID_FILE,
     "SELKIES_MODAL_WORKSPACE": WORKSPACE,
+    "SELKIES_MODAL_BLENDER_SPOOL": BLENDER_SPOOL,
+    # Blender's preferences, add-ons, and extensions, and its auto-saves and last scene, on the
+    # Volume with the work they belong to
+    "BLENDER_USER_RESOURCES": f"{WORKSPACE}/.blender",
+    "SELKIES_MODAL_BLENDER_RECOVERY": f"{WORKSPACE}/.blender/autosave",
 }
 
 
@@ -107,6 +117,8 @@ def session_image() -> modal.Image:
         .add_local_file(HERE / "session.sh", "/usr/local/bin/selkies-modal-session", copy=True)
         .add_local_file(HERE / "run.sh", "/usr/local/bin/selkies-modal-run", copy=True)
         .add_local_file(HERE / "blender" / "autostart", "/etc/xdg/openbox/autostart", copy=True)
+        .add_local_file(HERE / "blender" / "session.py", f"{SHARE}/blender-session.py", copy=True)
+        .add_local_file(HERE / "blender" / "run-python.sh", "/usr/local/bin/selkies-modal-blender", copy=True)
         .env(SESSION_ENV)
         .entrypoint([])
     )
@@ -135,6 +147,118 @@ def session_link(sandbox: modal.Sandbox) -> str:
     return f"{credentials.url}/?_modal_connect_token={credentials.token}#token={token}"
 
 
+def start_session(
+    app: modal.App,
+    name: str,
+    *,
+    gpu: str | None,
+    cpu: float | tuple[float, float],
+    memory: int,
+    idle_seconds: int,
+    lifetime_seconds: int,
+    env: dict[str, str] | None = None,
+    region: str | None = None,
+    workspace: str | None = None,
+    tags: dict[str, str] | None = None,
+    image: modal.Image | None = None,
+) -> modal.Sandbox:
+    """Start a session's Sandbox and return it at once, before Selkies listens.
+
+    The session's two tokens are made here and reach the Sandbox as a Modal
+    Secret; nothing else holds them. `workspace` mounts one directory of the
+    Volume in place of all of it, which is what keeps one user's files out of
+    another's session where a service starts sessions for many. `cpu` takes a
+    request, or a request and a limit, as Modal bills whichever of the request
+    and the use is higher. `image` is the session image where the caller holds
+    one already built, which a service does so that no request waits on a build.
+
+    Raises:
+        modal.exception.AlreadyExistsError: A session of that name is running.
+    """
+    volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
+    if workspace is not None:
+        volume = volume.with_mount_options(sub_path=workspace)
+    credentials = modal.Secret.from_dict(
+        {
+            "SELKIES_MASTER_TOKEN": secrets.token_urlsafe(32),
+            "SELKIES_MODAL_SESSION_TOKEN": secrets.token_urlsafe(32),
+        }
+    )
+    return modal.Sandbox.create(
+        "/usr/local/bin/selkies-modal-session",
+        app=app,
+        name=name,
+        image=image or session_image(),
+        gpu=gpu,
+        cpu=cpu,
+        memory=memory,
+        region=region,
+        timeout=lifetime_seconds,
+        env={**(env or {}), "SELKIES_MODAL_IDLE_TIMEOUT": str(idle_seconds)},
+        secrets=[credentials],
+        volumes={WORKSPACE: volume},
+        tags=tags or {},
+        readiness_probe=modal.Probe.with_tcp(PORT),
+    )
+
+
+def stop_session(sandbox: modal.Sandbox, wait_seconds: int = 45) -> None:
+    """End a session the way its idle timeout does, then end its Sandbox whatever became of that.
+
+    Terminating a Sandbox kills it where it stands, with Blender's open scene.
+    The session's own way out has Blender keep that scene first (`session.sh`),
+    so the session is signaled to take it and given `wait_seconds` to finish.
+    """
+    sandbox.exec("sh", "-c", 'kill -TERM "$(cat "$SELKIES_MODAL_PID_FILE")"').wait()
+    deadline = time.monotonic() + wait_seconds
+    while sandbox.poll() is None and time.monotonic() < deadline:
+        time.sleep(1)
+    sandbox.terminate(wait=True)
+
+
+def blender_python(sandbox: modal.Sandbox, code: str, wait_seconds: int = 120) -> tuple[int, str]:
+    """Run Python inside the session's Blender and return its status and what it printed.
+
+    The status is `run-python.sh`'s: 0 when the code ran to its end, 1 with its
+    traceback after what it printed when it raised, 124 when Blender did not
+    answer within `wait_seconds`.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-blender", str(wait_seconds))
+    try:
+        process.stdin.write(code)
+        process.stdin.write_eof()
+        process.stdin.drain()
+    except modal.exception.Error:
+        # The command ended before it read anything; its status and output say why
+        pass
+    output = process.stdout.read()
+    status = process.wait()
+    return status, output + process.stderr.read()
+
+
+def screenshot(sandbox: modal.Sandbox) -> bytes:
+    """The session's screen as a JPEG no wider than 1280 pixels, small enough to hand to a model.
+
+    Selkies takes the picture (`/api/screenshot`, a PNG at the display's size),
+    asked from inside the Sandbox with the master token that never leaves it.
+
+    Raises:
+        RuntimeError: Selkies or the conversion refused, with what it said.
+    """
+    process = sandbox.exec(
+        "sh",
+        "-c",
+        'curl -fsS -m 20 -H "Authorization: Bearer $SELKIES_MASTER_TOKEN" '
+        '"http://127.0.0.1:${SELKIES_PORT:-8080}/api/screenshot" | '
+        # The comma is escaped for ffmpeg, which otherwise reads it as the end of the filter
+        "ffmpeg -loglevel error -i pipe:0 -vf 'scale=min(1280\\,iw):-2' -q:v 4 -f mjpeg pipe:1 | base64 -w0",
+    )
+    picture = process.stdout.read()
+    if process.wait() != 0 or not picture:
+        raise RuntimeError(f"no screenshot: {process.stderr.read().strip()}")
+    return base64.b64decode(picture)
+
+
 def up(args: argparse.Namespace) -> int:
     """Start the session, or return the one already running under that name, and print its link."""
     sandbox = find_session(args.name)
@@ -148,29 +272,17 @@ def up(args: argparse.Namespace) -> int:
     image = session_image().build(app)
     say(f"image {image.object_id} ready after {time.monotonic() - started:.0f} s")
 
-    env = dict(item.split("=", 1) for item in args.env)
-    env["SELKIES_MODAL_IDLE_TIMEOUT"] = str(round(args.idle_minutes * 60))
-    credentials = modal.Secret.from_dict(
-        {
-            "SELKIES_MASTER_TOKEN": secrets.token_urlsafe(32),
-            "SELKIES_MODAL_SESSION_TOKEN": secrets.token_urlsafe(32),
-        }
-    )
     started = time.monotonic()
-    sandbox = modal.Sandbox.create(
-        "/usr/local/bin/selkies-modal-session",
-        app=app,
-        name=args.name,
-        image=image,
+    sandbox = start_session(
+        app,
+        args.name,
         gpu=None if args.gpu == "none" else args.gpu,
         cpu=args.cpu,
         memory=args.memory,
-        timeout=round(args.lifetime_hours * 3600),
-        env=env,
-        secrets=[credentials],
-        volumes={WORKSPACE: modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)},
+        idle_seconds=round(args.idle_minutes * 60),
+        lifetime_seconds=round(args.lifetime_hours * 3600),
+        env=dict(item.split("=", 1) for item in args.env),
         tags={"session": args.name, "gpu": args.gpu},
-        readiness_probe=modal.Probe.with_tcp(PORT),
     )
     where = "without a GPU" if args.gpu == "none" else f"on {args.gpu}"
     say(f"{args.name} is {sandbox.object_id} {where}; waiting for Selkies")
@@ -215,13 +327,23 @@ def run(args: argparse.Namespace) -> int:
     return process.wait()
 
 
+def blender(args: argparse.Namespace) -> int:
+    """Run the Python on standard input inside the session's Blender and print what it printed."""
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    status, output = blender_python(sandbox, sys.stdin.read(), args.wait)
+    sys.stdout.write(output)
+    return status
+
+
 def down(args: argparse.Namespace) -> int:
     """Stop a session, which ends its billing; its workspace stays."""
     sandbox = find_session(args.name)
     if sandbox is None:
         say(f"no session named {args.name} is running")
         return 0
-    sandbox.terminate(wait=True)
+    stop_session(sandbox)
     say(f"{args.name} ({sandbox.object_id}) stopped")
     return 0
 
@@ -283,6 +405,8 @@ def parser() -> argparse.ArgumentParser:
     command("ls", ls, "List the running sessions.")
     execute = named(command("exec", run, "Run a command in a session's environment."))
     execute.add_argument("arguments", nargs=argparse.REMAINDER, metavar="-- command", help="the command and its arguments")
+    script = named(command("blender", blender, "Run the Python on standard input inside a session's Blender."))
+    script.add_argument("--wait", type=int, default=120, help="seconds to wait for Blender to answer (default: %(default)s)")
     named(command("down", down, "Stop a session."))
     command("build", build, "Build the image without starting a session.")
     return top
