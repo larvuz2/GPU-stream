@@ -6,6 +6,7 @@
 # Run by the Selkies window manager once it is up, as the session's
 # application, installed as /etc/xdg/openbox/autostart, which both backends
 # read: Blender, started in the workspace so its file dialogs open on the
-# directory that outlives the Sandbox.
+# directory that outlives the Sandbox, with the script that keeps its recovery
+# files there and runs the Python the session is handed (session.py).
 cd "${SELKIES_MODAL_WORKSPACE:-${HOME}}" 2> /dev/null || true
-exec blender
+exec blender --python /usr/local/share/selkies-modal/blender-session.py
