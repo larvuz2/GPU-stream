@@ -11,10 +11,14 @@
  * The window frames the hero art, concept imagery that is decoration rather than a picture of the
  * product. Should the file be missing, a drawn stand-in takes its place: the rings of a form
  * turning on a lathe, in the same frame.
+ *
+ * The window on its stage and the strip of app names are what any hero of this page is built
+ * from, so they are exported for the second take's hero (`creative/CreativeHero.tsx`), which sets
+ * its own art and its own note in the same frame.
  * @module
  */
 import { useState } from 'react';
-import { ArrowRight, Lock, Play, Sparkles } from 'lucide-react';
+import { ArrowRight, Lock, Play, Sparkles, type LucideIcon } from 'lucide-react';
 import { AppName, ArtImage } from '../components/Art';
 import { brand, catalog, cheapestTier, liveApps, minutesFor, upcomingApps, type CatalogApp } from '../lib/catalog';
 import { cx } from '../lib/cx';
@@ -73,19 +77,61 @@ export function Hero() {
         <AppStrip />
       </div>
 
-      <div className="shell relative mt-12 sm:mt-16">
-        <div className="rings" aria-hidden="true">
-          <span className="ring ring-1" />
-          <span className="ring ring-2" />
-          <span className="ring ring-3" />
-          <span className="ring ring-4" />
-        </div>
-        <div className="relative mx-auto max-w-5xl">
-          <div className="stream-glow" aria-hidden="true" />
-          <StreamWindow app={live} />
-        </div>
-      </div>
+      <StreamStage app={live} />
     </section>
+  );
+}
+
+/** What the chip floating over the window says: one thing going on in the session it frames. */
+export interface WindowNote {
+  /** The icon in the chip's tile. */
+  icon: LucideIcon;
+  /** The chip's statement. */
+  title: string;
+  /** The line under the statement. */
+  detail: string;
+  /** Whether the detail is an identifier, set in the monospace face. */
+  code?: boolean;
+}
+
+/** The note of the first take: an agent at work, named by the tool it is running. */
+const AGENT_NOTE: WindowNote = {
+  icon: Sparkles,
+  title: 'Claude is in the session',
+  detail: SCRIPT_TOOL,
+  code: true,
+};
+
+/** Props of {@link StreamStage}. */
+interface StreamStageProps {
+  /** The app the window's title names, when one is live. */
+  app: CatalogApp | undefined;
+  /** The address of the art the window frames. */
+  art?: string;
+  /** What the chip over the window says. */
+  note?: WindowNote;
+}
+
+/**
+ * Renders the hero's visual: the window in its light, with the rings turning behind it.
+ *
+ * @param props The component's props.
+ * @returns The stage.
+ */
+export function StreamStage({ app, art = HERO_ART, note = AGENT_NOTE }: StreamStageProps) {
+  return (
+    <div className="shell relative mt-12 sm:mt-16">
+      <div className="rings" aria-hidden="true">
+        <span className="ring ring-1" />
+        <span className="ring ring-2" />
+        <span className="ring ring-3" />
+        <span className="ring ring-4" />
+      </div>
+      <div className="relative mx-auto max-w-5xl">
+        <div className="stream-glow" aria-hidden="true" />
+        <StreamWindow app={app} art={art} note={note} />
+      </div>
+    </div>
   );
 }
 
@@ -95,7 +141,7 @@ export function Hero() {
  *
  * @returns The row.
  */
-function AppStrip() {
+export function AppStrip() {
   return (
     <div className="mt-10 flex animate-rise flex-col items-center justify-center gap-x-10 gap-y-5 [animation-delay:260ms] lg:flex-row">
       <AppGroup label="Live now" apps={liveApps} />
@@ -145,17 +191,22 @@ function AppGroup({ label, apps }: AppGroupProps) {
 interface StreamWindowProps {
   /** The app the window's title names, when one is live. */
   app: CatalogApp | undefined;
+  /** The address of the art the window frames. */
+  art: string;
+  /** What the chip over the window says. */
+  note: WindowNote;
 }
 
 /**
- * Renders the browser-tab frame around the hero art, with a chip that shows an agent at work in
+ * Renders the browser-tab frame around the hero art, with a chip that shows something going on in
  * the session.
  *
  * @param props The component's props.
  * @returns The frame.
  */
-function StreamWindow({ app }: StreamWindowProps) {
+function StreamWindow({ app, art, note }: StreamWindowProps) {
   const [artMissing, setArtMissing] = useState(false);
+  const { icon: NoteIcon } = note;
   return (
     <div className="stream-window animate-rise [animation-delay:320ms]">
       <div className="overflow-hidden rounded-[inherit]">
@@ -181,7 +232,7 @@ function StreamWindow({ app }: StreamWindowProps) {
             <LatheScene />
           ) : (
             <ArtImage
-              src={HERO_ART}
+              src={art}
               width={1920}
               height={1080}
               priority
@@ -199,11 +250,13 @@ function StreamWindow({ app }: StreamWindowProps) {
         )}
       >
         <span className="icon-tile size-10 rounded-xl">
-          <Sparkles className="size-[1.1rem]" aria-hidden="true" />
+          <NoteIcon className="size-[1.1rem]" aria-hidden="true" />
         </span>
         <span className="min-w-0">
-          <span className="block text-sm font-semibold">Claude is in the session</span>
-          <span className="mono block truncate text-xs text-muted">{SCRIPT_TOOL}</span>
+          <span className="block text-sm font-semibold">{note.title}</span>
+          <span className={cx(note.code === true && 'mono', 'block truncate text-xs text-muted')}>
+            {note.detail}
+          </span>
         </span>
       </div>
     </div>

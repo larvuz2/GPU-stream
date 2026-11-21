@@ -9,6 +9,7 @@
  *
  * No figure is written here. A tier's price per hour is its credits per minute times sixty times
  * what a credit is worth; a pack's bonus is what its credits exceed its price by at that worth.
+ * Both takes of the landing page show this one section, each under a heading in its own voice.
  * @module
  */
 import { ArrowRight, Check, Gift } from 'lucide-react';
@@ -26,21 +27,29 @@ import {
 import { creditCount, minutesText, percentage, price, usd } from '../lib/format';
 import { SectionHeading } from './SectionHeading';
 
+/** Props of {@link Pricing}. */
+interface PricingProps {
+  /** The section's title. */
+  title?: string;
+  /** The sentence or two under the title. */
+  lede?: string;
+}
+
 /**
- * Renders the pricing section.
+ * Renders the pricing section. The figures are the catalog's whoever frames them; the heading is
+ * the part a take of the landing page words its own way.
  *
+ * @param props The component's props.
  * @returns The section.
  */
-export function Pricing() {
+export function Pricing({
+  title = 'Pay by the minute. Stop whenever.',
+  lede = `No subscription. 1 credit is ${usd(catalog.credit_usd)}, and a session spends credits by the minute on the tier you pick.`,
+}: PricingProps) {
   return (
     <section id="pricing" className="section" aria-labelledby="pricing-title">
       <div className="shell">
-        <SectionHeading
-          id="pricing-title"
-          eyebrow="Pricing"
-          title="Pay by the minute. Stop whenever."
-          lede={`No subscription. 1 credit is ${usd(catalog.credit_usd)}, and a session spends credits by the minute on the tier you pick.`}
-        />
+        <SectionHeading id="pricing-title" eyebrow="Pricing" title={title} lede={lede} />
 
         <ul className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {catalog.tiers.map((tier) => (

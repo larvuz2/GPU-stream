@@ -46,13 +46,19 @@
 @layer base {
   :root {
     --accent: var(--color-ember);
+    /* The height of the comparison bar above the navigation, zero on a page without one. */
+    --compare-bar: 0rem;
     color-scheme: dark;
+  }
+
+  html:has(.compare-bar) {
+    --compare-bar: 2.75rem;
   }
 
   html {
     scroll-behavior: smooth;
-    /* Clears the sticky navigation when a link jumps to a section. */
-    scroll-padding-top: 5.5rem;
+    /* Clears the sticky navigation, and the bar above it, when a link jumps to a section. */
+    scroll-padding-top: calc(5.5rem + var(--compare-bar));
     background: var(--color-ink-950);
   }
 
@@ -116,6 +122,65 @@
   .page {
     position: relative;
     overflow-x: clip;
+  }
+
+  /* The comparison bar: a tool laid over the page, so it is tinted in the violet no call to
+     action uses and sits above the navigation, which sticks beneath it. */
+  .compare-bar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    height: var(--compare-bar);
+    /* The selected segment's glow stays inside the bar, so nothing of the bar falls on the page. */
+    overflow: clip;
+    border-bottom: 1px solid rgb(166 120 255 / 0.24);
+    background:
+      linear-gradient(90deg, rgb(139 92 246 / 0.16), transparent 32%, transparent 68%, rgb(139 92 246 / 0.16)),
+      rgb(9 9 16 / 0.86);
+    backdrop-filter: blur(18px);
+  }
+
+  .segmented {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 9999px;
+    background: rgb(0 0 0 / 0.4);
+  }
+
+  .segment {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 1.75rem;
+    padding-inline: 0.8rem;
+    border-radius: 9999px;
+    color: var(--color-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    transition:
+      color 0.15s ease,
+      background-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+
+  .segment:hover {
+    color: var(--color-fg);
+  }
+
+  .segment:has(input:checked) {
+    background: rgb(139 92 246 / 0.34);
+    color: #fff;
+    box-shadow:
+      inset 0 0 0 1px rgb(166 120 255 / 0.6),
+      0 0 18px -6px rgb(139 92 246 / 0.95);
+  }
+
+  .segment:has(input:focus-visible) {
+    outline: 2px solid var(--color-ember-300);
+    outline-offset: 2px;
   }
 
   .shell {
@@ -447,6 +512,93 @@
 
   .app-card-soon:hover .art-image {
     filter: saturate(0.9) brightness(0.92);
+  }
+
+  /* Use-case cards. The art takes the top of the card and the words sit at its foot on a
+     gradient of their own, which is therefore as tall as the words whatever the card's size. A
+     feature card, from the width at which it spans two columns, lets the art fill it instead. */
+  .use-card {
+    display: flex;
+    border: 1px solid color-mix(in oklab, var(--accent) 22%, rgb(255 255 255 / 0.1));
+    border-radius: 1.5rem;
+    isolation: isolate;
+    transition:
+      transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1),
+      border-color 0.3s ease,
+      box-shadow 0.3s ease;
+  }
+
+  .use-card:hover {
+    transform: translateY(-4px);
+    border-color: color-mix(in oklab, var(--accent) 65%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--accent) 24%, transparent),
+      0 44px 90px -52px var(--accent);
+  }
+
+  /* The card is one link, its title stretched over it, so the ring belongs to the card. */
+  .use-card:has(a:focus-visible) {
+    outline: 2px solid var(--color-ember-300);
+    outline-offset: 3px;
+  }
+
+  .use-card a:focus-visible {
+    outline: none;
+  }
+
+  .use-card .art-image {
+    height: 66%;
+    -webkit-mask-image: linear-gradient(to bottom, #000 68%, transparent);
+    mask-image: linear-gradient(to bottom, #000 68%, transparent);
+  }
+
+  .use-card:hover .art-image {
+    transform: scale(1.045);
+  }
+
+  .use-words {
+    padding-top: 3.25rem;
+    background: linear-gradient(
+      to top,
+      rgb(7 7 12 / 0.97) 0%,
+      rgb(7 7 12 / 0.93) 58%,
+      rgb(7 7 12 / 0.6) 82%,
+      transparent 100%
+    );
+  }
+
+  @media (min-width: 640px) {
+    .use-card-feature .art-image {
+      height: 100%;
+      -webkit-mask-image: none;
+      mask-image: none;
+    }
+  }
+
+  .use-arrow {
+    border: 1px solid rgb(255 255 255 / 0.22);
+    background: rgb(5 5 10 / 0.5);
+    backdrop-filter: blur(10px);
+    transition:
+      background-color 0.25s ease,
+      border-color 0.25s ease,
+      color 0.25s ease,
+      transform 0.25s ease;
+  }
+
+  .use-card:hover .use-arrow {
+    border-color: transparent;
+    background: var(--accent);
+    color: #1c0d02;
+    transform: translate(2px, -2px);
+  }
+
+  .use-card-soon .art-image {
+    filter: saturate(0.6) brightness(0.72);
+  }
+
+  .use-card-soon:hover .art-image {
+    filter: saturate(0.9) brightness(0.9);
   }
 
   .art-scrim::after {
