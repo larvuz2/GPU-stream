@@ -1,0 +1,12 @@
+{
+  "policies": {
+    "DownloadDirectory": "/home/ubuntu/workspace/Downloads",
+    "PromptForDownloadLocation": false,
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "DontCheckDefaultBrowser": true,
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": "",
+    "NoDefaultBookmarks": true
+  }
+}

@@ -1,0 +1,9 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Run by the Selkies window manager once it is up, as the session's
+# application, installed as /etc/xdg/openbox/autostart: Nuke, or, in a
+# workspace that has none yet, its one-time setup (setup.sh).
+exec selkies-modal-nuke

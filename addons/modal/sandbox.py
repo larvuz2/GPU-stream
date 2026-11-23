@@ -81,12 +81,27 @@ SESSION_ENV = {
     # Where the page's uploads land and its downloads come from: the directory that outlives the
     # Sandbox, where the server's own default is the desktop of a home that does not
     "SELKIES_FILE_MANAGER_PATH": WORKSPACE,
-    "SELKIES_MODAL_BLENDER_SPOOL": BLENDER_SPOOL,
-    # Blender's preferences, add-ons, and extensions, and its auto-saves and last scene, on the
-    # Volume with the work they belong to
-    "BLENDER_USER_RESOURCES": f"{WORKSPACE}/.blender",
-    "SELKIES_MODAL_BLENDER_RECOVERY": f"{WORKSPACE}/.blender/autosave",
 }
+
+# What each application's session adds to it.
+APP_ENV = {
+    "blender": {
+        "SELKIES_MODAL_APP": "blender",
+        "SELKIES_MODAL_BLENDER_SPOOL": BLENDER_SPOOL,
+        # Blender's preferences, add-ons, and extensions, and its auto-saves and last scene, on
+        # the Volume with the work they belong to
+        "BLENDER_USER_RESOURCES": f"{WORKSPACE}/.blender",
+        "SELKIES_MODAL_BLENDER_RECOVERY": f"{WORKSPACE}/.blender/autosave",
+    },
+    "nuke": {
+        "SELKIES_MODAL_APP": "nuke",
+        # Nuke's settings, and the sign-in Foundry's login license keeps, kept in the workspace
+        # (session.sh)
+        "SELKIES_MODAL_PERSIST": ".nuke .local/share/Foundry FoundryLicensing",
+        "NUKE_PATH": f"{SHARE}/nuke",
+    },
+}
+APPS = tuple(APP_ENV)
 
 
 def say(message: str) -> None:
@@ -94,35 +109,55 @@ def say(message: str) -> None:
     print(f"selkies-modal: {message}", file=sys.stderr, flush=True)
 
 
-def session_image() -> modal.Image:
-    """The base container with Blender, the idle counter's reader, and this integration's scripts.
+def session_image(app: str = "blender") -> modal.Image:
+    """The base container with an application, the idle counter's reader, and this integration's scripts.
 
     Modal builds every layer as root whatever user an image names, while the base
     keeps its package database the session user's, so that `sudo apt-get` works
-    inside a session. The package layer therefore goes through
-    `selkies-privileged-files run`, which runs it as that user under fakeroot
-    the way an in-session install does. Blender is the release archive from
-    blender.org, checked against the hash blender.org publishes for it.
+    inside a session. Package layers therefore go through
+    `selkies-privileged-files run`, which runs them as that user under fakeroot
+    the way an in-session install does.
+
+    Blender is the release archive from blender.org, checked against the hash
+    blender.org publishes for it. Nuke is not in the image at all: Foundry hands
+    it out behind a login and a license its user accepts, so the session
+    installs it into the workspace once that user has (`nuke/setup.sh`); the
+    image carries what that takes, Firefox among it (`nuke/install-deps.sh`).
     """
-    series = BLENDER_VERSION.rsplit(".", 1)[0]
-    archive = f"https://download.blender.org/release/Blender{series}/blender-{BLENDER_VERSION}-linux-x64.tar.xz"
-    return (
-        modal.Image.from_registry(BASE_IMAGE)
-        .dockerfile_commands(
-            "RUN selkies-privileged-files run sh -c '"
-            "apt-get update && apt-get install --no-install-recommends -y xprintidle && "
-            "apt-get clean && rm -rf /var/lib/apt/lists/*'",
-            f"RUN curl -fsSL -o /tmp/blender.tar.xz {archive} && "
-            f"echo '{BLENDER_SHA256}  /tmp/blender.tar.xz' | sha256sum -c - && "
-            "mkdir -p /opt/blender && tar -xJf /tmp/blender.tar.xz -C /opt/blender --strip-components=1 && "
-            "rm -f /tmp/blender.tar.xz && ln -s /opt/blender/blender /usr/local/bin/blender",
+    if app == "nuke":
+        image = (
+            modal.Image.from_registry(BASE_IMAGE)
+            # Not under /tmp: a file copied there leaves the directory root's alone
+            .add_local_file(HERE / "nuke" / "install-deps.sh", f"{SHARE}/nuke/install-deps.sh", copy=True)
+            .dockerfile_commands(f"RUN selkies-privileged-files run sh {SHARE}/nuke/install-deps.sh")
+            .add_local_file(HERE / "nuke" / "firefox-policies.json", "/etc/firefox/policies/policies.json", copy=True)
+            .add_local_file(HERE / "nuke" / "autostart", "/etc/xdg/openbox/autostart", copy=True)
+            .add_local_file(HERE / "nuke" / "rc.xml", "/etc/xdg/openbox/rc.xml", copy=True)
+            .add_local_file(HERE / "nuke" / "setup.sh", "/usr/local/bin/selkies-modal-nuke", copy=True)
+            .add_local_file(HERE / "nuke" / "menu.py", f"{SHARE}/nuke/menu.py", copy=True)
         )
-        .add_local_file(HERE / "session.sh", "/usr/local/bin/selkies-modal-session", copy=True)
+    else:
+        series = BLENDER_VERSION.rsplit(".", 1)[0]
+        archive = f"https://download.blender.org/release/Blender{series}/blender-{BLENDER_VERSION}-linux-x64.tar.xz"
+        image = (
+            modal.Image.from_registry(BASE_IMAGE)
+            .dockerfile_commands(
+                "RUN selkies-privileged-files run sh -c '"
+                "apt-get update && apt-get install --no-install-recommends -y xprintidle && "
+                "apt-get clean && rm -rf /var/lib/apt/lists/*'",
+                f"RUN curl -fsSL -o /tmp/blender.tar.xz {archive} && "
+                f"echo '{BLENDER_SHA256}  /tmp/blender.tar.xz' | sha256sum -c - && "
+                "mkdir -p /opt/blender && tar -xJf /tmp/blender.tar.xz -C /opt/blender --strip-components=1 && "
+                "rm -f /tmp/blender.tar.xz && ln -s /opt/blender/blender /usr/local/bin/blender",
+            )
+            .add_local_file(HERE / "blender" / "autostart", "/etc/xdg/openbox/autostart", copy=True)
+            .add_local_file(HERE / "blender" / "session.py", f"{SHARE}/blender-session.py", copy=True)
+            .add_local_file(HERE / "blender" / "run-python.sh", "/usr/local/bin/selkies-modal-blender", copy=True)
+        )
+    return (
+        image.add_local_file(HERE / "session.sh", "/usr/local/bin/selkies-modal-session", copy=True)
         .add_local_file(HERE / "run.sh", "/usr/local/bin/selkies-modal-run", copy=True)
-        .add_local_file(HERE / "blender" / "autostart", "/etc/xdg/openbox/autostart", copy=True)
-        .add_local_file(HERE / "blender" / "session.py", f"{SHARE}/blender-session.py", copy=True)
-        .add_local_file(HERE / "blender" / "run-python.sh", "/usr/local/bin/selkies-modal-blender", copy=True)
-        .env(SESSION_ENV)
+        .env({**SESSION_ENV, **APP_ENV[app]})
         .entrypoint([])
     )
 
@@ -164,6 +199,7 @@ def start_session(
     workspace: str | None = None,
     tags: dict[str, str] | None = None,
     image: modal.Image | None = None,
+    application: str = "blender",
 ) -> modal.Sandbox:
     """Start a session's Sandbox and return it at once, before Selkies listens.
 
@@ -173,7 +209,8 @@ def start_session(
     another's session where a service starts sessions for many. `cpu` takes a
     request, or a request and a limit, as Modal bills whichever of the request
     and the use is higher. `image` is the session image where the caller holds
-    one already built, which a service does so that no request waits on a build.
+    one already built, which a service does so that no request waits on a build;
+    otherwise it is `application`'s.
 
     Raises:
         modal.exception.AlreadyExistsError: A session of that name is running.
@@ -191,7 +228,7 @@ def start_session(
         "/usr/local/bin/selkies-modal-session",
         app=app,
         name=name,
-        image=image or session_image(),
+        image=image or session_image(application),
         gpu=gpu,
         cpu=cpu,
         memory=memory,
@@ -272,7 +309,7 @@ def up(args: argparse.Namespace) -> int:
 
     app = modal.App.lookup(APP_NAME, create_if_missing=True)
     started = time.monotonic()
-    image = session_image().build(app)
+    image = session_image(args.app).build(app)
     say(f"image {image.object_id} ready after {time.monotonic() - started:.0f} s")
 
     started = time.monotonic()
@@ -285,7 +322,9 @@ def up(args: argparse.Namespace) -> int:
         idle_seconds=round(args.idle_minutes * 60),
         lifetime_seconds=round(args.lifetime_hours * 3600),
         env=dict(item.split("=", 1) for item in args.env),
-        tags={"session": args.name, "gpu": args.gpu},
+        workspace=f"/{args.workspace}" if args.workspace else None,
+        tags={"session": args.name, "gpu": args.gpu, "app": args.app},
+        image=image,
     )
     where = "without a GPU" if args.gpu == "none" else f"on {args.gpu}"
     say(f"{args.name} is {sandbox.object_id} {where}; waiting for Selkies")
@@ -351,13 +390,21 @@ def down(args: argparse.Namespace) -> int:
     return 0
 
 
-def build(_args: argparse.Namespace) -> int:
-    """Build the image without starting a session, so the next `up` starts from Modal's cache."""
+def build(args: argparse.Namespace) -> int:
+    """Build an application's image without starting a session, so the next `up` starts from Modal's cache."""
     app = modal.App.lookup(APP_NAME, create_if_missing=True)
     started = time.monotonic()
-    image = session_image().build(app)
+    image = session_image(args.app).build(app)
     say(f"image {image.object_id} ready after {time.monotonic() - started:.0f} s")
     return 0
+
+
+def workspace_directory(value: str) -> str:
+    """A `--workspace` argument: a directory of the Volume, as words joined by slashes."""
+    parts = value.strip("/").split("/")
+    if not all(part and part not in (".", "..") and part.replace("-", "").replace("_", "").isalnum() for part in parts):
+        raise argparse.ArgumentTypeError(f"{value!r} is not a directory name like team/nuke")
+    return "/".join(parts)
 
 
 def environment_assignment(value: str) -> str:
@@ -382,6 +429,13 @@ def parser() -> argparse.ArgumentParser:
         return sub
 
     start = named(command("up", up, "Start a session, or return the one running, and print its link."))
+    start.add_argument("--app", choices=APPS, default="blender", help="the application the session runs (default: %(default)s)")
+    start.add_argument(
+        "--workspace",
+        type=workspace_directory,
+        default="",
+        help="the directory of the workspace Volume the session keeps its files in (default: all of it)",
+    )
     start.add_argument(
         "--gpu",
         default="T4",
@@ -411,7 +465,8 @@ def parser() -> argparse.ArgumentParser:
     script = named(command("blender", blender, "Run the Python on standard input inside a session's Blender."))
     script.add_argument("--wait", type=int, default=120, help="seconds to wait for Blender to answer (default: %(default)s)")
     named(command("down", down, "Stop a session."))
-    command("build", build, "Build the image without starting a session.")
+    image = command("build", build, "Build an application's image without starting a session.")
+    image.add_argument("--app", choices=APPS, default="blender", help="the application (default: %(default)s)")
     return top
 
 

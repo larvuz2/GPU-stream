@@ -18,6 +18,7 @@
 #   read, so there a connected page counts as use.
 # - Commands. The launcher touches the activity file for each command it runs
 #   in the session, so an agent working with no page open keeps it alive.
+# - Transfers. A file still being downloaded or uploaded into the workspace.
 #
 # With neither for SELKIES_MODAL_IDLE_TIMEOUT seconds (600 unless set; 0 never
 # ends it), the entrypoint is stopped and this script exits. The count starts
@@ -88,6 +89,21 @@ esac
 ) || exit 1
 unset SELKIES_MODAL_SESSION_TOKEN
 
+# Where an application keeps its settings or sign-in in the home, which is the
+# image's and goes with the Sandbox, those directories are links into the
+# workspace instead (SELKIES_MODAL_PERSIST, paths relative to the home, which
+# the image names). What the image put there itself is copied across the first
+# time, without replacing what the workspace already holds.
+for path in ${SELKIES_MODAL_PERSIST-}; do
+  kept="${SELKIES_MODAL_WORKSPACE}/.home/${path}"
+  mkdir -p "${kept}" "$(dirname "${HOME}/${path}")"
+  if [ -d "${HOME}/${path}" ] && [ ! -L "${HOME}/${path}" ]; then
+    cp -an "${HOME}/${path}/." "${kept}/"
+    rm -rf "${HOME:?}/${path}"
+  fi
+  ln -sfn "${kept}" "${HOME}/${path}"
+done
+
 /etc/container-entrypoint.sh &
 SESSION_PID=$!
 
@@ -98,6 +114,7 @@ SESSION_PID=$!
 # keeps a Blender the window manager starts again here from taking it for
 # another session's.
 keep_scene() {
+  [ "${SELKIES_MODAL_APP-}" = blender ] || return 0
   echo 'bpy.ops.wm.quit_blender()' | timeout 20 selkies-modal-blender 10 > /dev/null 2>&1 || return 1
   for _ in $(seq 1 50); do
     pgrep -x blender > /dev/null || break
@@ -144,11 +161,20 @@ page_connected() {
     "http://127.0.0.1:${SELKIES_PORT:-8080}/api/sessions" 2> /dev/null | grep -q '"connected_at"'
 }
 
+# Whether a file is still arriving in the workspace: a download in Firefox or an
+# upload from the page, both of which write into a `.part` file until they are
+# whole. An installer of several gigabytes takes longer than the idle timeout
+# with no input at all.
+transfer_running() {
+  find "${SELKIES_MODAL_WORKSPACE}" -maxdepth 2 -name '*.part' -newermt "$((CHECK_INTERVAL * 2)) seconds ago" \
+    -print -quit 2> /dev/null | grep -q .
+}
+
 # Seconds since the session was last used: the smaller of the input counter and
 # the activity file's age.
 idle_seconds() {
   local now idle input
-  if [ "$(session_env SELKIES_WAYLAND)" = "true" ] && page_connected; then
+  if { [ "$(session_env SELKIES_WAYLAND)" = "true" ] && page_connected; } || transfer_running; then
     touch "${SELKIES_MODAL_ACTIVITY_FILE}"
   fi
   now="$(date +%s)"
