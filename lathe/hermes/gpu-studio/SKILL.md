@@ -133,14 +133,15 @@ the resulting `.nk` in `work/`, and the steps in `recipe.md`.
 ## Files
 
 **Google Drive** is the Modal Secret `gdrive`: start the machine with
-`--secret gdrive`, then copy inside the machine, which is fast:
+`--secret gdrive`, then copy inside the machine, which is fast. `gdrive:` is
+the team's folder, "Nuke in Cloud - Final Twist", so paths start inside it:
 
 ```bash
-$S exec --name nuke-<person> -- rclone copy "gdrive:Nuke in Cloud - Final Twist/<folder>" \
+$S exec --name nuke-<person> -- rclone copy "gdrive:<folder>" \
   /home/ubuntu/workspace/projects/<p>/in --progress
 $S exec --name nuke-<person> -- rclone copy /home/ubuntu/workspace/projects/<p>/out \
-  "gdrive:Nuke in Cloud - Final Twist/<folder>/delivered"
-$S exec --name nuke-<person> -- rclone lsf "gdrive:Nuke in Cloud - Final Twist"
+  "gdrive:<folder>/delivered"
+$S exec --name nuke-<person> -- rclone lsf gdrive:
 ```
 
 Use a job for copies of more than a few gigabytes.
@@ -150,14 +151,14 @@ says `invalid_grant` or `Secret ... not found`), a teammate signs in once, on
 their machine:
 
 ```bash
-$S drive-login --name nuke-<person> --shared-drive 0AEMU33wD9Aw9Uk9PVA --wait-minutes 30
+$S drive-login --name nuke-<person> --folder 1W61dZv5Jy0ocdQ0mFRt_Hfj77fNT1GNv --wait-minutes 30
 ```
 
 Start their machine first if none is running, and tell them right away: "Open
 your machine's link, click Sign in - Google Accounts in the taskbar, press
-Continue, sign in with the Google account that has the team's shared drive, and
-allow rclone." The command waits for them, then prints the top of the shared
-drive and saves the Secret; machines started after that take it with `--secret
+Continue, sign in with the Google account that can open the team's Drive
+folder, and allow rclone." The command waits for them, then prints what is in
+the folder and saves the Secret; machines started after that take it with `--secret
 gdrive`. A machine that was already running when they signed in does not have
 it: start it again before copying.
 

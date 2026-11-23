@@ -86,7 +86,7 @@ a minute or two with a link; opening the link shows Nuke in the browser.
 ## 5. Google Drive (when you want it)
 
 Footage should not go through Discord, which caps files at 10 MB. Hermes moves
-it between your shared drive and the workspace from inside the GPU machine,
+it between the team's Drive folder and the workspace from inside the GPU machine,
 with rclone, signed in as one of you. There is no key file to make: you sign
 in to Google once, in a window on a Nuke machine.
 
@@ -96,15 +96,15 @@ in to Google once, in a window on a Nuke machine.
 2. Open the link. In the taskbar at the bottom, click **Sign in - Google
    Accounts** (Nuke may have opened on top of it), then **Continue** on
    Firefox's welcome box.
-3. Sign in with the Google account that can open the team's shared drive
-   ("Nuke in Cloud - Final Twist" lives in one), and allow **rclone** to see
-   and edit your Drive files. The window closes by itself, and Hermes says the
-   drive is connected.
+3. Sign in with the Google account that can open the team's folder, "Nuke in
+   Cloud - Final Twist", and allow **rclone** to see and edit your Drive
+   files. The window closes by itself, and Hermes says the drive is
+   connected.
 
 Hermes keeps the access as the Modal Secret `gdrive` and starts machines with
-it whenever footage has to move. It reaches what that Google account reaches
-in Drive, so sign in with an account that sees only the team's drives if you
-want it narrower. To cut it off, remove rclone at
+it whenever footage has to move, inside that folder. The sign-in itself
+reaches what that Google account reaches in Drive, so sign in with an account
+that sees only the team's folders if you want it narrower. To cut it off, remove rclone at
 https://myaccount.google.com/connections; to switch accounts, ask Hermes to
 connect Google Drive again.
 

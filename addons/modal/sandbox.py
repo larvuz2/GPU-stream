@@ -509,11 +509,14 @@ def drive_login(args: argparse.Namespace) -> int:
     """Connect Google Drive through a person's sign-in in a session, and keep the access as a Modal Secret.
 
     The Secret holds the remote `gdrive` as rclone reads it from the
-    environment (`RCLONE_CONFIG_GDRIVE_...`), on the shared drive
-    `--shared-drive` names or the account's own drive, so a session started
-    with `--secret` copies to and from it with no setup. The access is tried
-    from the session before it is kept, and the top of the drive is printed: a
-    sign-in that reaches nothing replaces no Secret that worked.
+    environment (`RCLONE_CONFIG_GDRIVE_...`), rooted at the folder `--folder`
+    names or at the account's own drive, so a session started with `--secret`
+    copies to and from it with no setup. A folder reaches what was shared with
+    the account however it was shared, in a shared drive, in someone's own
+    drive, or by its link, where a shared drive takes membership of it. The
+    access is tried from the session before it is kept, and what the folder
+    holds is printed: a sign-in that reaches nothing replaces no Secret that
+    worked.
     """
     sandbox = find_session(args.name)
     if sandbox is None:
@@ -521,7 +524,7 @@ def drive_login(args: argparse.Namespace) -> int:
     values = {
         "RCLONE_CONFIG_GDRIVE_TYPE": "drive",
         "RCLONE_CONFIG_GDRIVE_SCOPE": "drive",
-        "RCLONE_CONFIG_GDRIVE_TEAM_DRIVE": args.shared_drive,
+        "RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID": args.folder,
         "RCLONE_CONFIG_GDRIVE_TOKEN": drive_sign_in(sandbox, round(args.wait_minutes * 60)),
     }
     check = sandbox.exec(
@@ -619,7 +622,9 @@ def parser() -> argparse.ArgumentParser:
     drive = named(
         command("drive-login", drive_login, "Connect Google Drive by a sign-in in a session's Firefox, kept as a Modal Secret.")
     )
-    drive.add_argument("--shared-drive", default="", metavar="ID", help="the shared drive to reach (default: the account's own drive)")
+    drive.add_argument(
+        "--folder", default="", metavar="ID", help="the Drive folder gdrive: opens on, from its address (default: the account's own drive)"
+    )
     drive.add_argument("--secret", default="gdrive", help="the Modal Secret to keep the access in (default: %(default)s)")
     drive.add_argument(
         "--wait-minutes", type=float, default=10.0, help="how long the sign-in stays open (default: %(default)s)"
