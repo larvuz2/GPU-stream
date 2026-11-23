@@ -33,10 +33,11 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import re
 import secrets
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import modal
 from modal.stream_type import StreamType
@@ -137,7 +138,9 @@ def session_image(app: str = "blender") -> modal.Image:
             .add_local_file(HERE / "nuke" / "rc.xml", "/etc/xdg/openbox/rc.xml", copy=True)
             .add_local_file(HERE / "nuke" / "setup.sh", "/usr/local/bin/selkies-modal-nuke", copy=True)
             .add_local_file(HERE / "nuke" / "nuke.desktop", "/usr/local/share/applications/nuke.desktop", copy=True)
+            .add_local_file(HERE / "nuke" / "nuke-run.sh", "/usr/local/bin/nuke-run", copy=True)
             .add_local_file(HERE / "nuke" / "menu.py", f"{SHARE}/nuke/menu.py", copy=True)
+            .add_local_file(HERE / "nuke" / "init.py", f"{SHARE}/nuke/init.py", copy=True)
         )
     else:
         series = BLENDER_VERSION.rsplit(".", 1)[0]
@@ -160,8 +163,40 @@ def session_image(app: str = "blender") -> modal.Image:
     return (
         image.add_local_file(HERE / "session.sh", "/usr/local/bin/selkies-modal-session", copy=True)
         .add_local_file(HERE / "run.sh", "/usr/local/bin/selkies-modal-run", copy=True)
+        .add_local_file(HERE / "job.sh", "/usr/local/bin/selkies-modal-job", copy=True)
         .env({**SESSION_ENV, **APP_ENV[app]})
         .entrypoint([])
+    )
+
+
+def nuke_image(workspace: str | None) -> modal.Image:
+    """The Nuke session image, with the Nuke the workspace installed copied into it where there is one.
+
+    Nuke run from the workspace reads its files from the Volume, which a new
+    machine fetches as Nuke asks for them: measured on a T4, Nuke took over seven
+    minutes to open. Copied into the image, it is read from Modal's image cache
+    instead. The copy is the workspace's own install, whose license its user
+    accepted (`nuke/setup.sh`), into the account's own private image; it is
+    rebuilt when the workspace has a newer Nuke, which names the step, and the
+    session takes this copy where it has one (`/opt/nuke`).
+    """
+    image = session_image("nuke")
+    if not workspace:
+        return image
+    volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
+    try:
+        entries = volume.listdir(f"/{workspace}/.apps/nuke")
+    except modal.exception.NotFoundError:
+        return image
+    versions = sorted(
+        (PurePosixPath(entry.path).name for entry in entries if PurePosixPath(entry.path).name.startswith("Nuke")),
+        key=lambda name: [int(part) for part in re.findall(r"\d+", name)],
+    )
+    if not versions:
+        return image
+    return image.run_commands(
+        f"mkdir -p /opt/nuke && cp -a /mnt/nuke/{versions[-1]} /opt/nuke/",
+        volumes={"/mnt/nuke": volume.with_mount_options(sub_path=f"/{workspace}/.apps/nuke", read_only=True)},
     )
 
 
@@ -203,6 +238,7 @@ def start_session(
     tags: dict[str, str] | None = None,
     image: modal.Image | None = None,
     application: str = "blender",
+    extra_secrets: tuple[str, ...] = (),
 ) -> modal.Sandbox:
     """Start a session's Sandbox and return it at once, before Selkies listens.
 
@@ -213,7 +249,9 @@ def start_session(
     request, or a request and a limit, as Modal bills whichever of the request
     and the use is higher. `image` is the session image where the caller holds
     one already built, which a service does so that no request waits on a build;
-    otherwise it is `application`'s.
+    otherwise it is `application`'s. `extra_secrets` names Modal Secrets whose
+    variables the session gets too, such as the Google Drive access rclone
+    reads (`RCLONE_CONFIG_...`).
 
     Raises:
         modal.exception.AlreadyExistsError: A session of that name is running.
@@ -238,7 +276,7 @@ def start_session(
         region=region,
         timeout=lifetime_seconds,
         env={**(env or {}), "SELKIES_MODAL_IDLE_TIMEOUT": str(idle_seconds)},
-        secrets=[credentials],
+        secrets=[credentials, *(modal.Secret.from_name(name) for name in extra_secrets)],
         volumes={WORKSPACE: volume},
         tags=tags or {},
         readiness_probe=modal.Probe.with_tcp(PORT),
@@ -312,7 +350,8 @@ def up(args: argparse.Namespace) -> int:
 
     app = modal.App.lookup(APP_NAME, create_if_missing=True)
     started = time.monotonic()
-    image = session_image(args.app).build(app)
+    workspace = f"/{args.workspace}" if args.workspace else None
+    image = (nuke_image(args.workspace) if args.app == "nuke" else session_image(args.app)).build(app)
     say(f"image {image.object_id} ready after {time.monotonic() - started:.0f} s")
 
     started = time.monotonic()
@@ -325,7 +364,8 @@ def up(args: argparse.Namespace) -> int:
         idle_seconds=round(args.idle_minutes * 60),
         lifetime_seconds=round(args.lifetime_hours * 3600),
         env=dict(item.split("=", 1) for item in args.env),
-        workspace=f"/{args.workspace}" if args.workspace else None,
+        workspace=workspace,
+        extra_secrets=tuple(args.secret),
         tags={"session": args.name, "gpu": args.gpu, "app": args.app},
         image=image,
     )
@@ -453,6 +493,13 @@ def parser() -> argparse.ArgumentParser:
         "--lifetime-hours", type=float, default=8.0, help="end the session after this long whatever it is doing, 24 at most (default: %(default)s)"
     )
     start.add_argument("--ready-timeout", type=int, default=600, help="seconds to wait for Selkies to listen (default: %(default)s)")
+    start.add_argument(
+        "--secret",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="a Modal Secret whose variables the session gets, such as the Drive access rclone reads; repeatable",
+    )
     start.add_argument(
         "--env",
         action="append",

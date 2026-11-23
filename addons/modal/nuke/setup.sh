@@ -42,11 +42,17 @@ export GSK_RENDERER=cairo
 mkdir -p "${APPS}" "${DOWNLOADS}"
 cd "${WORKSPACE}" || exit 1
 
-# The newest Nuke installed in the workspace: the executable named for its
-# version (Nuke17.1) in the directory Foundry's installer made for it.
+# The newest Nuke installed: the executable named for its version (Nuke17.1)
+# in the directory Foundry's installer made for it. The image's copy of the
+# workspace's install (/opt/nuke, sandbox.py's nuke_image) comes first, since it
+# opens in a fraction of the time the Volume's does.
 installed_nuke() {
-  find "${APPS}" -mindepth 2 -maxdepth 2 -type f -perm -u+x -regex '.*/Nuke[0-9]+\.[0-9]+' 2> /dev/null |
-    sort -V | tail -n 1
+  local nuke
+  for root in /opt/nuke "${APPS}"; do
+    nuke="$(find "${root}" -mindepth 2 -maxdepth 2 -type f -perm -u+x -regex '.*/Nuke[0-9]+\.[0-9]+' 2> /dev/null |
+      sort -V | tail -n 1)"
+    [ -z "${nuke}" ] || { printf '%s' "${nuke}"; return; }
+  done
 }
 
 # Foundry's Linux archive (or its installer alone), where a download or an
