@@ -151,7 +151,7 @@ says `invalid_grant` or `Secret ... not found`), a teammate signs in once, on
 their machine:
 
 ```bash
-$S drive-login --name nuke-<person> --folder 1W61dZv5Jy0ocdQ0mFRt_Hfj77fNT1GNv --wait-minutes 30
+$S drive-login --name nuke-<person> --folder 1FTZ9WpfkCjWdcZP1JIqCaoEpdIgHQDoa --wait-minutes 30
 ```
 
 Start their machine first if none is running, and tell them right away: "Open
