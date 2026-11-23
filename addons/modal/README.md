@@ -124,6 +124,10 @@ addons/modal/selkies-modal up --app nuke --name nuke --workspace team/nuke --gpu
    `~/FoundryLicensing`) are kept in the workspace too, and a script that was
    never saved is auto-saved there (`.nuke-autosave`).
 
+A Nuke session is a desktop: a taskbar keeps Nuke, Firefox, and the setup's
+windows in reach however they are minimized, and Nuke is in the start menu to
+open again once closed.
+
 `--workspace` keeps a session's files in one directory of the Volume, so a
 team's Nuke and its scripts are apart from everything else there.
 

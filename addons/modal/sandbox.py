@@ -99,6 +99,8 @@ APP_ENV = {
         # (session.sh)
         "SELKIES_MODAL_PERSIST": ".nuke .local/share/Foundry FoundryLicensing",
         "NUKE_PATH": f"{SHARE}/nuke",
+        # The desktop, whose taskbar keeps Nuke, Firefox, and the setup's windows in reach
+        "SELKIES_DESKTOP": "true",
     },
 }
 APPS = tuple(APP_ENV)
@@ -134,6 +136,7 @@ def session_image(app: str = "blender") -> modal.Image:
             .add_local_file(HERE / "nuke" / "autostart", "/etc/xdg/openbox/autostart", copy=True)
             .add_local_file(HERE / "nuke" / "rc.xml", "/etc/xdg/openbox/rc.xml", copy=True)
             .add_local_file(HERE / "nuke" / "setup.sh", "/usr/local/bin/selkies-modal-nuke", copy=True)
+            .add_local_file(HERE / "nuke" / "nuke.desktop", "/usr/local/share/applications/nuke.desktop", copy=True)
             .add_local_file(HERE / "nuke" / "menu.py", f"{SHARE}/nuke/menu.py", copy=True)
         )
     else:
