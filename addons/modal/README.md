@@ -128,6 +128,18 @@ A Nuke session is a desktop: a taskbar keeps Nuke, Firefox, and the setup's
 windows in reach however they are minimized, and Nuke is in the start menu to
 open again once closed.
 
+Once a workspace has Nuke, `up` copies it into the session image (`/opt/nuke`)
+and the session opens that copy: from the Volume, Nuke 17.1 took over seven
+minutes to open on a new machine, and from the image 19 s. The copy is made
+once per Nuke version, which took 50 minutes for its 15 GB, and later starts
+reuse it.
+
+Without its window, `nuke-run` runs Nuke with the interactive license, which a
+login license for one person carries where it has no render license, and
+`selkies-modal-job` runs a long command in the background, counting as use of
+the session while it runs (`lathe/hermes/gpu-studio/SKILL.md` has the
+commands).
+
 `--workspace` keeps a session's files in one directory of the Volume, so a
 team's Nuke and its scripts are apart from everything else there.
 
