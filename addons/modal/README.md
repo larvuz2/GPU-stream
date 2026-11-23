@@ -33,6 +33,7 @@ writes after you approve it in a browser.
 | `blender` | Runs the Python on standard input inside the session's Blender, the one the page shows |
 | `ls` | Lists the running sessions |
 | `down` | Stops a session, with the scene Blender has open kept for the next one |
+| `drive-login` | Opens Google's sign-in on a Nuke session's screen and keeps the Drive access it grants as a Modal Secret, which `up --secret` hands to a session as rclone's `gdrive:` |
 | `build` | Builds the image without starting a session |
 
 Every command but `ls` and `build` takes `--name` (`blender` unless given), so

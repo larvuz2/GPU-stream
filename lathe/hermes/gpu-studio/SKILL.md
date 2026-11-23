@@ -132,8 +132,8 @@ the resulting `.nk` in `work/`, and the steps in `recipe.md`.
 
 ## Files
 
-**Google Drive** (needs the `gdrive` secret, SETUP.md step 5): start the
-machine with `--secret gdrive`, then copy inside the machine, which is fast:
+**Google Drive** is the Modal Secret `gdrive`: start the machine with
+`--secret gdrive`, then copy inside the machine, which is fast:
 
 ```bash
 $S exec --name nuke-<person> -- rclone copy "gdrive:Nuke in Cloud - Final Twist/<folder>" \
@@ -144,6 +144,22 @@ $S exec --name nuke-<person> -- rclone lsf "gdrive:Nuke in Cloud - Final Twist"
 ```
 
 Use a job for copies of more than a few gigabytes.
+
+To connect Google Drive the first time, or again (when asked to, or when rclone
+says `invalid_grant` or `Secret ... not found`), a teammate signs in once, on
+their machine:
+
+```bash
+$S drive-login --name nuke-<person> --shared-drive 0AEMU33wD9Aw9Uk9PVA --wait-minutes 30
+```
+
+Start their machine first if none is running, and tell them right away: "Open
+your machine's link, click Sign in - Google Accounts in the taskbar, press
+Continue, sign in with the Google account that has the team's shared drive, and
+allow rclone." The command waits for them, then prints the top of the shared
+drive and saves the Secret; machines started after that take it with `--secret
+gdrive`. A machine that was already running when they signed in does not have
+it: start it again before copying.
 
 **Discord attachments:** download them on the machine from their links, which
 expire within about a day:
@@ -200,6 +216,7 @@ Renders are not affected.
 | Nuke shows "Set up Nuke" | Nuke is not installed in that workspace; the teammate follows the window (download from Foundry, accept the license) |
 | Nuke asks to sign in to Foundry | The trial's sign-in expired or the trial ended; the teammate signs in in the window |
 | A command hangs | It is waiting on a long command; next time make it a job |
+| rclone says `invalid_grant`, or `up` says Secret `gdrive` not found | Drive is not connected, or its sign-in was revoked; run `drive-login` with the teammate (Files) |
 | `up` takes many minutes before printing anything | The first start after Nuke is installed or updated copies Nuke (15 GB) into the machine image, once; later starts reuse it |
 
 ## Blender

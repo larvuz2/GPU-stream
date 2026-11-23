@@ -340,6 +340,69 @@ def screenshot(sandbox: modal.Sandbox) -> bytes:
     return base64.b64decode(picture)
 
 
+def drive_sign_in(sandbox: modal.Sandbox, wait_seconds: int) -> str:
+    """Have the person at a session sign in to Google in its Firefox, and return the token rclone was granted.
+
+    rclone's own sign-in (`rclone authorize drive`) waits on the Sandbox's
+    loopback for Google to send the person back, so the sign-in happens in the
+    session's Firefox, the one browser that reaches that address: nothing is
+    pasted, and no key file exists, which is what an organization that forbids
+    service account keys leaves. The token carries a refresh token, with which
+    rclone stays signed in until the person revokes its access in their Google
+    account.
+
+    The sign-in gets a Firefox window of its own, on a profile of its own, which
+    is closed once the sign-in is over: a command `selkies-modal-run` runs has
+    no way into a Firefox the session already has open, so asking that one for
+    a tab starts a second Firefox that waits on its profile instead. It starts
+    in a process session of its own (`setsid`), since the session counts a
+    command `selkies-modal-run` runs as use for as long as it runs.
+
+    Raises:
+        SystemExit: rclone did not start a sign-in, or nobody finished it within `wait_seconds`.
+    """
+    process = sandbox.exec(
+        "/usr/local/bin/selkies-modal-run",
+        "timeout",
+        str(wait_seconds),
+        "rclone",
+        "authorize",
+        "drive",
+        "--auth-no-open-browser",
+        bufsize=1,
+    )
+    said = []
+    for line in process.stderr:
+        said.append(line)
+        sign_in = re.search(r"http://127\.0\.0\.1:\d+/auth\?state=[\w-]+", line)
+        if sign_in:
+            break
+    else:
+        process.wait()
+        raise SystemExit(f"selkies-modal: rclone started no sign-in: {''.join(said).strip()}")
+    browser = "/tmp/selkies-modal-sign-in"
+    sandbox.exec(
+        "/usr/local/bin/selkies-modal-run",
+        "sh",
+        "-c",
+        'rm -rf "$1" && mkdir -p "$1" && '
+        'setsid -f sh -c \'echo $$ > "$1.pid"; exec firefox --no-remote --profile "$1" --new-window "$2"\' sh "$1" "$2" '
+        "> /dev/null 2>&1",
+        "sh",
+        browser,
+        sign_in.group(0),
+    ).wait()
+    say(f"Google's sign-in is open in a Firefox window on the session; waiting up to {wait_seconds // 60} min for it")
+    output = process.stdout.read()
+    status = process.wait()
+    sandbox.exec("sh", "-c", 'kill "$(cat "$1.pid")"; rm -rf "$1" "$1.pid"', "sh", browser).wait()
+    token = re.search(r"--->\n(.+)\n<---End paste", output)
+    if status != 0 or not token:
+        reason = "nobody signed in in time" if status == 124 else f"rclone ended with status {status}"
+        raise SystemExit(f"selkies-modal: Google Drive is not connected: {reason}")
+    return token.group(1)
+
+
 def up(args: argparse.Namespace) -> int:
     """Start the session, or return the one already running under that name, and print its link."""
     sandbox = find_session(args.name)
@@ -442,6 +505,44 @@ def build(args: argparse.Namespace) -> int:
     return 0
 
 
+def drive_login(args: argparse.Namespace) -> int:
+    """Connect Google Drive through a person's sign-in in a session, and keep the access as a Modal Secret.
+
+    The Secret holds the remote `gdrive` as rclone reads it from the
+    environment (`RCLONE_CONFIG_GDRIVE_...`), on the shared drive
+    `--shared-drive` names or the account's own drive, so a session started
+    with `--secret` copies to and from it with no setup. The access is tried
+    from the session before it is kept, and the top of the drive is printed: a
+    sign-in that reaches nothing replaces no Secret that worked.
+    """
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    values = {
+        "RCLONE_CONFIG_GDRIVE_TYPE": "drive",
+        "RCLONE_CONFIG_GDRIVE_SCOPE": "drive",
+        "RCLONE_CONFIG_GDRIVE_TEAM_DRIVE": args.shared_drive,
+        "RCLONE_CONFIG_GDRIVE_TOKEN": drive_sign_in(sandbox, round(args.wait_minutes * 60)),
+    }
+    check = sandbox.exec(
+        "/usr/local/bin/selkies-modal-run",
+        "rclone",
+        "lsf",
+        "--max-depth",
+        "1",
+        "gdrive:",
+        secrets=[modal.Secret.from_dict(values)],
+    )
+    listing = check.stdout.read()
+    if check.wait() != 0:
+        raise SystemExit(f"selkies-modal: signed in, but Google Drive refused: {check.stderr.read().strip()}")
+    modal.Secret.objects.create(args.secret, values, allow_existing=True)
+    modal.Secret.from_name(args.secret).update(values)
+    say(f"Google Drive is connected as the Secret {args.secret}; a session started with --secret {args.secret} has it as gdrive:")
+    sys.stdout.write(listing)
+    return 0
+
+
 def workspace_directory(value: str) -> str:
     """A `--workspace` argument: a directory of the Volume, as words joined by slashes."""
     parts = value.strip("/").split("/")
@@ -515,6 +616,14 @@ def parser() -> argparse.ArgumentParser:
     script = named(command("blender", blender, "Run the Python on standard input inside a session's Blender."))
     script.add_argument("--wait", type=int, default=120, help="seconds to wait for Blender to answer (default: %(default)s)")
     named(command("down", down, "Stop a session."))
+    drive = named(
+        command("drive-login", drive_login, "Connect Google Drive by a sign-in in a session's Firefox, kept as a Modal Secret.")
+    )
+    drive.add_argument("--shared-drive", default="", metavar="ID", help="the shared drive to reach (default: the account's own drive)")
+    drive.add_argument("--secret", default="gdrive", help="the Modal Secret to keep the access in (default: %(default)s)")
+    drive.add_argument(
+        "--wait-minutes", type=float, default=10.0, help="how long the sign-in stays open (default: %(default)s)"
+    )
     image = command("build", build, "Build an application's image without starting a session.")
     image.add_argument("--app", choices=APPS, default="blender", help="the application (default: %(default)s)")
     return top
