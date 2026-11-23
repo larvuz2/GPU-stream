@@ -36,7 +36,8 @@ stdout.
    stop it (`down`). Machines also stop themselves after 10 minutes unused, and
    after 8 hours at most.
 4. **Never delete the team's files** in the workspace or on Drive without the
-   teammate saying so in this conversation.
+   teammate saying so in this conversation, and never move, rename, or
+   reorganize their folders on Drive: the layout is theirs.
 5. **Write recipes down.** Every job's steps go in its project folder
    (`recipe.md`, and the Nuke script or Python it ran), so "do the same for
    these" two days later repeats it exactly, whatever you remember.
@@ -146,6 +147,48 @@ $S exec --name nuke-<person> -- rclone lsf gdrive:
 
 Use a job for copies of more than a few gigabytes.
 
+### Finding the team's work on Drive
+
+The team makes folders in the Drive folder however they like, one per episode,
+client, shoot, or task, nested as deep as they want, and tells you where things
+are in their own words ("episode 3's plates", "the stuff Maria uploaded
+yesterday"). Never assume a layout; look:
+
+```bash
+rclone lsf gdrive:                                         # the top of the team's folder
+rclone lsf --max-depth 3 gdrive:"Episode 03"               # what is inside a folder
+rclone lsf -R --ignore-case --include "*ep03*" gdrive:     # find by name anywhere
+rclone lsf -R --format tsp gdrive:"Episode 03"             # with modified time and size, for "the newest"
+```
+
+(Run these on a machine started with `--secret gdrive`, through `$S exec`, like
+the copies above.)
+
+- **A link instead of a path.** A teammate may paste a Drive folder link
+  (`https://drive.google.com/drive/folders/<ID>`). Use its ID in place of a
+  path, which reaches the folder wherever it is, as long as it is shared with
+  the Google account Drive was connected with:
+
+  ```bash
+  rclone lsf gdrive: --drive-root-folder-id <ID>
+  rclone copy gdrive: /home/ubuntu/workspace/projects/<p>/in --drive-root-folder-id <ID> --progress
+  ```
+
+- **Briefs and notes.** A Google Doc lists as `<name>.docx`; read it as text:
+  `rclone cat "gdrive:<folder>/<name>.txt" --drive-export-formats txt`. Read the
+  brief before asking questions it already answers.
+- **Two matches.** When a name matches more than one folder, ask which one,
+  naming both paths. Do not guess.
+- **Where results go.** Wherever the teammate says; otherwise a `delivered`
+  folder inside the folder the footage came from. Never overwrite a file that
+  is there: give the new one a version (`_v002`).
+- **Remember the place.** Name the workspace project after the Drive folder
+  (`Episode 03/shots` becomes `projects/episode-03-shots`), and write the Drive
+  path, or the link, at the top of its `recipe.md`, so a later "do the same
+  for episode 4" knows where episode 3 came from.
+
+### Connecting Drive
+
 To connect Google Drive the first time, or again (when asked to, or when rclone
 says `invalid_grant` or `Secret ... not found`), a teammate signs in once, on
 their machine:
@@ -161,6 +204,8 @@ folder, and allow rclone." The command waits for them, then prints what is in
 the folder and saves the Secret; machines started after that take it with `--secret
 gdrive`. A machine that was already running when they signed in does not have
 it: start it again before copying.
+
+### Other ways in and out
 
 **Discord attachments:** download them on the machine from their links, which
 expire within about a day:
