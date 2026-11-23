@@ -101,6 +101,32 @@ unsaved scene still unsaved and a saved file under its own path with the
 changes that were not saved. A Sandbox that is killed outright, at its
 lifetime or from Modal's dashboard, keeps only the last auto-save.
 
+## Nuke
+
+`--app nuke` starts a session for Foundry's Nuke instead. Foundry hands Nuke
+out behind a login and a license its user accepts, so the image does not carry
+it; the session installs it into the workspace once, at the user's word:
+
+```bash
+addons/modal/selkies-modal up --app nuke --name nuke --workspace team/nuke --gpu T4 --memory 16384
+```
+
+1. A workspace with no Nuke opens Firefox on Foundry's download page, with
+   instructions on top. The user signs in and downloads Nuke for Linux (the
+   `.tgz`), which saves into the workspace's `Downloads`; or they upload that
+   file through the page's Files panel. A transfer still arriving counts as
+   use, so the idle timeout does not end the session in the middle of it.
+2. Once it has arrived, a window asks whether to install it, naming Foundry's
+   license. Only on "Accept and install" does Foundry's installer run, into
+   the workspace (`.apps/nuke`); the archive is then removed.
+3. Every later session on that workspace opens Nuke directly. Nuke's settings
+   (`~/.nuke`) and Foundry's sign-in (`~/.local/share/Foundry`,
+   `~/FoundryLicensing`) are kept in the workspace too, and a script that was
+   never saved is auto-saved there (`.nuke-autosave`).
+
+`--workspace` keeps a session's files in one directory of the Volume, so a
+team's Nuke and its scripts are apart from everything else there.
+
 ## The session
 
 The image is the base container by digest with three additions: Blender's
