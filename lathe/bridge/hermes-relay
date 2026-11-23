@@ -1,0 +1,34 @@
+#!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Runs on the machine Hermes runs on: hands one Discord message to the team's
+# Claude Code cloud session, the same one every time, so it keeps the whole
+# conversation (README.md). Hermes calls it for each message in the channel,
+# with the text on standard input:
+#
+#     hermes-relay AUTHOR [ATTACHMENT_URL...] < message.txt
+#
+# LATHE_CLAUDE_SESSION is the session (its `session_...` ID or claude.ai/code
+# URL), and LATHE_DISCORD_CHANNEL_ID the channel it answers in, which the
+# message carries so the session knows where to. `claude` has to be logged in,
+# on this machine, as the account that owns the session (`claude auth login`).
+# The message reaches the session as that account's own, so its first line
+# says who wrote it in Discord; attachments go as their Discord links, which
+# the session downloads while they last.
+set -euo pipefail
+
+session="${LATHE_CLAUDE_SESSION:?set LATHE_CLAUDE_SESSION to the Claude Code session ID}"
+channel="${LATHE_DISCORD_CHANNEL_ID:?set LATHE_DISCORD_CHANNEL_ID to the Discord channel ID}"
+author="${1:?usage: hermes-relay AUTHOR [ATTACHMENT_URL...] < message}"
+shift
+
+{
+  printf '[Discord via Hermes] from %s. Answer in the channel: lathe/bridge/discord-post --channel %s "..." [files]\n\n' "${author}" "${channel}"
+  cat
+  if [ "$#" -gt 0 ]; then
+    printf '\n\nAttachments:\n'
+    printf -- '- %s\n' "$@"
+  fi
+} | claude -p --cloud "${session}" --output-format json

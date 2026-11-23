@@ -1,0 +1,72 @@
+#!/bin/bash
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Posts a message, with files, to a Discord channel: how the Claude Code
+# session that Hermes relays the team's channel to answers in it (README.md).
+# `claude -p --cloud` only queues a message into the session and never returns
+# the reply, so the reply goes back on its own.
+#
+#     discord-post --channel 123456789012345678 "The render is done." comp_v003.mov
+#
+# It posts as a bot, the one Hermes runs as, through Discord's API. The bot's
+# token is not here: the cloud environment's network proxy adds it to requests
+# for discord.com (a network secret with the `Bot` prefix), so this sends a
+# placeholder in its place, or DISCORD_BOT_TOKEN where one is set. Without
+# `--channel`, DISCORD_CHANNEL_ID names the channel, and where neither is set a
+# channel webhook in DISCORD_WEBHOOK_URL is used instead.
+#
+# A Discord message holds 2,000 characters, so longer text goes as several in
+# order, the files with the last. A file over the upload limit (10 MB unless
+# DISCORD_UPLOAD_LIMIT_MB says otherwise, which a boosted server raises) is
+# refused here rather than by Discord, so the caller can share it another way.
+set -euo pipefail
+
+usage="usage: discord-post [--channel ID] MESSAGE [FILE...]"
+channel="${DISCORD_CHANNEL_ID-}"
+if [ "${1-}" = "--channel" ]; then
+  channel="${2:?${usage}}"
+  shift 2
+fi
+text="${1:?${usage}}"
+shift
+
+if [ -n "${channel}" ]; then
+  case "${channel}" in *[!0-9]*) echo "discord-post: a channel ID is digits: ${channel}" >&2; exit 2 ;; esac
+  url="${DISCORD_API_URL:-https://discord.com/api/v10}/channels/${channel}/messages"
+  auth=(-H "Authorization: Bot ${DISCORD_BOT_TOKEN:-placeholder-the-proxy-replaces}")
+elif [ -n "${DISCORD_WEBHOOK_URL-}" ]; then
+  url="${DISCORD_WEBHOOK_URL}?wait=true"
+  auth=()
+else
+  echo "discord-post: name a channel (--channel or DISCORD_CHANNEL_ID) or set DISCORD_WEBHOOK_URL" >&2
+  exit 2
+fi
+
+limit=$((${DISCORD_UPLOAD_LIMIT_MB:-10} * 1024 * 1024))
+for file in "$@"; do
+  [ -f "${file}" ] || { echo "discord-post: no such file: ${file}" >&2; exit 2; }
+  if [ "$(stat -c %s "${file}")" -gt "${limit}" ]; then
+    echo "discord-post: ${file} is over the ${DISCORD_UPLOAD_LIMIT_MB:-10} MB Discord takes; share a link to it instead" >&2
+    exit 3
+  fi
+done
+
+# The text in pieces Discord takes, cut by characters rather than bytes. It goes
+# to jq as an argument: jq's raw input reads in blocks and splits a character
+# that straddles one.
+mapfile -t pieces < <(jq -nc --arg text "${text}" '$text | [range(0; length; 1900) as $i | .[$i:$i + 1900]] | .[]')
+
+for index in "${!pieces[@]}"; do
+  # As a string: curl reads nothing in it, where -F would take a leading @ or <, or a ;type=, as its own
+  form=(--form-string "payload_json={\"content\": ${pieces[index]}, \"allowed_mentions\": {\"parse\": []}}")
+  if [ "${index}" -eq $((${#pieces[@]} - 1)) ]; then
+    number=0
+    for file in "$@"; do
+      form+=(-F "files[${number}]=@${file}")
+      number=$((number + 1))
+    done
+  fi
+  curl -fsS --retry 3 --max-time 300 -o /dev/null "${auth[@]}" "${form[@]}" "${url}"
+done
