@@ -87,34 +87,26 @@ a minute or two with a link; opening the link shows Nuke in the browser.
 
 Footage should not go through Discord, which caps files at 10 MB. Hermes moves
 it between your shared drive and the workspace from inside the GPU machine,
-with rclone, as a Google service account (a robot user that belongs to your
-Google Workspace):
+with rclone, signed in as one of you. There is no key file to make: you sign
+in to Google once, in a window on a Nuke machine.
 
-1. In https://console.cloud.google.com, create a project, turn on the
-   **Google Drive API**, then under IAM & Admin > Service Accounts create a
-   service account, open it, and under Keys add a key of type JSON. A
-   `.json` file downloads.
-2. In Google Drive, open the shared drive that holds the team's folders
-   ("Nuke in Cloud - Final Twist" lives in one), choose **Manage members**,
-   and add the service account's email (`...@....iam.gserviceaccount.com`)
-   as **Content manager**.
-3. Store the key as a Modal Secret named `gdrive`, from any machine with the
-   Modal key (the shared drive's ID is the part of its address after
-   `/drive/folders/` when you open the shared drive itself):
+1. Send Hermes a direct message: "Connect Google Drive." Hermes starts a Nuke
+   machine if you have none open, sends you its link, and opens Google's
+   sign-in on it.
+2. Open the link. In the taskbar at the bottom, click **Sign in - Google
+   Accounts** (Nuke may have opened on top of it), then **Continue** on
+   Firefox's welcome box.
+3. Sign in with the Google account that can open the team's shared drive
+   ("Nuke in Cloud - Final Twist" lives in one), and allow **rclone** to see
+   and edit your Drive files. The window closes by itself, and Hermes says the
+   drive is connected.
 
-   ```bash
-   ~/gpu-stream/addons/modal/selkies-modal modal secret create gdrive \
-     RCLONE_CONFIG_GDRIVE_TYPE=drive \
-     RCLONE_CONFIG_GDRIVE_SCOPE=drive \
-     RCLONE_CONFIG_GDRIVE_TEAM_DRIVE=0AEMU33wD9Aw9Uk9PVA \
-     RCLONE_CONFIG_GDRIVE_SERVICE_ACCOUNT_CREDENTIALS="$(cat path/to/key.json)"
-   ```
-
-   Then delete the downloaded `.json` file.
-
-From then on, Hermes starts machines with `--secret gdrive` and copies with
-`rclone copy "gdrive:Nuke in Cloud - Final Twist/..." ...` (the manual has the
-commands).
+Hermes keeps the access as the Modal Secret `gdrive` and starts machines with
+it whenever footage has to move. It reaches what that Google account reaches
+in Drive, so sign in with an account that sees only the team's drives if you
+want it narrower. To cut it off, remove rclone at
+https://myaccount.google.com/connections; to switch accounts, ask Hermes to
+connect Google Drive again.
 
 ## What it costs
 
