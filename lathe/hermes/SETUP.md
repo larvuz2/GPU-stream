@@ -14,15 +14,26 @@ teammate ──DM──> Hermes (on its own machine, with its memory)
                  Modal: GPU machines (Nuke, Blender) + the team's workspace
 ```
 
-Set aside about twenty minutes. Steps 1 to 4 are needed; step 5 only once you
-want Hermes to move footage to and from Google Drive by itself.
+This file is for you, not for Hermes. `gpu-studio/SKILL.md` is the one Hermes
+reads, and step 3 puts it where Hermes finds it. Set aside about twenty
+minutes. Steps 1 to 4 are needed; step 5 only once you want Hermes to move
+footage to and from Google Drive by itself.
+
+Hermes can do steps 1 and 3 itself if you send it this message:
+
+> Run `git clone https://github.com/larvuz2/GPU-stream ~/gpu-stream`, then copy
+> the folder `~/gpu-stream/lathe/hermes/gpu-studio` into your skills folder
+> and reload your skills. Tell me when the gpu-studio skill is loaded.
+
+The key in step 2 and the allow list in step 4 are yours to set, in Hermes's
+own files rather than in a chat.
 
 ## 1. Give Hermes the code
 
 On the machine Hermes runs on (it needs `git` and Python 3.10 or newer):
 
 ```bash
-git clone --branch claude/peaceful-franklin-wol1mm https://github.com/larvuz2/GPU-stream ~/gpu-stream
+git clone https://github.com/larvuz2/GPU-stream ~/gpu-stream
 ```
 
 The repository is public, so this needs no key. To update later:
