@@ -13,8 +13,10 @@
 #   the fingerprint Mozilla publishes (as addons/desktop does), so the user can
 #   sign in to Foundry and download Nuke inside the session rather than upload
 #   several gigabytes through the page.
-# - zenity for the setup's windows, xdotool to drive them in a test, and
-#   xprintidle for the idle timeout (session.sh).
+# - zenity for the setup's windows, xdotool to drive them in a test,
+#   xprintidle for the idle timeout (session.sh), and rclone, which moves a
+#   team's footage between Google Drive and the workspace from inside the
+#   session, at the data center's speed rather than an uploader's.
 # - The libraries Nuke and the Qt it ships with load from the system on Linux:
 #   NUMA, GLU, the XCB extensions Qt's xcb platform opens, and what the
 #   Chromium of Foundry's licensing window needs.
@@ -30,7 +32,7 @@ printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' > /e
 
 apt-get update
 apt-get install --no-install-recommends -y \
-    firefox zenity xdotool xprintidle \
+    firefox zenity xdotool xprintidle rclone \
     libnuma1 libglu1-mesa libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
     libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 \
     libnss3 libasound2t64 libxcomposite1 libxdamage1 libxtst6 libxrandr2 libxkbfile1 libxss1
