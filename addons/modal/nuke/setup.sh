@@ -17,6 +17,10 @@
 # installed once and is there in every session after; the archive is removed
 # once it has, since it takes as much room again.
 #
+# The session is the desktop (SELKIES_DESKTOP), so Nuke, Firefox, and the
+# setup's windows are on its taskbar however they are minimized or stacked, and
+# Nuke is in its start menu (nuke.desktop) to open again once closed.
+#
 # Nuke's settings and Foundry's sign-in are kept by the session (session.sh
 # links `~/.nuke`, `~/.local/share/Foundry`, and `~/FoundryLicensing` into the
 # workspace), and scripts saved in the workspace stay with it.
@@ -62,6 +66,9 @@ arrived_installer() {
 # session is itself the boundary around it.
 launch() {
   [ -z "${instructions-}" ] || kill "${instructions}" 2> /dev/null
+  # Foundry's icon, for the start menu's entry (nuke.desktop)
+  [ -e "${APPS}/icon.png" ] ||
+    find "$(dirname "$1")/plugins/icons" -name NukeApp128.png -exec cp {} "${APPS}/icon.png" \; -quit 2> /dev/null
   export QTWEBENGINE_DISABLE_SANDBOX=1
   exec "$1"
 }

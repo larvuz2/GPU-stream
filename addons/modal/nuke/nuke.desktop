@@ -1,0 +1,16 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Nuke in the start menu and the taskbar of a Nuke session's desktop. It runs
+# what the session itself starts with (setup.sh): Nuke where the workspace has
+# it, its setup where it does not. The icon is Foundry's own, which setup.sh
+# copies beside the installed Nuke.
+[Desktop Entry]
+Type=Application
+Name=Nuke
+Comment=Composite in Foundry Nuke
+Exec=selkies-modal-nuke
+Icon=/home/ubuntu/workspace/.apps/nuke/icon.png
+Terminal=false
+Categories=Graphics;AudioVideo;
