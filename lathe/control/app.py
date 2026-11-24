@@ -101,7 +101,9 @@ def sessions() -> Any:
     if not settings.supabase:
         return None
     store = Store(settings.supabase_url, settings.supabase_key)
-    return Sessions(settings, Catalog(Path("/root/catalog.json")), store, ModalLauncher(), ModalJobs())
+    return Sessions(
+        settings, Catalog(Path("/root/catalog.json")), store, ModalLauncher(site_url=settings.site_url), ModalJobs()
+    )
 
 
 @app.function(image=image, secrets=[secret], timeout=600)

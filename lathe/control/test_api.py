@@ -42,7 +42,7 @@ from agent import TOOL_NAMES, Agent, Claude, Reply, echoable, invalid, read_skil
 from api import create_app
 from generation import IMAGE_MODELS, VIDEO_MODELS, Fal, GenerationStopped
 from github_client import GitHub, GitHubError, read_state, seal, sign_state, unseal
-from launcher import ModalLauncher
+from launcher import ModalLauncher, origin
 from service import OPEN, Catalog, Config, Refused, Sessions, Store, User, hash_key
 
 CATALOG = Catalog(Path(__file__).resolve().parent.parent / "catalog.json")
@@ -1413,7 +1413,7 @@ class FakeSandboxModule:
 
 def test_the_launcher_starts_each_app_from_its_own_image_in_the_users_workspace():
     module = FakeSandboxModule()
-    launcher = ModalLauncher(module, app="modal-app")
+    launcher = ModalLauncher(module, app="modal-app", site_url="https://lathe.example/app/")
     tier = {"gpu": None, "cpu": 2, "memory_gb": 4}
     project = str(uuid.uuid4())
     for app, project_id in (("filmcraft", project), ("filmcraft", project), ("nuke", project), ("blender", None)):
@@ -1421,9 +1421,13 @@ def test_the_launcher_starts_each_app_from_its_own_image_in_the_users_workspace(
     assert module.images == ["filmcraft", f"nuke:users/{ALICE.id}", "blender"], "one image per app; Nuke's from the user's install"
     film, _, nuke, blender = (settings for _, settings in module.started)
     assert film["application"] == "filmcraft" and film["image"] == "image:filmcraft"
-    assert film["workspace"] == f"/users/{ALICE.id}" and film["env"] == {"SELKIES_MODAL_PROJECT": f"projects/{project}"}
+    site = "https://lathe.example"
+    assert film["workspace"] == f"/users/{ALICE.id}"
+    assert film["env"] == {"SELKIES_MODAL_PROJECT": f"projects/{project}", "SELKIES_FRAME_ANCESTORS": site}
     assert nuke["image"] == f"nuke-image:users/{ALICE.id}" and nuke["application"] == "nuke"
-    assert blender["env"] is None and "lathe_project" not in blender["tags"]
+    assert blender["env"] == {"SELKIES_FRAME_ANCESTORS": site} and "lathe_project" not in blender["tags"]
+    assert ModalLauncher(module, app="modal-app").frame_ancestor == "", "no site, no frame allowed"
+    assert origin("javascript:alert(1)") == "" and origin("http://localhost:5173/x") == "http://localhost:5173"
 
     launcher.sandbox = lambda sandbox_id: f"sandbox:{sandbox_id}"
     with pytest.raises(RuntimeError, match="no FilmCraft command channel"):

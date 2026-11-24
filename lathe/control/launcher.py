@@ -8,7 +8,10 @@ starts is the one `selkies-modal up` starts. What the service adds is where:
 every session mounts its user's own directory of the workspace Volume
 (`/users/<user id>`), and an engine of a project opens in that project's folder
 of it (`SELKIES_MODAL_PROJECT=projects/<project id>`), so the engines of one
-project read and write the same files.
+project read and write the same files. Every session also lets the site show
+it in a frame (`SELKIES_FRAME_ANCESTORS`, the site's origin): the studio's Screen
+panel is that frame, and Selkies otherwise allows only its own origin to frame
+the client.
 
 Each app's session image is defined once per container and reused, so no start
 waits on a definition another start already made; Modal itself caches what
@@ -26,6 +29,7 @@ from __future__ import annotations
 
 import sys
 from typing import Any
+from urllib.parse import urlsplit
 
 from service import IDLE_SECONDS, LIFETIME_SECONDS, READY_SECONDS
 
@@ -33,14 +37,23 @@ LAUNCHER_DIR = "/root/launcher"
 FILMCRAFT_SECONDS = 60
 
 
+def origin(url: str) -> str:
+    """The origin of an http(s) URL (`https://example.com`), or an empty string for anything else."""
+    parts = urlsplit(url.strip())
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return ""
+    return f"{parts.scheme}://{parts.netloc}"
+
+
 class ModalLauncher:
     """Starts, links, stops, and acts in session Sandboxes.
 
     `launcher` is the `sandbox` module of `addons/modal` and `app` the Modal
     app its Sandboxes belong to; both are looked up where not given.
+    `site_url` is the site whose pages may frame a session, none where empty.
     """
 
-    def __init__(self, launcher: Any = None, app: Any = None) -> None:
+    def __init__(self, launcher: Any = None, app: Any = None, site_url: str = "") -> None:
         if launcher is None:
             sys.path.insert(0, LAUNCHER_DIR)
             import sandbox as launcher
@@ -51,6 +64,7 @@ class ModalLauncher:
         self.launcher = launcher
         self.app = app
         self.images: dict[str, Any] = {}
+        self.frame_ancestor = origin(site_url)
 
     @staticmethod
     def sandbox(sandbox_id: str) -> Any:
@@ -74,6 +88,11 @@ class ModalLauncher:
         reported, so a start that fails leaves nothing running.
         """
         project = session.get("project_id")
+        env = {}
+        if project:
+            env["SELKIES_MODAL_PROJECT"] = f"projects/{project}"
+        if self.frame_ancestor:
+            env["SELKIES_FRAME_ANCESTORS"] = self.frame_ancestor
         tags = {"lathe_session": session["id"], "lathe_user": session["user_id"]}
         if project:
             tags["lathe_project"] = project
@@ -86,7 +105,7 @@ class ModalLauncher:
             memory=tier["memory_gb"] * 1024,
             idle_seconds=IDLE_SECONDS,
             lifetime_seconds=LIFETIME_SECONDS,
-            env={"SELKIES_MODAL_PROJECT": f"projects/{project}"} if project else None,
+            env=env or None,
             region=region,
             workspace=f"/users/{session['user_id']}",
             tags=tags,

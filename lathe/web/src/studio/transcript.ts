@@ -12,8 +12,10 @@
  * agent's questions, and a line for each change it made to the plan, the library, or an engine.
  * The fold is a pure function of the events, so a page that polls only appends and re-folds:
  *
- * - Consecutive `text` events of one turn are pieces of one reply and join into one block; any
- *   other event between them starts a new block, so prose around a tool call reads in order.
+ * - Consecutive `text` events of one turn are paragraphs of one reply (the agent writes each finished
+ *   block of its answer, and each note it makes between tools, as one event), so they join into one
+ *   block a blank line apart; any other event between them starts a new block, so prose around a
+ *   tool call reads in order.
  * - A `tool_start` opens a card and the `tool_end` naming its `call_id` closes it with its outcome
  *   and media. A call still open when its turn ends was cut short (the turn was stopped or
  *   failed), and says so rather than spinning forever.
@@ -79,7 +81,7 @@ export function buildTranscript(events: readonly StudioEvent[]): TranscriptItem[
       case 'text': {
         const last = items.at(-1);
         if (last?.type === 'agent' && previous?.kind === 'text' && previous.turn_id === event.turn_id) {
-          items[items.length - 1] = { ...last, text: last.text + event.data.text };
+          items[items.length - 1] = { ...last, text: `${last.text}\n\n${event.data.text}` };
         } else {
           items.push({ type: 'agent', key, text: event.data.text, first: false });
         }

@@ -65,13 +65,13 @@ const AVATAR = `data:image/svg+xml,${encodeURIComponent(
 /** A still of the site's artwork, as a media file. */
 const still = (file: string, name: string): Media => ({ kind: 'image', url: `/media/${file}`, name });
 
-const PIP = still('use-character.webp', 'pip-reference.webp');
-const MARA = still('use-film.webp', 'mara-reference.webp');
-const GLASSHOUSE = still('hero-creative.webp', 'glasshouse.webp');
-const SPIRE = still('app-unreal.webp', 'spire-city.webp');
-const PEAKS = still('app-krita.webp', 'ember-peaks-concept.webp');
-const BEACON = still('claude.webp', 'beacon.webp');
-const RUNNERS = still('use-product.webp', 'runners.webp');
+const PIP = still('character-theo.webp', 'pip-reference.webp');
+const MARA = still('character-mara.webp', 'mara-reference.webp');
+const GLASSHOUSE = still('discipline-architecture.webp', 'glasshouse.webp');
+const SPIRE = still('discipline-media.webp', 'spire-city.webp');
+const PEAKS = still('discipline-experiences.webp', 'ember-peaks-concept.webp');
+const BEACON = still('discipline-art.webp', 'beacon.webp');
+const RUNNERS = still('discipline-fashion.webp', 'runners.webp');
 
 /** One state of a simulated engine, entered at a point in time. */
 interface Phase {
@@ -333,7 +333,7 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
         'I will draft the script first, then build the bible so every shot stays consistent.',
     },
   });
-  add({ turn_id: t1, kind: 'tool_start', data: { call_id: 'c1', tool: 'write_file', title: 'Draft the script' } });
+  add({ turn_id: t1, kind: 'tool_start', data: { call_id: 'c1', tool: 'github_save', title: 'Draft the script' } });
   add(
     {
       turn_id: t1,
@@ -394,7 +394,7 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
     kind: 'user_message',
     data: { text: 'These are great. Mara should feel older, more weathered.' },
   });
-  add({ turn_id: t2, kind: 'tool_start', data: { call_id: 'c6', tool: 'update_asset', title: 'Update @mara' } });
+  add({ turn_id: t2, kind: 'tool_start', data: { call_id: 'c6', tool: 'library_upsert', title: 'Update @mara' } });
   add(
     { turn_id: t2, kind: 'tool_end', data: { call_id: 'c6', ok: true, summary: 'Age and description updated.' } },
     6 * SECOND,
@@ -406,7 +406,7 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
       text: 'Done: @mara is late forties now, sun-creased, with a courier’s patience. I will regenerate her reference once we lock the opening, so its light matches shot 1.',
     },
   });
-  add({ turn_id: t2, kind: 'tool_start', data: { call_id: 'c7', tool: 'start_engine', title: 'Open FilmCraft' } });
+  add({ turn_id: t2, kind: 'tool_start', data: { call_id: 'c7', tool: 'engine_start', title: 'Open FilmCraft' } });
   add({ turn_id: t2, kind: 'engine', data: { engine } }, 30 * SECOND);
   add(
     {
@@ -542,7 +542,7 @@ function reply(project: Project, text: string, turn: TurnId, start: number): Sch
         event: {
           turn_id: turn,
           kind: 'tool_start',
-          data: { call_id: `${turn}-a`, tool: 'write_file', title: 'Shot list for scene 1' },
+          data: { call_id: `${turn}-a`, tool: 'github_save', title: 'Shot list for scene 1' },
         },
       },
       {

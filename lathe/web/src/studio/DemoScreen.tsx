@@ -14,14 +14,14 @@
  * @module
  */
 import type { CatalogApp } from '../lib/catalog';
-import { appImage } from '../lib/media';
+import { engineImage } from '../lib/media';
 
 /** The demo film's stills, which the drawn editor's bin and viewer show. */
 const STILLS = [
-  '/media/use-character.webp',
-  '/media/use-film.webp',
-  '/media/hero-creative.webp',
-  '/media/app-unreal.webp',
+  '/media/character-theo.webp',
+  '/media/character-mara.webp',
+  '/media/discipline-architecture.webp',
+  '/media/discipline-media.webp',
 ];
 
 /** The drawn timeline's tracks: each clip's start and length in percent of the sequence, and its tint. */
@@ -62,7 +62,7 @@ export function DemoScreen({ app }: DemoScreenProps) {
   if (app?.id !== 'filmcraft') {
     return (
       <div className="art absolute inset-0" style={{ '--accent': app?.accent }}>
-        <img src={app === undefined ? STILLS[2] : appImage(app.id)} alt="" className="art-image" data-loaded="true" />
+        <img src={(app === undefined ? undefined : engineImage(app.id)) ?? STILLS[2]} alt="" className="art-image" data-loaded="true" />
         <span className="absolute bottom-3 left-3 rounded-md bg-ink-950/70 px-2 py-1 text-xs font-semibold">
           {app?.name}
         </span>

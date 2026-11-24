@@ -8,7 +8,7 @@ user works in, and this directory is everything around it.
 
 | Part | What it is | Where it runs |
 | --- | --- | --- |
-| [`web/`](web) | The site: landing page, sign-up, and the dashboard a user starts sessions from | Netlify, built from this repository (`netlify.toml`) |
+| [`web/`](web) | The site: the landing page, sign-up, and the studio: a user's projects, the agent, and the engines it opens | Netlify, built from this repository (`netlify.toml`) |
 | [`control/`](control) | The control plane: the API the site calls, the MCP endpoint an agent calls, the Studio's projects and their agent, and the upkeep that meters and monitors sessions | Modal (`modal deploy`) |
 | [`supabase/`](supabase) | Accounts, credits, sessions, API keys, projects, their libraries and conversations, and GitHub connections | A Supabase project |
 | [`catalog.json`](catalog.json) | The disciplines, apps, machine tiers, regions, prices, and the name | Read by the site and the control plane alike |
@@ -21,7 +21,7 @@ to `available`, or rename the service (`brand`).
 
 1. The user signs in on the site with Supabase Auth, which hands the browser an
    access token.
-2. The dashboard asks the control plane for a session, with that token. The
+2. The studio asks the control plane for a session, with that token. The
    control plane asks Supabase who the token belongs to, then records the
    session through a database function that checks the user's credits and
    session limit and whether there is room, in one transaction.
@@ -29,14 +29,14 @@ to `available`, or rename the service (`brand`).
    workspace Volume mounted, and marks the session running when Selkies
    answers. A session beyond the deployment's capacity waits in a queue and
    starts when one ends.
-4. The dashboard asks for a link and opens it: the stream, guarded by Modal's
+4. The studio asks for a link and shows it on its Screen panel: the stream, guarded by Modal's
    connect token and the Selkies session token.
 5. Once a minute the control plane charges every running session, stops the
    ones whose user ran out of credits, and closes the row of every Sandbox that
    ended itself: unused for ten minutes, stopped, or crashed.
 
 An agent does the same over MCP with an API key the user made in the
-dashboard, and has two tools more: running Python in the session's Blender,
+studio (Connect Claude), and has two tools more: running Python in the session's Blender,
 and a screenshot of the result.
 
 ## Lathe Studio
