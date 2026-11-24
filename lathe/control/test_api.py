@@ -12,8 +12,9 @@ the way a scripted conversation says, recording every request it was sent.
 What is tested here is this side: who a credential names, what each route and
 tool returns and refuses, that one user's sessions, projects, libraries, and
 engines are invisible to another, that the agent's conversation only ever
-grows, and that GitHub's callback takes nothing it did not sign. Run with
-`pytest lathe/control`.
+grows, that GitHub's callback takes nothing it did not sign, and that Unreal
+Engine starts only for an account linked to Epic, pulled with that user's own
+token. Run with `pytest lathe/control`.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import hashlib
 import hmac
 import itertools
 import json
+import sys
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -41,9 +43,9 @@ from fastapi.testclient import TestClient
 from agent import TOOL_NAMES, Agent, Claude, Reply, echoable, invalid, read_skills, replace_tags, skills_for
 from api import create_app
 from generation import IMAGE_MODELS, VIDEO_MODELS, Fal, GenerationStopped, video_kilotokens
-from github_client import GitHub, GitHubError, read_state, seal, sign_state, unseal
+from github_client import GitHub, GitHubError, Grant, read_state, reads_packages, seal, sign_state, unseal
 from launcher import ModalLauncher, origin
-from service import OPEN, Catalog, Config, Refused, Sessions, Store, User, hash_key
+from service import OPEN, Catalog, Config, OwnCopy, Refused, Sessions, Store, User, hash_key
 
 CATALOG = Catalog(Path(__file__).resolve().parent.parent / "catalog.json")
 ALICE = User(id="00000000-0000-0000-0000-00000000000a", email="alice@example.test")
@@ -306,17 +308,27 @@ class FakeLauncher:
 
     def __init__(self) -> None:
         self.started: list[tuple[dict[str, Any], dict[str, Any], str | None]] = []
+        self.own_copies: list[OwnCopy | None] = []
+        self.credentials: dict[str, dict[str, str]] = {}
         self.stopped: list[str] = []
         self.exits: dict[str, int] = {}
         self.fail_start = False
         self.commands: list[tuple[str, str]] = []
         self.calls: list[tuple[str, str, Any]] = []
 
-    def start(self, session: dict[str, Any], tier: dict[str, Any], region: str | None) -> str:
+    def start(self, session: dict[str, Any], tier: dict[str, Any], region: str | None, own_copy: OwnCopy | None = None) -> str:
         if self.fail_start:
             raise RuntimeError("Please add a payment method to use T4 GPU sandboxes.")
         self.started.append((session, tier, region))
+        self.own_copies.append(own_copy)
         return f"sb-{len(self.started)}"
+
+    def keep_registry_credential(self, user_id: str, username: str, token: str, create: bool = True) -> None:
+        if create or user_id in self.credentials:
+            self.credentials[user_id] = {"REGISTRY_USERNAME": username, "REGISTRY_PASSWORD": token}
+
+    def forget_registry_credential(self, user_id: str) -> None:
+        self.credentials.pop(user_id, None)
 
     def state(self, sandbox_id: str) -> int | None:
         return self.exits.get(sandbox_id)
@@ -364,12 +376,24 @@ class InlineJobs:
 
 
 class FakeGitHub:
-    """GitHub, as far as Lathe reaches it: one account, the codes it grants, its repositories and their files."""
+    """GitHub, as far as Lathe reaches it: one account, the codes it grants, its repositories and their files.
+
+    `repo-only-code` is a grant from before Lathe asked for `read:packages`. `linked_to_epic` holds
+    the tokens whose account sees Epic's repository and images, and `epic_refusal` is what GitHub
+    answers the check with instead, when set.
+    """
 
     authorize_url = staticmethod(GitHub.authorize_url)
 
     def __init__(self) -> None:
-        self.codes = {"good-code": "gho_alice_token"}
+        self.codes = {
+            "good-code": Grant("gho_alice_token", "read:packages,repo"),
+            "repo-only-code": Grant("gho_alice_old", "repo"),
+            "next-code": Grant("gho_alice_next", "read:packages,repo"),
+        }
+        self.linked_to_epic: set[str] = set()
+        self.epic_refusal: GitHubError | None = None
+        self.epic_checks: list[str] = []
         self.repositories: dict[str, dict[str, Any]] = {
             "alice-gh/film": {"full_name": "alice-gh/film", "private": True, "html_url": "https://github.com/alice-gh/film",
                               "updated_at": "2026-11-20T00:00:00Z", "permissions": {"push": True}},
@@ -380,11 +404,17 @@ class FakeGitHub:
         self.redirects: list[str] = []
         self.tokens: list[str] = []
 
-    def exchange(self, client_id: str, client_secret: str, code: str, redirect_uri: str) -> str:
+    def exchange(self, client_id: str, client_secret: str, code: str, redirect_uri: str) -> Grant:
         self.redirects.append(redirect_uri)
         if code not in self.codes:
             raise GitHubError(401, "bad_verification_code")
         return self.codes[code]
+
+    def epic_access(self, token: str) -> bool:
+        self.epic_checks.append(token)
+        if self.epic_refusal is not None:
+            raise self.epic_refusal
+        return token in self.linked_to_epic
 
     def user(self, token: str) -> dict[str, Any]:
         self.tokens.append(token)
@@ -596,7 +626,8 @@ def test_a_session_starts_in_the_users_own_workspace_and_hands_back_a_link(world
 def test_what_is_not_on_offer_is_refused(world):
     client = world[0]
     post = lambda body: client.post("/v1/sessions", headers=auth("alice-token"), json=body).status_code
-    assert post({"app": "unreal", "tier": "cpu"}) == 400, "an app that is coming soon"
+    assert post({"app": "photocraft", "tier": "cpu"}) == 400, "an app that is coming next"
+    assert post({"app": "godot", "tier": "cpu"}) == 400, "an app that is coming soon"
     assert post({"app": "blender", "tier": "nope"}) == 400
     assert post({"app": "blender", "tier": "cpu", "region": "mars"}) == 400
     assert post({"app": "blender", "tier": "a10"}) == 409, "a tier the deployment has not switched on"
@@ -1224,20 +1255,20 @@ def test_the_github_tools_write_and_read_the_linked_repository(studio):
     assert github.tokens[-1] == "gho_alice_token"
 
 
-def connect_alice(studio: SimpleNamespace, return_to: str = f"{SITE}/app/") -> Any:
+def connect_alice(studio: SimpleNamespace, return_to: str = f"{SITE}/app/", code: str = "good-code") -> Any:
     state = parse_qs(urlsplit(studio.client.post("/v1/github/connect", headers=auth("alice-token"), json={"return_to": return_to}).json()["url"]).query)["state"][0]
-    return studio.client.get("/v1/github/callback", params={"code": "good-code", "state": state}, follow_redirects=False)
+    return studio.client.get("/v1/github/callback", params={"code": code, "state": state}, follow_redirects=False)
 
 
 def test_github_connects_through_a_signed_state_and_links_projects(studio):
     client, store, github = studio.client, studio.store, studio.github
-    assert client.get("/v1/github", headers=auth("alice-token")).json() == {"configured": True, "connected": False}
+    assert client.get("/v1/github", headers=auth("alice-token")).json() == {"configured": True, "connected": False, "epic_linked": None}
     assert client.get("/v1/github/repos", headers=auth("alice-token")).status_code == 409
     url = client.post("/v1/github/connect", headers=auth("alice-token"), json={"return_to": f"{SITE}/app/?p=1#top"}).json()["url"]
     parts = urlsplit(url)
     query = parse_qs(parts.query)
     assert f"{parts.scheme}://{parts.netloc}{parts.path}" == "https://github.com/login/oauth/authorize"
-    assert query["client_id"] == ["gh-client"] and query["scope"] == ["repo"]
+    assert query["client_id"] == ["gh-client"] and query["scope"] == ["repo read:packages"]
     assert query["redirect_uri"] == ["http://testserver/v1/github/callback"]
     assert read_state(SECRET, query["state"][0])["u"] == ALICE.id
 
@@ -1246,8 +1277,10 @@ def test_github_connects_through_a_signed_state_and_links_projects(studio):
     assert github.redirects == ["http://testserver/v1/github/callback"]
     (row,) = store.tables["github_connections"].values()
     assert "gho_alice_token" not in json.dumps(row) and unseal(SECRET, row["token_encrypted"]) == "gho_alice_token"
+    assert row["scope"] == "read:packages,repo", "the scopes GitHub granted, kept beside the token"
     assert client.get("/v1/github", headers=auth("alice-token")).json() == {
-        "configured": True, "connected": True, "login": "alice-gh", "avatar_url": "https://avatars.example.test/alice"}
+        "configured": True, "connected": True, "login": "alice-gh", "avatar_url": "https://avatars.example.test/alice",
+        "epic_linked": False}
     assert client.get("/v1/github", headers=auth("bob-token")).json()["connected"] is False
     repos = client.get("/v1/github/repos", headers=auth("alice-token")).json()["repos"]
     assert repos[0] == {"full_name": "alice-gh/film", "private": True, "html_url": "https://github.com/alice-gh/film",
@@ -1264,7 +1297,7 @@ def test_github_connects_through_a_signed_state_and_links_projects(studio):
     assert link({"create": {"name": "mara-film"}}).status_code == 409
     assert client.post(f"/v1/projects/{film['id']}/github", headers=auth("bob-token"), json={"repo": "alice-gh/film"}).status_code == 404
     assert client.delete(f"/v1/projects/{film['id']}/github", headers=auth("alice-token")).json()["project"]["github_repo"] is None
-    assert client.delete("/v1/github", headers=auth("alice-token")).json() == {"configured": True, "connected": False}
+    assert client.delete("/v1/github", headers=auth("alice-token")).json() == {"configured": True, "connected": False, "epic_linked": None}
     assert store.tables["github_connections"] == {}
 
 
@@ -1310,10 +1343,80 @@ def test_github_never_sends_anyone_off_the_site(studio):
 
 def test_github_waits_for_its_oauth_app(world):
     client = world[0]
-    assert client.get("/v1/github", headers=auth("alice-token")).json() == {"configured": False, "connected": False}
+    assert client.get("/v1/github", headers=auth("alice-token")).json() == {"configured": False, "connected": False, "epic_linked": None}
     assert client.post("/v1/github/connect", headers=auth("alice-token"), json={"return_to": f"{SITE}/app/"}).status_code == 503
     refused = client.get("/v1/github/callback", params={"code": "c", "state": sign_state("", ALICE.id, SITE)}, follow_redirects=False)
     assert refused.status_code == 400
+
+
+def test_unreal_starts_only_for_a_github_account_linked_to_epic(studio):
+    client, github, launcher, store = studio.client, studio.github, studio.launcher, studio.store
+    game = new_project(client, discipline="games", format="World")
+    start = lambda token="alice-token", project=game: client.post(
+        f"/v1/projects/{project['id']}/engines", headers=auth(token), json={"app": "unreal", "tier": "t4"})
+    linked = lambda: client.get("/v1/github", headers=auth("alice-token")).json()["epic_linked"]
+
+    assert linked() is None, "unknown without GitHub"
+    refused = start()
+    assert refused.status_code == 409 and "Connect GitHub first" in refused.json()["detail"]
+
+    connect_alice(studio, code="repo-only-code")
+    assert linked() is None, "unknown for a grant without read:packages"
+    refused = start()
+    assert refused.status_code == 409 and "Connect GitHub again" in refused.json()["detail"]
+    assert github.epic_checks == [], "GitHub is not asked what the grant cannot show"
+
+    connect_alice(studio)
+    assert linked() is False
+    refused = start()
+    detail = refused.json()["detail"]
+    assert refused.status_code == 403
+    assert "epicgames.com" in detail and "Apps and Accounts" in detail and "EpicGames organization" in detail
+    assert detail.index("Apps and Accounts") < detail.index("EpicGames organization") < detail.index("Reconnect GitHub")
+
+    github.epic_refusal = GitHubError(502, "Server Error")
+    assert linked() is None, "unknown while GitHub fails"
+    refused = start()
+    assert refused.status_code == 409 and "Server Error" in refused.json()["detail"]
+    github.epic_refusal = None
+    assert launcher.started == [], "nothing started while the link was not shown"
+
+    assert launcher.credentials == {}, "connecting GitHub alone keeps no credential for a pull"
+    github.linked_to_epic.add("gho_alice_token")
+    assert linked() is True
+    engine = start().json()["engine"]
+    assert engine["app"] == "unreal" and store.sessions[engine["id"]]["status"] == "running"
+    assert launcher.own_copies == [OwnCopy("5.8")]
+    assert launcher.credentials == {ALICE.id: {"REGISTRY_USERNAME": "alice-gh", "REGISTRY_PASSWORD": "gho_alice_token"}}, (
+        "pulled with her own login and token, kept for her before the start"
+    )
+    assert "gho_alice_token" not in json.dumps(store.sessions) + json.dumps(engine), "the token is kept nowhere with the session"
+
+    connect_alice(studio, code="next-code")
+    assert launcher.credentials[ALICE.id]["REGISTRY_PASSWORD"] == "gho_alice_next", "connecting again refreshes it"
+    theirs = new_project(client, "bob-token", discipline="games", format="World")
+    assert start("bob-token", theirs).status_code == 409, "another user's link is not Bob's"
+    client.delete(f"/v1/sessions/{engine['id']}", headers=auth("alice-token"))
+    client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "blender", "tier": "t4"})
+    assert launcher.own_copies[-1] is None, "an app on Lathe's own license gets no credential"
+    client.delete("/v1/github", headers=auth("alice-token"))
+    assert launcher.credentials == {}, "disconnecting GitHub deletes it"
+
+
+def test_a_queued_unreal_start_uses_the_github_connection_it_has_when_it_starts(studio):
+    client, sessions, store, github = studio.client, studio.sessions, studio.store, studio.github
+    connect_alice(studio)
+    github.linked_to_epic.add("gho_alice_token")
+    object.__setattr__(sessions.config, "capacity", 0)
+    game = new_project(client, discipline="games", format="World")
+    queued = client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "unreal", "tier": "t4"})
+    assert queued.json()["engine"]["status"] == "queued"
+    client.delete("/v1/github", headers=auth("alice-token"))
+    object.__setattr__(sessions.config, "capacity", 10)
+    sessions.reconcile()
+    (session,) = store.sessions.values()
+    assert session["status"] == "failed" and "Connect GitHub again" in session["end_reason"]
+    assert studio.launcher.started == [] and studio.launcher.credentials == {}
 
 
 def test_a_sealed_token_opens_only_under_its_secret():
@@ -1451,6 +1554,115 @@ def test_the_launcher_starts_each_app_from_its_own_image_in_the_users_workspace(
     module.filmcraft_call = lambda sandbox, method, params=None, timeout=60: calls.append((sandbox, method, params, timeout)) or {"ok": True}
     assert launcher.filmcraft("sb-1", "engine.commands", {}) == {"ok": True}
     assert calls == [("sandbox:sb-1", "engine.commands", {}, 60)]
+
+
+class FakeModal:
+    """Modal's named Secrets, as far as the launcher keeps registry credentials in them."""
+
+    def __init__(self) -> None:
+        self.secrets: dict[str, dict[str, str]] = {}
+        fake = self
+
+        class NotFoundError(Exception):
+            pass
+
+        class Secret:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            @staticmethod
+            def from_name(name: str) -> Secret:
+                return Secret(name)
+
+            def hydrate(self) -> Secret:
+                if self.name not in fake.secrets:
+                    raise NotFoundError(self.name)
+                return self
+
+            def update(self, values: dict[str, str]) -> None:
+                fake.secrets[self.hydrate().name].update(values)
+
+        def create(name: str, values: dict[str, str], *, allow_existing: bool = False) -> None:
+            if name in fake.secrets and not allow_existing:
+                raise AssertionError(f"{name} exists")
+            fake.secrets.setdefault(name, dict(values))
+
+        def delete(name: str, *, allow_missing: bool = False) -> None:
+            if name not in fake.secrets and not allow_missing:
+                raise NotFoundError(name)
+            fake.secrets.pop(name, None)
+
+        Secret.objects = SimpleNamespace(create=create, delete=delete)
+        self.module = SimpleNamespace(Secret=Secret, exception=SimpleNamespace(NotFoundError=NotFoundError))
+
+
+def test_the_launcher_pulls_unreal_with_each_users_own_named_secret(monkeypatch):
+    modal = FakeModal()
+    monkeypatch.setitem(sys.modules, "modal", modal.module)
+    module = FakeSandboxModule()
+    launcher = ModalLauncher(module, app="modal-app")
+    tier = {"gpu": "L4", "cpu": 8, "memory_gb": 32}
+    session = lambda user: {"id": str(uuid.uuid4()), "user_id": user.id, "app": "unreal", "project_id": None}
+    with pytest.raises(RuntimeError, match="cannot build Unreal Engine's image yet"):
+        launcher.start(session(ALICE), tier, None, OwnCopy("5.8"))
+
+    launcher.keep_registry_credential(BOB.id, "bob-gh", "gho_b", create=False)
+    assert modal.secrets == {}, "refreshing makes no Secret for a user without one"
+    launcher.keep_registry_credential(ALICE.id, "alice-gh", "gho_a")
+    launcher.keep_registry_credential(ALICE.id, "alice-gh", "gho_a2")
+    launcher.keep_registry_credential(BOB.id, "bob-gh", "gho_b")
+    launcher.keep_registry_credential(BOB.id, "bob-gh", "gho_b2", create=False)
+    assert modal.secrets == {
+        f"lathe-ghcr-{ALICE.id}": {"REGISTRY_USERNAME": "alice-gh", "REGISTRY_PASSWORD": "gho_a2"},
+        f"lathe-ghcr-{BOB.id}": {"REGISTRY_USERNAME": "bob-gh", "REGISTRY_PASSWORD": "gho_b2"},
+    }, "one Secret per user, holding their latest token"
+
+    pulls = []
+    module.unreal_image = lambda registry_secret, version: pulls.append((registry_secret.name, version)) or f"unreal:{registry_secret.name}"
+    for user in (ALICE, BOB, ALICE):
+        launcher.start(session(user), tier, None, OwnCopy("5.8"))
+    alice, bob = f"lathe-ghcr-{ALICE.id}", f"lathe-ghcr-{BOB.id}"
+    assert pulls == [(alice, "5.8"), (bob, "5.8"), (alice, "5.8")], "each start pulls with its user's own named Secret"
+    assert [settings["image"] for _, settings in module.started] == [f"unreal:{alice}", f"unreal:{bob}", f"unreal:{alice}"]
+    with pytest.raises(RuntimeError, match="own registry credential"):
+        launcher.start(session(ALICE), tier, None)
+    assert module.images == [], "no image of Unreal is kept for the next start"
+
+    launcher.forget_registry_credential(ALICE.id)
+    launcher.forget_registry_credential(ALICE.id)
+    assert list(modal.secrets) == [bob], "forgetting deletes the user's Secret, and a missing one is no error"
+
+
+def test_github_reads_an_epic_link_from_what_the_token_can_see():
+    """The real `GitHub` over a recorded GitHub: which calls the check makes, and what each answer means."""
+    seen: list[httpx.Request] = []
+    status: dict[str, int] = {}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/login/oauth/access_token":
+            return httpx.Response(200, json={"access_token": "gho_new", "scope": "repo,read:packages", "token_type": "bearer"})
+        code = status.get(request.url.path, 200)
+        return httpx.Response(code, json={"message": "Not Found"} if code == 404 else {})
+
+    github = GitHub()
+    github.http = httpx.Client(headers=github.http.headers, transport=httpx.MockTransport(answer))
+    repo, package = "/repos/EpicGames/UnrealEngine", "/orgs/EpicGames/packages/container/unreal-engine"
+    assert github.epic_access("gho_t") is True
+    assert [(request.method, request.url.path) for request in seen] == [("GET", repo), ("GET", package)]
+    assert {request.headers["authorization"] for request in seen} == {"Bearer gho_t"}
+
+    seen.clear()
+    status[repo] = 404
+    assert github.epic_access("gho_t") is False and len(seen) == 1, "not in Epic's organization: the images are not asked"
+    status.update({repo: 200, package: 404})
+    assert github.epic_access("gho_t") is False, "the repository without the images is not a link the engine can be pulled with"
+    status[repo] = 500
+    with pytest.raises(GitHubError):
+        github.epic_access("gho_t")
+
+    assert github.exchange("id", "secret", "code", "https://api.example.test/cb") == Grant("gho_new", "repo,read:packages")
+    assert [reads_packages(scope) for scope in ("repo,read:packages", "write:packages", "repo", "")] == [True, True, False, False]
 
 
 def test_skills_are_chosen_by_discipline_with_their_references(tmp_path):

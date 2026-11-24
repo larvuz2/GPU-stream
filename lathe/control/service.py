@@ -35,6 +35,18 @@ log of events the page polls (`events`), and a message to the agent claims the
 project's one turn in the database before a job runs it (`send_message`,
 `agent.py`). The user's GitHub account is connected through an OAuth App whose
 token is kept sealed (`github_client.py`).
+
+An app of status `byol` runs on a license the user brings, checked before it
+starts. Unreal Engine's is the user's Epic account, which Epic links to a
+GitHub account: the session starts only while the user's connected GitHub
+account shows that link (`epic_link`), and its image is pulled from Epic's
+registry with that user's own GitHub login and token, since Epic's license
+lets each user have their copy but not Lathe hand one copy around
+(`lathe/UNREAL.md`). The launcher keeps that credential as the user's own
+registry credential (`Launcher.keep_registry_credential`), written again at
+every start of the app and when the user connects GitHub again, and forgotten
+when they disconnect it; it is never kept beside a session or used for another
+user's image.
 """
 
 from __future__ import annotations
@@ -54,7 +66,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import httpx
 
-from github_client import GitHub, GitHubError, read_state, seal, sign_state, unseal
+from github_client import GitHub, GitHubError, read_state, reads_packages, seal, sign_state, unseal
 
 IDLE_SECONDS = 600
 LIFETIME_SECONDS = 8 * 3600
@@ -62,6 +74,8 @@ READY_SECONDS = 120
 # A session still `starting` after this long has lost its job
 START_LIMIT_SECONDS = 300
 OPEN = ("queued", "starting", "running")
+# The catalog statuses an app can be started under: anyone's, the team's, or on the user's own license
+STARTABLE = ("available", "team", "byol")
 SESSION_FIELDS = (
     "id",
     "project_id",
@@ -118,6 +132,18 @@ class User:
 
     id: str
     email: str
+
+
+@dataclass(frozen=True)
+class OwnCopy:
+    """A start that pulls the user's own copy of an app, of this version.
+
+    The copy is pulled with the registry credential the launcher keeps for the
+    session's user, which the service writes before the start
+    (`Launcher.keep_registry_credential`).
+    """
+
+    version: str
 
 
 @dataclass(frozen=True)
@@ -340,8 +366,23 @@ class Store:
 class Launcher(Protocol):
     """The part of `addons/modal/sandbox.py` this service drives, which a test stands in for."""
 
-    def start(self, session: dict[str, Any], tier: dict[str, Any], region: str | None) -> str:
-        """Start the session's Sandbox, wait until it streams, and return the Sandbox's ID."""
+    def start(
+        self, session: dict[str, Any], tier: dict[str, Any], region: str | None, own_copy: OwnCopy | None = None
+    ) -> str:
+        """Start the session's Sandbox, wait until it streams, and return the Sandbox's ID.
+
+        `own_copy` is given for an app the user brings the license of, whose image is pulled with
+        the registry credential kept for the session's user.
+        """
+
+    def keep_registry_credential(self, user_id: str, username: str, token: str, create: bool = True) -> None:
+        """Keep the user's own registry login and token, which their copies of an app are pulled with.
+
+        With `create` false, only a credential already kept for the user is written again.
+        """
+
+    def forget_registry_credential(self, user_id: str) -> None:
+        """Delete the registry credential kept for the user, if there is one."""
 
     def state(self, sandbox_id: str) -> int | None:
         """The Sandbox's exit status, or nothing while it runs."""
@@ -553,20 +594,25 @@ class Sessions:
         An app of status `team` is for the accounts `LATHE_TEAM_EMAILS` names,
         since its license is the user's own (Nuke's is per person), and Nuke
         has as many seats open at once as `LATHE_NUKE_SEATS` says, counted by
-        the database with the capacity (`lathe_request_session`).
+        the database with the capacity (`lathe_request_session`). An app of
+        status `byol` starts for a user whose own license for it is linked
+        (`require_own_license`).
 
         Raises:
             Refused: 400 for an app, tier, or region that is not on offer, 402 without the credits
-                for a first minute, 403 for a team app outside the team, 409 at the user's session
-                limit, with every seat of the app taken, or for a tier that is switched off.
+                for a first minute, 403 for a team app outside the team or an own license that is
+                not linked, 409 at the user's session limit, with every seat of the app taken, for a
+                tier that is switched off, or while the link cannot be checked.
         """
         offered = self.catalog.apps.get(app, {})
-        if offered.get("status") not in ("available", "team"):
+        if offered.get("status") not in STARTABLE:
             raise Refused(400, "That app is not available yet.")
         if tier not in self.catalog.tiers or region not in self.catalog.regions:
             raise Refused(400, "Unknown tier or region.")
         if tier not in self.config.tiers:
             raise Refused(409, "That tier is not switched on yet. Pick another one.")
+        if offered["status"] == "byol":
+            self.require_own_license(user.id, offered)
         profile = self.me(user)
         if offered["status"] == "team" and (profile["email"] or user.email).lower() not in self.config.team_emails:
             raise Refused(403, f"{offered['name']} is open to the team's accounts only.")
@@ -1140,13 +1186,79 @@ class Sessions:
         connection = self.github_connection(user_id)
         return unseal(self.config.secret_key, connection["token_encrypted"]) if connection else None
 
-    def github_status(self, user: User) -> dict[str, Any]:
-        """Whether GitHub can be connected, and the account the user connected."""
+    def github_status(self, user: User, epic: bool = False) -> dict[str, Any]:
+        """Whether GitHub can be connected, and the account the user connected.
+
+        With `epic`, also whether that account is linked to Epic (`epic_linked`, from `epic_link`),
+        which asks GitHub, so the API's GitHub routes ask for it and the agent's prompt does not.
+        """
         connection = self.github_connection(user.id)
         status: dict[str, Any] = {"configured": self.config.github, "connected": connection is not None}
         if connection:
             status.update(login=connection["login"], avatar_url=connection["avatar_url"])
+        if epic:
+            status["epic_linked"] = self.epic_link(user.id)[0]
         return status
+
+    def epic_link(self, user_id: str) -> tuple[bool | None, str]:
+        """Whether the user's GitHub account is linked to an Epic account, and why not where it is not known.
+
+        `True` and `False` are GitHub's answer for the connected account. `None` is unknown: no
+        GitHub connected, one connected before Lathe asked for `read:packages` (which reading
+        Epic's images takes, so it has to be connected again), a token GitHub no longer takes, or
+        GitHub not answering; the reason says which, for the person.
+        """
+        connection = self.github_connection(user_id) if self.config.github else None
+        if connection is None:
+            return None, "Connect GitHub first: Unreal Engine runs on the Epic account your GitHub account is linked to."
+        token = unseal(self.config.secret_key, connection["token_encrypted"])
+        if token is None or not reads_packages(connection.get("scope") or ""):
+            return None, "Connect GitHub again, so Lathe can check your Epic link and pull the engine with your account."
+        try:
+            return self.github.epic_access(token), ""
+        except GitHubError as error:
+            if error.status == 401:
+                return None, "GitHub no longer accepts this connection. Connect GitHub again."
+            return None, f"GitHub refused Lathe's check of your Epic link: {error.message}"
+        except httpx.HTTPError:
+            return None, "GitHub did not answer Lathe's check of your Epic link. Try again in a moment."
+
+    def require_own_license(self, user_id: str, app: dict[str, Any]) -> None:
+        """Refuse an app of status `byol` until the user's own license for it is linked.
+
+        The one such license checked is Unreal Engine's Epic account; any other app of the status
+        is refused, since nothing here can check its license.
+
+        Raises:
+            Refused: 403 with the steps that link it, 409 while the link cannot be checked, 400 for an
+                app whose license this service cannot check.
+        """
+        if app["id"] != "unreal":
+            raise Refused(400, "That app is not available yet.")
+        linked, reason = self.epic_link(user_id)
+        if linked is None:
+            raise Refused(409, reason)
+        if not linked:
+            steps = " ".join(f"{number}. {step}" for number, step in enumerate(app["license"]["steps"], 1))
+            raise Refused(
+                403, f"{app['name']} runs on your own Epic account, and your GitHub account is not linked to one. {steps}"
+            )
+
+    def own_copy(self, session: dict[str, Any]) -> OwnCopy:
+        """Have the launcher keep the user's GitHub login and token for a start of their own copy, and describe it.
+
+        Written at the start itself, so a session that waited in the queue starts with the
+        connection the user has then.
+
+        Raises:
+            Refused: 409 for a user whose GitHub connection is gone or no longer opens.
+        """
+        connection = self.github_connection(session["user_id"])
+        token = unseal(self.config.secret_key, connection["token_encrypted"]) if connection else None
+        if connection is None or token is None:
+            raise Refused(409, "Connect GitHub again: the engine is pulled with your own GitHub account.")
+        self.launcher.keep_registry_credential(session["user_id"], connection["login"], token)
+        return OwnCopy(self.catalog.apps[session["app"]]["version"])
 
     def site_page(self, url: str) -> bool:
         """Whether a URL is a page of the site, the only place GitHub's callback sends anyone back to.
@@ -1181,6 +1293,9 @@ class Sessions:
     def github_callback(self, code: str, state: str, error: str, api_url: str) -> str:
         """Finish a connection GitHub sent a user back from, and return the page to send them on to.
 
+        A registry credential the launcher already keeps for the user takes the new token; a user
+        who never started an app on their own license gets none from connecting.
+
         Raises:
             Refused: 400 for a state this deployment did not sign, one that expired, or one naming a
                 page off the site; then nothing is exchanged and no page is visited.
@@ -1191,10 +1306,10 @@ class Sessions:
         if error or not code:
             return with_query(payload["r"], github="failed")
         try:
-            token = self.github.exchange(
+            grant = self.github.exchange(
                 self.config.github_client_id, self.config.github_client_secret, code, self.callback_url(api_url)
             )
-            account = self.github.user(token)
+            account = self.github.user(grant.token)
         except (GitHubError, httpx.HTTPError):
             return with_query(payload["r"], github="failed")
         self.store.upsert(
@@ -1203,17 +1318,30 @@ class Sessions:
                 "user_id": payload["u"],
                 "login": account["login"],
                 "avatar_url": account.get("avatar_url") or "",
-                "token_encrypted": seal(self.config.secret_key, token),
+                "token_encrypted": seal(self.config.secret_key, grant.token),
+                "scope": grant.scope,
                 "updated_at": now(),
             },
             on_conflict="user_id",
         )
+        try:
+            self.launcher.keep_registry_credential(payload["u"], account["login"], grant.token, create=False)
+        except Exception:
+            # The connection is made; the next start of an app on the user's own license writes
+            # the credential again before it pulls anything
+            pass
         return with_query(payload["r"], github="connected")
 
     def github_disconnect(self, user: User) -> dict[str, Any]:
-        """Forget the user's GitHub connection and its token."""
+        """Forget the user's GitHub connection, its token, and the registry credential kept from it.
+
+        The credential goes first, so a disconnect the launcher fails leaves the connection there
+        for the user to disconnect again, rather than a token in Modal that nothing points at.
+        Returns what `GET /v1/github` now says.
+        """
+        self.launcher.forget_registry_credential(user.id)
         self.store.delete("github_connections", user_id=f"eq.{user.id}")
-        return self.github_status(user)
+        return self.github_status(user, epic=True)
 
     def require_github(self, user_id: str) -> str:
         """The user's GitHub token.
@@ -1295,7 +1423,10 @@ class Sessions:
         tier = self.catalog.tiers[session["tier"]]
         region = session["region"] if self.config.pin_regions and session["region"] != "auto" else None
         try:
-            sandbox_id = self.launcher.start(session, tier, region)
+            if self.catalog.apps.get(session["app"], {}).get("status") == "byol":
+                sandbox_id = self.launcher.start(session, tier, region, own_copy=self.own_copy(session))
+            else:
+                sandbox_id = self.launcher.start(session, tier, region)
         except Exception as error:
             self.store.rpc("lathe_end_session", p_session=session_id, p_reason=f"start failed: {error}"[:300], p_failed=True)
             return

@@ -16,8 +16,18 @@ which with the check that it lies under the site's own address
 
 The token is stored only encrypted, with Fernet under a key derived from the
 same secret (`seal`, `unseal`), and leaves the control plane only in requests
-to GitHub. Each key derived from the secret is for one purpose, so a signed
-state can never be read as a sealed token or the reverse.
+to GitHub, and as the user's own credential for pulling their copy of an app
+from GitHub's container registry, which the launcher keeps as that user's own
+Modal Secret (`launcher.py`). Each key derived
+from the secret is for one purpose, so a signed state can never be read as a
+sealed token or the reverse.
+
+The app asks for `repo`, for the project's repository, and `read:packages`,
+for that pull. Whether a user's account is linked to Epic is read from what
+their token can see (`GitHub.epic_access`): Epic gives a linked account the
+private `EpicGames/UnrealEngine` repository, through its organization, and the
+engine's container images on `ghcr.io/epicgames/unreal-engine`. GitHub hides
+what a token cannot see behind a 404, so a 404 is "not linked", never an error.
 """
 
 from __future__ import annotations
@@ -28,7 +38,7 @@ import hmac
 import json
 import secrets
 import time
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import quote, urlencode
 
 import httpx
@@ -37,8 +47,25 @@ from cryptography.fernet import Fernet, InvalidToken
 AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 TOKEN_URL = "https://github.com/login/oauth/access_token"
 API_URL = "https://api.github.com"
-SCOPE = "repo"
+# Space-delimited, as the authorization page takes them; GitHub lists what it granted with commas
+SCOPE = "repo read:packages"
+PACKAGE_SCOPES = frozenset({"read:packages", "write:packages"})
 STATE_SECONDS = 600
+# What an account linked to Epic can see: the engine's source and its container images
+EPIC_REPO = "EpicGames/UnrealEngine"
+EPIC_PACKAGE = "/orgs/EpicGames/packages/container/unreal-engine"
+
+
+class Grant(NamedTuple):
+    """What GitHub granted for an authorization: the token, and its scopes as GitHub lists them."""
+
+    token: str
+    scope: str
+
+
+def reads_packages(scope: str) -> bool:
+    """Whether a grant's scopes let its token pull from GitHub's container registry."""
+    return bool(PACKAGE_SCOPES & {part.strip() for part in scope.split(",")})
 
 
 class GitHubError(Exception):
@@ -139,8 +166,8 @@ class GitHub:
         query = {"client_id": client_id, "redirect_uri": redirect_uri, "scope": SCOPE, "state": state}
         return f"{AUTHORIZE_URL}?{urlencode(query)}"
 
-    def exchange(self, client_id: str, client_secret: str, code: str, redirect_uri: str) -> str:
-        """The token a code from the authorization page is worth."""
+    def exchange(self, client_id: str, client_secret: str, code: str, redirect_uri: str) -> Grant:
+        """The token a code from the authorization page is worth, with the scopes it carries."""
         response = self.http.post(
             TOKEN_URL,
             headers={"Accept": "application/json"},
@@ -149,11 +176,29 @@ class GitHub:
         body = response.json() if response.content else {}
         if response.status_code >= 400 or not body.get("access_token"):
             raise GitHubError(response.status_code, body.get("error_description") or body.get("error") or "no token")
-        return body["access_token"]
+        return Grant(body["access_token"], body.get("scope") or "")
 
     def user(self, token: str) -> dict[str, Any]:
         """The account a token is for: `login` and `avatar_url` among the rest."""
         return self._call("GET", f"{API_URL}/user", token)
+
+    def epic_access(self, token: str) -> bool:
+        """Whether the token's account is linked to Epic: it sees Unreal Engine's repository and its images.
+
+        The images are read with `read:packages`, so the token has to have been granted it
+        (`reads_packages`).
+
+        Raises:
+            GitHubError: GitHub refused for another reason than not showing the account either one.
+        """
+        for path in (f"/repos/{EPIC_REPO}", EPIC_PACKAGE):
+            try:
+                self._call("GET", f"{API_URL}{path}", token)
+            except GitHubError as error:
+                if error.status == 404:
+                    return False
+                raise
+        return True
 
     def repos(self, token: str) -> list[dict[str, Any]]:
         """The repositories the account can push to, most recently updated first."""

@@ -19,9 +19,15 @@
  * another origin cannot be read. So the stage says what it can: a frame that has not loaded in
  * twenty seconds is reported as stalled, and the way to open the stream in a tab of its own is
  * always one click away, with a note under a loaded frame for the case this page cannot see.
+ *
+ * An engine whose session reports streams beside its desktop (`Session.streams`: the Unreal
+ * Editor streams itself, apart from the desktop Blender runs on) gets a switch between "Desktop"
+ * and each stream's name. The desktop is the session's own minted link; a stream is its own
+ * address. Switching loads the other picture in place of the first, as switching engines does, so
+ * only the picture on screen is streamed.
  * @module
  */
-import { useEffect, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useState, type ComponentType } from 'react';
 import { ChevronDown, ExternalLink, Maximize2, Minimize2, MonitorPlay, RefreshCw } from 'lucide-react';
 import { isActive, type Session } from '../lib/api';
 import { findApp, findTier, type CatalogApp } from '../lib/catalog';
@@ -34,8 +40,14 @@ import { openStreamTab } from './present';
 /** How long a frame may take to load before the stage calls it stalled. */
 const STALL_MS = 20_000;
 
-/** What stands in for the stream where there is none to show, as the demo has. */
-export type StreamStandIn = ComponentType<{ app: CatalogApp | undefined }>;
+/**
+ * What stands in for the stream where there is none to show, as the demo has: drawn for the app,
+ * and for the stream chosen beside its desktop (`null` for the desktop).
+ */
+export type StreamStandIn = ComponentType<{ app: CatalogApp | undefined; stream: string | null }>;
+
+/** What the switch calls an engine's own desktop, beside the streams it reports. */
+const DESKTOP = 'Desktop';
 
 /** Props of {@link Stage}. */
 interface StageProps {
@@ -88,13 +100,24 @@ export function Stage({
   const [opening, setOpening] = useState(false);
   const [tabError, setTabError] = useState<string | null>(null);
   const [blockedLink, setBlockedLink] = useState<string | null>(null);
+  const [streamName, setStreamName] = useState<string | null>(null);
   const app = engine === null ? undefined : findApp(engine.app);
-  const appName = app?.name ?? engine?.app ?? 'Engine';
   const running = engine?.status === 'running';
+  const streams = engine?.streams ?? [];
+  const stream = streams.find((candidate) => candidate.name === streamName) ?? null;
+  const appName = app?.name ?? engine?.app ?? 'Engine';
+  const pictureName = stream?.name ?? appName;
   const choices = engines.filter(isActive);
   const unfolded = open || focus || narrow;
+  // By its address alone: the engine list is read again every few seconds, and a new list must
+  // not count as a new picture.
+  const streamUrl = stream?.url ?? null;
+  const pictureLink = useCallback(
+    (id: string): Promise<string> => (streamUrl === null ? link(id) : Promise.resolve(streamUrl)),
+    [link, streamUrl],
+  );
 
-  /** Opens the stream in a tab of its own. */
+  /** Opens the picture on screen in a tab of its own. */
   async function openTab(): Promise<void> {
     if (engine === null) {
       return;
@@ -103,7 +126,7 @@ export function Stage({
     setTabError(null);
     setBlockedLink(null);
     try {
-      setBlockedLink(await openStreamTab(() => link(engine.id), appName));
+      setBlockedLink(await openStreamTab(() => pictureLink(engine.id), pictureName));
     } catch (failure) {
       setTabError(describeError(failure));
     } finally {
@@ -148,12 +171,35 @@ export function Stage({
             <span className="truncate">{appName}</span>
           </span>
         )}
+        {running && streams.length > 0 ? (
+          <div className="flex flex-none items-center rounded-lg border border-line p-0.5" role="group" aria-label="Picture on screen">
+            {[null, ...streams.map((candidate) => candidate.name)].map((name) => {
+              const chosen = name === (stream?.name ?? null);
+              return (
+                <button
+                  key={name ?? DESKTOP}
+                  type="button"
+                  aria-pressed={chosen}
+                  className={cx(
+                    'h-6 rounded-md px-2 text-xs transition-colors',
+                    chosen ? 'bg-white/10 text-fg' : 'text-muted hover:text-fg',
+                  )}
+                  onClick={() => {
+                    setStreamName(name);
+                  }}
+                >
+                  {name ?? DESKTOP}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         <div className="ml-auto flex items-center gap-0.5">
           {running ? (
             <button
               type="button"
               className="icon-btn"
-              aria-label={`Open ${appName} in a new tab`}
+              aria-label={`Open ${pictureName} in a new tab`}
               title="Open in a new tab"
               disabled={opening}
               onClick={() => {
@@ -197,11 +243,12 @@ export function Stage({
               <Empty engines={engines} onStartEngine={onStartEngine} />
             ) : running ? (
               <Stream
-                key={engine.id}
+                key={`${engine.id} ${stream?.name ?? DESKTOP}`}
                 engine={engine}
-                appName={appName}
+                appName={pictureName}
                 app={app}
-                link={link}
+                stream={stream?.name ?? null}
+                link={pictureLink}
                 standIn={standIn}
                 interactive={focus || narrow}
                 onFocus={() => {
@@ -234,7 +281,7 @@ export function Stage({
             <p className="mt-2 text-xs text-muted">
               Your browser blocked the new tab.{' '}
               <a className="link" href={blockedLink} target="_blank" rel="noopener noreferrer">
-                Open {appName}
+                Open {pictureName}
               </a>
             </p>
           )}
@@ -353,9 +400,11 @@ interface StreamProps {
   engine: Session;
   /** Its catalog app. */
   app: CatalogApp | undefined;
-  /** Its app's name. */
+  /** The name of what it shows: its app's, or the stream's beside its desktop. */
   appName: string;
-  /** Mints a link to its stream. */
+  /** The stream beside its desktop that it shows, or `null` for the desktop. */
+  stream: string | null;
+  /** Mints a link to what it shows. */
   link: (id: string) => Promise<string>;
   /** Drawn instead of the stream, where there is none to show. */
   standIn: StreamStandIn | undefined;
@@ -373,7 +422,17 @@ interface StreamProps {
  * @param props The component's props.
  * @returns The stream.
  */
-function Stream({ engine, app, appName, link, standIn: StandIn, interactive, onFocus, onOpenTab }: StreamProps) {
+function Stream({
+  engine,
+  app,
+  appName,
+  stream,
+  link,
+  standIn: StandIn,
+  interactive,
+  onFocus,
+  onOpenTab,
+}: StreamProps) {
   const [src, setSrc] = useState<string | null>(null);
   const [phase, setPhase] = useState<'minting' | 'loading' | 'loaded' | 'stalled' | 'failed'>('minting');
   const [error, setError] = useState<string | null>(null);
@@ -425,7 +484,7 @@ function Stream({ engine, app, appName, link, standIn: StandIn, interactive, onF
   if (StandIn !== undefined) {
     return (
       <>
-        <StandIn app={app} />
+        <StandIn app={app} stream={stream} />
         {interactive ? null : <FocusLayer appName={appName} onFocus={onFocus} />}
       </>
     );

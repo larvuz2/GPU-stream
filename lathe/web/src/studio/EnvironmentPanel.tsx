@@ -9,9 +9,13 @@
  *
  * Engines are catalog apps running as sessions of the project. Each shows its state, its clock
  * while it runs, and the controls that put it on the screen or stop it. The start form offers the
- * discipline's engines first, then every other app; only an available app, or a team one, which
- * the control plane admits for the team's accounts alone, can be started, and the rest show their
- * status. A tier the control plane does not list as open is shown but cannot be chosen.
+ * discipline's engines first, then every other app; only an available app, a team one, which the
+ * control plane admits for the team's accounts alone, or one on the person's own license can be
+ * started, and the rest show their status. A tier the control plane does not list as open is shown
+ * but cannot be chosen. Choosing an app on the person's own license (Unreal Engine, on their Epic
+ * account) shows whether that license is linked, as the control plane reads it through their
+ * GitHub account: linked; not linked, with the steps that link it and Epic's page on them; or
+ * unknown, with GitHub to connect first or again. It starts once linked.
  *
  * GitHub is the person's own account, connected once through the control plane's OAuth App and
  * then linked per project to a repository, existing or created for it. The block says plainly
@@ -21,7 +25,18 @@
 import { useEffect, useId, useMemo, useState, type SubmitEvent } from 'react';
 import { CircleStop, ExternalLink, Lock, LogOut, MonitorPlay, Play, Plus, Unlink } from 'lucide-react';
 import { isActive, type GitHubRepo, type Health, type Me, type Project, type RepoLink, type Session } from '../lib/api';
-import { catalog, findApp, findDiscipline, findTier, gpuLabel, minutesFor, type Tier } from '../lib/catalog';
+import {
+  catalog,
+  findApp,
+  findDiscipline,
+  findTier,
+  gpuLabel,
+  isOwnLicense,
+  minutesFor,
+  ownLicenseLabel,
+  type CatalogApp,
+  type Tier,
+} from '../lib/catalog';
 import { cx } from '../lib/cx';
 import { clock, minutesText, timestamp } from '../lib/format';
 import { useNow } from './hooks';
@@ -45,6 +60,8 @@ interface EngineSectionProps {
   health: Health | null;
   /** The signed-in account. */
   me: Me | null;
+  /** The GitHub connection, through which an app on the person's own license is linked. */
+  github: GitHub;
   /** Starts an engine. */
   onStart: (app: string, tier: string) => Promise<Session>;
   /** Stops an engine. */
@@ -68,6 +85,7 @@ export function EngineSection({
   screenId,
   health,
   me,
+  github,
   onStart,
   onStop,
   onShow,
@@ -103,7 +121,14 @@ export function EngineSection({
         </ul>
       )}
       {enginesStatus === 'missing' ? null : (
-        <StartForm project={project} health={health} me={me} onStart={onStart} onAddCredits={onAddCredits} />
+        <StartForm
+          project={project}
+          health={health}
+          me={me}
+          github={github}
+          onStart={onStart}
+          onAddCredits={onAddCredits}
+        />
       )}
       {ended.length === 0 ? null : (
         <details className="mt-3 text-xs text-faint">
@@ -272,6 +297,8 @@ interface StartFormProps {
   health: Health | null;
   /** The signed-in account. */
   me: Me | null;
+  /** The GitHub connection, through which an app on the person's own license is linked. */
+  github: GitHub;
   /** Starts an engine. */
   onStart: (app: string, tier: string) => Promise<Session>;
   /** Opens the credits dialog. */
@@ -284,7 +311,7 @@ interface StartFormProps {
  * @param props The component's props.
  * @returns The form.
  */
-function StartForm({ project, health, me, onStart, onAddCredits }: StartFormProps) {
+function StartForm({ project, health, me, github, onStart, onAddCredits }: StartFormProps) {
   const appId = useId();
   const tierId = useId();
   const discipline = findDiscipline(project.discipline);
@@ -303,7 +330,11 @@ function StartForm({ project, health, me, onStart, onAddCredits }: StartFormProp
   const app = findApp(pickedApp);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const ready = app !== undefined && canStart(app) && tier !== undefined;
+  const ready =
+    app !== undefined &&
+    canStart(app) &&
+    tier !== undefined &&
+    (!isOwnLicense(app) || github.status?.epic_linked === true);
 
   /**
    * Starts the engine the form describes.
@@ -392,12 +423,136 @@ function StartForm({ project, health, me, onStart, onAddCredits }: StartFormProp
           ? 'No tier is switched on right now.'
           : `${gpuLabel(tier)}${minutes === null ? '' : ` · about ${minutesText(minutes)} on your credits`}`}
       </p>
+      {app !== undefined && isOwnLicense(app) ? <EpicLink app={app} github={github} /> : null}
       {error === null ? null : (
         <div className="mt-2">
           <ErrorNotice error={error} onAddCredits={onAddCredits} />
         </div>
       )}
     </form>
+  );
+}
+
+/** Props of {@link EpicLink}. */
+interface EpicLinkProps {
+  /** The app on the person's own license: Unreal Engine. */
+  app: CatalogApp;
+  /** The GitHub connection, which carries the link. */
+  github: GitHub;
+}
+
+/**
+ * Renders whether the person's Epic account, the license Unreal Engine starts on, is linked.
+ *
+ * The control plane reads the link from what the person's GitHub account can see, and this shows
+ * its answer. Not linked, it lists the catalog's steps and Epic's page on them; unknown, it offers
+ * GitHub to connect, first or again, after which the link is read anew.
+ *
+ * @param props The component's props.
+ * @returns The block.
+ */
+function EpicLink({ app, github }: EpicLinkProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const status = github.status;
+  const label = ownLicenseLabel(app);
+
+  /** Sends the person to GitHub, to connect or to connect again; the page comes back here. */
+  async function connect(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      await github.connect();
+    } catch (failure) {
+      setError(failure);
+      setBusy(false);
+    }
+  }
+
+  const connectButton = (text: string) => (
+    <button
+      type="button"
+      className="btn btn-ghost btn-sm mt-2 h-8 w-full text-xs"
+      disabled={busy}
+      onClick={() => {
+        void connect();
+      }}
+    >
+      {busy ? <span className="spinner size-3.5" aria-hidden="true" /> : <GitHubMark className="size-3.5" />}
+      {text}
+    </button>
+  );
+
+  let body;
+  if (github.availability === 'loading') {
+    body = <p className="text-xs text-faint">Checking the link to Epic…</p>;
+  } else if (!status?.configured) {
+    body = (
+      <Notice tone="warn">
+        {app.name} starts through a GitHub account linked to Epic, and this server cannot connect GitHub yet.
+      </Notice>
+    );
+  } else if (!status.connected) {
+    body = (
+      <>
+        <Notice tone="warn" title="Connect GitHub first.">
+          {app.name} runs on the Epic account your GitHub account is linked to.
+        </Notice>
+        {connectButton('Connect GitHub')}
+      </>
+    );
+  } else if (status.epic_linked === true) {
+    body = (
+      <Notice tone="info" title={`${label} is linked.`}>
+        {status.login === null ? 'Through your GitHub account.' : `Through GitHub, as ${status.login}.`}
+      </Notice>
+    );
+  } else if (status.epic_linked === false) {
+    body = (
+      <>
+        <Notice tone="warn" title={`${label} is not linked yet.`}>
+          {app.name} runs on your own Epic account, which Epic links to your GitHub account
+          {status.login === null ? '' : ` (${status.login})`}.
+        </Notice>
+        <ol className="mt-2 grid list-decimal gap-1 pl-5 text-xs leading-relaxed text-muted">
+          {(app.license?.steps ?? []).map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+        {app.license === undefined ? null : (
+          <a
+            className="link mt-2 inline-flex items-center gap-1 text-xs"
+            href={app.license.url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Epic&rsquo;s page on linking GitHub
+            <ExternalLink className="size-3" aria-hidden="true" />
+          </a>
+        )}
+        {connectButton('Reconnect GitHub')}
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <Notice tone="warn" title="Reconnect GitHub.">
+          It was connected before {app.name} needed it to read packages, which checking the link to Epic and
+          pulling the engine take.
+        </Notice>
+        {connectButton('Reconnect GitHub')}
+      </>
+    );
+  }
+  return (
+    <div className="mt-2.5" aria-live="polite">
+      {body}
+      {error === null ? null : (
+        <div className="mt-2">
+          <ErrorNotice error={error} />
+        </div>
+      )}
+    </div>
   );
 }
 

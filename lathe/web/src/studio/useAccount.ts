@@ -285,7 +285,7 @@ export function useGitHub(client: ControlPlane | null): GitHub {
   const disconnect = useCallback(async (): Promise<void> => {
     await connected(client).disconnectGitHub();
     setStatus((previous) =>
-      previous === null ? null : { ...previous, connected: false, login: null, avatar_url: null },
+      previous === null ? null : { ...previous, connected: false, login: null, avatar_url: null, epic_linked: null },
     );
   }, [client]);
 

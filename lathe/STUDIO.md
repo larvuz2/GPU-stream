@@ -52,7 +52,9 @@ FilmCraft's commands.
 An engine is a catalog app (`catalog.json`, `apps`) running as a Selkies
 session on a Modal Sandbox (`addons/modal`). Status: `available` (anyone),
 `team` (only the team's accounts, for software whose license is the user's own,
-such as Nuke), `next` (being built: PhotoCraft, Unreal Engine), `soon`.
+such as Nuke), `byol` (anyone, once they have linked their own license, which
+the app's `license` names with the steps that link it: Unreal Engine on the
+user's Epic account, `UNREAL.md`), `next` (being built: PhotoCraft), `soon`.
 
 - **FilmCraft** is built from the release the fork tracks
   (`github.com/larvuz2/filmcraft`, a fork of `storytold/filmcraft`), pinned by
@@ -77,7 +79,10 @@ holds: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`), then links a project to a
 repository, new or existing, from the Environment panel. The token stays in the
 control plane; the agent saves the project's script, library manifest, and shot
 list there, and engines that need the repository get it as a credential of their
-session.
+session. The same connection is how Unreal Engine is licensed: the app asks for
+`read:packages` beside `repo`, `epic_linked` says whether the account is linked
+to Epic, and an Unreal engine starts only while it is, pulled with that user's
+own token.
 
 ## Contract: the control plane's API
 
@@ -106,7 +111,7 @@ POST   /v1/projects/{pid}/library          {section, name, tag?, description?, m
 POST   /v1/projects/{pid}/library/{aid}/media   multipart file -> {asset}
 PATCH  /v1/projects/{pid}/library/{aid}    {section?, name?, tag?, description?, metadata?} -> {asset}
 DELETE /v1/projects/{pid}/library/{aid}    204
-GET    /v1/github                          {configured, connected, login?, avatar_url?}
+GET    /v1/github                          {configured, connected, login?, avatar_url?, epic_linked: true | false | null}
 POST   /v1/github/connect                  {return_to} -> {url}: GitHub's authorization page
 GET    /v1/github/callback                 GitHub returns here; redirects to return_to?github=connected|failed
 GET    /v1/github/repos                    {repos: [{full_name, private, html_url, updated_at}]}
@@ -119,7 +124,8 @@ DELETE /v1/projects/{pid}/github           -> {project}
 Project  {id, name, discipline, format, pinned, created_at, updated_at,
           github_repo: "owner/name" | null, library_sections: [string],
           plan: [{id, title, status: "pending" | "active" | "done" | "blocked"}]}
-Session  the existing session shape, with project_id and app
+Session  the existing session shape, with project_id and app, and streams?: [{name, url}]
+         for an engine that streams a picture beside its desktop (the Unreal Editor)
 Asset    {id, section, name, tag, description, metadata, created_at, updated_at,
           media: [{kind: "image" | "video" | "audio" | "file", url, name}], thumbnail_url}
 Event    {id, turn_id, kind, data, created_at}, kind one of

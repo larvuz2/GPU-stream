@@ -476,16 +476,25 @@
     {
       "id": "unreal",
       "name": "Unreal Engine",
-      "version": "",
-      "status": "next",
-      "tagline": "Build, light, and play real-time worlds from any laptop.",
+      "version": "5.8",
+      "status": "byol",
+      "tagline": "Real-time worlds with Blender beside it, on your own Epic account.",
       "accent": "#5b8cff",
       "disciplines": [
         "games",
         "experiences",
         "architecture"
       ],
-      "source": "https://www.unrealengine.com"
+      "source": "https://www.unrealengine.com",
+      "license": {
+        "label": "Your Epic account",
+        "url": "https://www.unrealengine.com/en-US/ue-on-github",
+        "steps": [
+          "On epicgames.com, open Account, then Apps and Accounts, and connect your GitHub account.",
+          "Accept the invitation to the EpicGames organization that GitHub emails you, within seven days.",
+          "Reconnect GitHub in the project's Environment panel."
+        ]
+      }
     },
     {
       "id": "nuke",

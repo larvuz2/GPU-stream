@@ -17,12 +17,23 @@ Each app's session image is defined once per container and reused, so no start
 waits on a definition another start already made; Modal itself caches what
 the definitions build. Nuke's is the exception: it is the image `nuke_image`
 makes from the user's own install in their workspace, defined at each start,
-since the install a user just made has to be in their next session.
+since the install a user just made has to be in their next session. Unreal
+Engine's is another: the launcher's `unreal_image` pulls Epic's image with the
+user's own registry credential, defined at each start and never kept here, so
+one user's copy is never another's image. The credential is a named Modal
+Secret per user, `lathe-ghcr-<user id>` (`REGISTRY_USERNAME`, their GitHub
+login; `REGISTRY_PASSWORD`, their token), rather than one made for each start:
+the layer that pulls the engine is identified by the Secret it pulls with, and
+a Secret of its own each start would pull about 40 GB again every time, where
+the user's named one keeps that layer cached for them. The service writes it
+before each start and when the user connects GitHub again, and deletes it when
+they disconnect (`keep_registry_credential`, `forget_registry_credential`).
 
 Modal is imported where it is used, so the service's tests can stand in for
 the launcher module and run without Modal installed. FilmCraft's command
-channel (`filmcraft_call`) is looked up on the launcher module when it is
-called, so a launcher without it still starts every other app.
+channel (`filmcraft_call`) and Unreal Engine's image (`unreal_image`) are
+looked up on the launcher module when they are needed, so a launcher without
+them still starts every other app.
 """
 
 from __future__ import annotations
@@ -31,10 +42,16 @@ import sys
 from typing import Any
 from urllib.parse import urlsplit
 
-from service import IDLE_SECONDS, LIFETIME_SECONDS, READY_SECONDS
+from service import IDLE_SECONDS, LIFETIME_SECONDS, READY_SECONDS, OwnCopy
 
 LAUNCHER_DIR = "/root/launcher"
 FILMCRAFT_SECONDS = 60
+REGISTRY_SECRET_PREFIX = "lathe-ghcr-"
+
+
+def registry_secret(user_id: str) -> str:
+    """The name of the Modal Secret that holds a user's own registry credential."""
+    return f"{REGISTRY_SECRET_PREFIX}{user_id}"
 
 
 def origin(url: str) -> str:
@@ -72,20 +89,39 @@ class ModalLauncher:
 
         return modal.Sandbox.from_id(sandbox_id)
 
-    def image(self, session: dict[str, Any]) -> Any:
-        """The session image of the session's app: this container's for most apps, the user's own for Nuke."""
+    def image(self, session: dict[str, Any], own_copy: OwnCopy | None = None) -> Any:
+        """The session image of the session's app: this container's for most apps, the user's own for Nuke and Unreal.
+
+        Raises:
+            RuntimeError: For Unreal Engine, a launcher without `unreal_image`, or a start that is not
+                of the user's own copy.
+        """
         app = session.get("app") or "blender"
         if app == "nuke":
             return self.launcher.nuke_image(f"users/{session['user_id']}")
+        if app == "unreal":
+            build = getattr(self.launcher, "unreal_image", None)
+            if build is None:
+                raise RuntimeError("This deployment's launcher cannot build Unreal Engine's image yet.")
+            if own_copy is None:
+                raise RuntimeError("Unreal Engine is pulled only with the user's own registry credential.")
+            import modal
+
+            return build(
+                registry_secret=modal.Secret.from_name(registry_secret(session["user_id"])), version=own_copy.version
+            )
         if app not in self.images:
             self.images[app] = self.launcher.session_image(app)
         return self.images[app]
 
-    def start(self, session: dict[str, Any], tier: dict[str, Any], region: str | None) -> str:
+    def start(
+        self, session: dict[str, Any], tier: dict[str, Any], region: str | None, own_copy: OwnCopy | None = None
+    ) -> str:
         """Start the session's Sandbox in its user's own directory of the workspace and wait until it streams.
 
         A Sandbox that does not come up is ended before the failure is
-        reported, so a start that fails leaves nothing running.
+        reported, so a start that fails leaves nothing running. `own_copy` is
+        the user's registry credential, for an app pulled with it.
         """
         project = session.get("project_id")
         env = {}
@@ -109,7 +145,7 @@ class ModalLauncher:
             region=region,
             workspace=f"/users/{session['user_id']}",
             tags=tags,
-            image=self.image(session),
+            image=self.image(session, own_copy),
             application=session.get("app") or "blender",
         )
         try:
@@ -118,6 +154,32 @@ class ModalLauncher:
             sandbox.terminate()
             raise
         return sandbox.object_id
+
+    def keep_registry_credential(self, user_id: str, username: str, token: str, create: bool = True) -> None:
+        """Write the user's registry login and token into their own Secret, made first where `create` says to.
+
+        Without `create`, a user with no Secret yet is left without one: connecting GitHub alone
+        keeps no token in Modal.
+        """
+        import modal
+
+        name = registry_secret(user_id)
+        values = {"REGISTRY_USERNAME": username, "REGISTRY_PASSWORD": token}
+        if create:
+            # Made where missing; one that exists keeps its values until the update below
+            modal.Secret.objects.create(name, values, allow_existing=True)
+        else:
+            try:
+                modal.Secret.from_name(name).hydrate()
+            except modal.exception.NotFoundError:
+                return
+        modal.Secret.from_name(name).update(values)
+
+    def forget_registry_credential(self, user_id: str) -> None:
+        """Delete the user's registry Secret, if they have one."""
+        import modal
+
+        modal.Secret.objects.delete(registry_secret(user_id), allow_missing=True)
 
     def state(self, sandbox_id: str) -> int | None:
         return self.sandbox(sandbox_id).poll()
