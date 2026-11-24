@@ -49,10 +49,10 @@ it is offered to the public.
 
 | Part | What it is |
 | --- | --- |
-| Identity | The user connects GitHub (Lathe's existing step, now also asking `read:packages`) and links that GitHub account to their Epic account on epicgames.com. Lathe checks the link by whether their token can see `EpicGames/UnrealEngine`, and says how to link when it cannot. |
-| Image | Per user: Epic's development image of 5.8.4 pulled with the user's token, with the Selkies session, Blender, the bridge, and a TURN relay layered on it. Built once per user and version, then cached; never shared between users. |
+| Identity | Needed for the editor only. The user connects GitHub (Lathe's existing step, now also asking `read:packages`) and links that GitHub account to their Epic account on epicgames.com. Lathe checks the link by whether their token can see `EpicGames/UnrealEngine`, and the agent says how to link when the user asks for the editor without it. |
+| Image | Without the Epic link: one shared desktop image (`session_image("unreal")`) with the GitHub client, Git LFS, Firefox, and Blender, nothing of Epic's in it. With it, per user: Epic's development image of 5.8.4 pulled with the user's token, with the same desktop, the bridge, and a TURN relay layered on it. Built once per user and version, then cached; never shared between users. |
 | Machine | L4 (24 GB, two NVENC, AV1), 8 cores, 32 GB by default; L40S (48 GB) for heavy scenes. A100 and H100 have no NVENC and are not offered. |
-| Picture | Two streams of one machine: the Selkies desktop (Blender, files, the browser for Epic and Fab sign-ins) and the editor's own stream. The studio's Screen panel switches between them. |
+| Picture | Two streams of one machine, `Desktop` (files, the GitHub client, Blender, the browser for Epic and Fab sign-ins) and `Unreal` (the editor's own stream, a placeholder page until it streams). The studio's Screen panel switches between them with a toggle (Alt+1, Alt+2), both kept loaded, and the agent switches it too (a `screen` event). |
 | Transport | The editor's stream is WebRTC. Its signalling and player page pass Modal's HTTPS proxy; its media goes through a TURN relay inside the Sandbox, reached over TCP through a raw port Modal exposes (`unencrypted_ports`), with per-session credentials. |
 | Blender and Unreal | One machine, one project folder. A Blender add-on exports the selection (glTF, or FBX for rigs) into the project's `bridge/` folder and asks the editor to import it through its Remote Control API on loopback, which runs the import in the editor's Python; the editor sends back the same way to Blender's Python spool. No network between machines is needed for the hand-off. |
 | The agent | Drives the editor through the Remote Control API and its Python now, and through the editor's MCP server on 5.9. |
@@ -65,23 +65,38 @@ repository, each developer clones it into a folder of their choosing, opens the
 own Git client under their own name. The engine does the same thing for them in
 the cloud, without changing how the team works.
 
-**Once per person.** Sign up; connect GitHub (one click); link that GitHub
-account to Epic, which most Unreal developers already have. Where the team's
-GitHub organization restricts third-party apps, which new organizations do by
-default, an owner of the organization approves Lathe once (Settings,
-Third-party access); until then the organization's repositories do not appear.
+**The first time.** Nothing is linked before the engine starts:
 
-**Once per game.** A Games project picks the repository and its branch. Lathe
-reads the `.uproject` before anything starts and shows what it found: the
-engine version the project was saved with (`EngineAssociation`), whether it has
-C++ modules or only Blueprints, its plugins, and whether the repository keeps
-its assets in Git LFS.
+1. The developer signs up and starts an Unreal engine: one click, on a tier
+   with a GPU.
+2. The agent puts its Desktop on the screen. The developer signs in to GitHub
+   in the GitHub client there and clones the game into the project's folder of
+   their workspace, Git LFS included, as on their own machine; the clone is on
+   the workspace Volume, so it is there at every later start.
+3. At the start of each turn while an Unreal engine runs, the agent is told of
+   any `.uproject` in its workspace it has not looked at yet (or the developer
+   names the path), and says what it found: the engine version it was saved
+   with (`EngineAssociation`) against the engine's, C++ modules or Blueprints
+   only, its plugins, Git LFS, and its size. The engine's card in the
+   Environment panel lists the same, each with "Open in Unreal".
+4. The developer asks to open it. The agent opens it in the editor
+   (`unreal_open`) and switches the screen to the Unreal view.
 
-**Each start.** The machine clones the repository into the user's own folder of
-the workspace Volume with their token, Git LFS included, the first time, and
-only fetches after that; the engine's derived data cache stays beside it, so
-shaders compile once per project rather than once per start. Commits carry the
-person's own GitHub name and address, as each developer's own client does.
+The Epic link is asked for at step 4 and only there: where the editor is not
+in the engine, the agent gives the one step that links it (the catalog's three
+parts), after which the next start of the engine brings the user's own copy.
+Where the team's GitHub organization restricts third-party apps, which new
+organizations do by default, that affects only what the agent reads through
+Lathe's OAuth App (`unreal_assets`, `github_read`); the clone in the Desktop is
+the developer's own sign-in. Commits carry the person's own GitHub name and
+address, made from the GitHub client as on their own machine.
+
+**A new project.** With no repository yet, the agent copies one of the
+engine's Blueprint templates into the project's folder under the name the
+developer gives, with Unreal's `.gitignore` and a `.gitattributes` that keeps
+`.uasset` and `.umap` in Git LFS, and opens it. A repository comes after,
+when they want one: created in the Environment panel and cloned in the GitHub
+client, with the project copied into the clone.
 
 **Versions.** The engine runs one current version, 5.8.4 now, which carries
 Epic's Unreal MCP server (experimental in 5.8); 5.9 becomes the default when it
@@ -160,20 +175,38 @@ against stand-ins for it.
   user's token sees `EpicGames/UnrealEngine` and the
   `ghcr.io/epicgames/unreal-engine` package (`GET /v1/github`: `epic_linked`,
   `null` without GitHub or the scope). Starting `unreal` (catalog status `byol`)
-  is refused until it is linked, with the steps that link it. Each start writes
-  the user's login and token into their own named Modal Secret,
+  asks for no link: a start reads it, and without it the engine is
+  `session_image("unreal")`, the desktop alone. A start on a linked account
+  writes the user's login and token into their own named Modal Secret,
   `lathe-ghcr-<user id>` (`REGISTRY_USERNAME`, `REGISTRY_PASSWORD`), which a
   reconnect refreshes and a disconnect deletes, and `launcher.py` passes that
   Secret to `unreal_image(registry_secret, version)` where the launcher has
   one. Named rather than made per start, so the layer that pulls the engine
-  (about 40 GB) stays cached per user.
+  (about 40 GB) stays cached per user. A running Unreal engine's listing
+  reports `streams` (`Desktop` through `session_link`, `Unreal` through
+  `unreal_view_link`), minted for that listing and never written to the log;
+  `POST /v1/sessions/{sid}/link` takes `{stream}` to mint either again.
+  `GET /v1/projects/{pid}/engines/{sid}/unreal-projects` is what the machine
+  found (`unreal_projects`), each with how this engine opens it.
+- **The agent.** `unreal_projects(engine_id)` lists the projects in an
+  engine's workspace; `unreal_open(engine_id, path)` refuses a newer project,
+  puts the clone of an older one on its own branch (`git switch -c`, nothing
+  committed or pushed), runs `selkies-modal-unreal-open`, and on success writes
+  a `screen` event that switches the studio to the Unreal view; where the
+  editor is missing it answers with the Epic steps, or with the restart a start
+  from before the link needs. `engine_show` switches the view itself. A turn
+  that starts while an Unreal engine runs asks the machine once for its
+  projects and tells the agent which it has not looked at yet. The `unreal`
+  skill holds the onboarding, step by step.
 - **The studio.** The catalog lists Unreal Engine 5.8 as `byol`, labeled "Your
-  Epic account" on the landing page. Choosing it in the Environment panel shows
-  the link: linked, not linked with the steps and Epic's page, or GitHub to
-  connect first or again; Start waits for the link. The Screen panel switches
-  an engine that reports `streams` between "Desktop" and each stream (the
-  Unreal Editor). The demo's Games project, Ember Ridge, has an Unreal engine
-  with both.
+  Epic account" on the landing page. Start in the Environment panel says what
+  the engine comes with and asks nothing of Epic. The Screen panel's header has
+  a two-option toggle, Desktop and Unreal (Alt+1, Alt+2), kept in focus mode,
+  with both pictures loaded at once so a switch is instant, and it follows the
+  agent's `screen` events. A running Unreal engine's card lists its projects
+  with "Open in Unreal", which asks the agent. The demo's Games project, Ember
+  Ridge (`/app/?demo`), shows the flow up to that question, and opening from
+  there switches the screen to the Unreal view.
 
 ## What is open
 
@@ -183,8 +216,15 @@ against stand-ins for it.
   this folder on the editor's Python path, and `DefaultRemoteControl.ini` in
   the editor's project. Whether Modal shares a layer pulled with one user's
   Secret with another user's build has to be checked there.
-- The control plane does not report a session's `streams` yet: the editor's
-  stream address comes with the transport (order of work, step 1).
+- The control plane is written against the machine side's
+  `session_image("unreal")`, `unreal_projects`, `unreal_view_link`, and
+  `selkies-modal-unreal-open` as stand-ins describe them; the report's field
+  names (`EngineAssociation` or `engine_association`, Git LFS as a flag or
+  `{used, fetched}`) and whether a path is absolute are read either way until
+  they are checked against a running session.
+- The studio's Alt+1 and Alt+2 reach the page only while it, not the stream,
+  has the keyboard: a stream in focus takes its keys, as it must for the
+  editor's own shortcuts.
 - Unverified against a running editor: the Remote Control body follows Epic's
   HTTP reference and the function's names in Epic's Python reference (the C++
   parameter names are from a third-party quote of its declaration); the two

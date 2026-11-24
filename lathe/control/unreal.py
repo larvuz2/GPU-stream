@@ -41,6 +41,16 @@ files, so what this module says of an asset is what its name says:
 A name is the team's habit, not the asset's class, so every answer says that it
 is by name, and that the editor's Asset Registry gives the exact classes once
 an Unreal engine runs on the project.
+
+Once an engine runs, the `.uproject` files the developer cloned into its
+workspace are what the machine reports (`unreal_projects` in
+`addons/modal/sandbox.py`), and `found_project` puts each in the shape the
+agent and the studio read, with how the engine opens it: the version it was
+saved with against the engine's (`version_verdict`), which is the table of
+`lathe/UNREAL.md`. A project saved with the engine's version opens as it is;
+an older one, or one of a source build whose version its file does not say,
+opens on the agent's branch, where the editor upgrades what it saves; a newer
+one does not open, since Unreal does not open a project in an older editor.
 """
 
 from __future__ import annotations
@@ -258,4 +268,98 @@ def survey(files: list[str], project: str, folder: str, kind: str | None, shown:
         "counts": {name: len(found) for name, found in assets.items()},
         "assets": listed,
         "world_partition_files": external,
+    }
+
+
+def release(version: str) -> tuple[int, ...] | None:
+    """An engine version's major and minor release (`5.8.4` is `(5, 8)`), or nothing for one that is not numbers."""
+    parts = version.strip().split(".")[:2]
+    if len(parts) < 2 or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def version_verdict(association: str, engine: str) -> tuple[str, str]:
+    """How an engine of version `engine` opens a project saved with `association`, as a word and a sentence.
+
+    The word is `same`, `older`, `newer`, `source` (a source build's registration GUID, whose
+    version the file does not say), or `unknown` (no version named).
+    """
+    if association.startswith("{"):
+        return "source", (
+            "Saved with a source build of Unreal, whose version the .uproject does not name: it opens in "
+            f"Unreal Engine {engine} on the agent's branch, where the editor upgrades what it saves."
+        )
+    saved, running = release(association), release(engine)
+    if saved is None or running is None:
+        return "unknown", f"The .uproject names no engine version: it opens in Unreal Engine {engine} on the agent's branch."
+    if saved == running:
+        return "same", f"Saved with Unreal Engine {association}, this engine's version: it opens as it is."
+    if saved < running:
+        return "older", (
+            f"Saved with Unreal Engine {association}: it opens in {engine} on the agent's branch, where the editor "
+            f"upgrades what it saves; the team's branches stay on {association}."
+        )
+    return "newer", (
+        f"Saved with Unreal Engine {association}, newer than this engine's {engine}: Unreal does not open a project "
+        "in an older editor."
+    )
+
+
+def names(items: Any) -> list[str]:
+    """The names in a list of names or of objects that name one, switched-off plugins left out.
+
+    A `.uproject` lists modules and plugins as objects (`Name`, `Enabled`); the machine's report
+    may write the same in snake case.
+    """
+    found = []
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, dict):
+            if not item.get("Enabled", item.get("enabled", True)):
+                continue
+            item = item.get("Name", item.get("name"))
+        if isinstance(item, str) and item:
+            found.append(item)
+    return found
+
+
+def lfs_state(raw: dict[str, Any]) -> bool | str | None:
+    """Whether a found project's repository keeps files in Git LFS, or the machine's word for their state.
+
+    The report says it as a flag or a word under `lfs`, or as `{used, fetched}` there or under its
+    `repository`; a repository whose LFS files are not fetched has pointers in their place, which
+    the editor cannot open.
+    """
+    repository = raw.get("repository")
+    lfs = raw.get("lfs", repository.get("lfs") if isinstance(repository, dict) else None)
+    if isinstance(lfs, dict):
+        if not lfs.get("used"):
+            return False
+        return True if lfs.get("fetched", True) else "used, but its files are not fetched yet"
+    return lfs if isinstance(lfs, (bool, str)) else None
+
+
+def found_project(raw: dict[str, Any], engine: str) -> dict[str, Any]:
+    """A `.uproject` the machine found in its workspace, as the agent and the studio read it.
+
+    `raw` is one entry of the machine's report (`unreal_projects` in `addons/modal/sandbox.py`):
+    `path`, `name`, the engine it was saved with (`EngineAssociation`, as the file spells it, or
+    `engine_association`), its C++ `modules`, its `plugins`, Git LFS (`lfs_state`), and `size` in
+    bytes.
+    """
+    path = str(raw.get("path") or "")
+    association = raw.get("EngineAssociation", raw.get("engine_association"))
+    association = association if isinstance(association, str) else ""
+    verdict, opens = version_verdict(association, engine)
+    size = raw.get("size", raw.get("size_bytes"))
+    return {
+        "path": path,
+        "name": str(raw.get("name") or PurePosixPath(path).stem),
+        "engine_association": association,
+        "version": verdict,
+        "opens": opens,
+        "cpp_modules": names(raw.get("modules", raw.get("cpp_modules"))),
+        "plugins": names(raw.get("plugins")),
+        "lfs": lfs_state(raw),
+        "size_bytes": size if isinstance(size, int) and not isinstance(size, bool) else None,
     }

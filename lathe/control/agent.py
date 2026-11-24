@@ -9,8 +9,11 @@ calls, the tools run, their results go back, and the loop ends when the model
 answers without a call, asks the person something (`ask_user`), is stopped, or
 reaches `MAX_STEPS`. As it goes it appends events to the project's log in the
 order things happen (`text`, `tool_start`, `tool_end`, `ask`, `plan`,
-`library`, `engine`, `error`), and the database ends the turn with `turn_end`
-(`lathe_end_turn`), so the page that polls the log sees the whole turn.
+`library`, `engine`, `screen`, `error`), and the database ends the turn with
+`turn_end` (`lathe_end_turn`), so the page that polls the log sees the whole
+turn. A `screen` event puts an engine, and which of its pictures, on the
+person's Screen panel: the agent switches the view to what it wants them to
+look at, as `unreal_open` switches to the Unreal view once the editor opens.
 
 The conversation is append-only, because the model's reasoning depends on it.
 The model thinks before it answers, and each thinking block is bound to the
@@ -23,7 +26,11 @@ reasoning, so:
   skills of `lathe/skills` that fit the discipline), and the tools are a fixed
   list. What changes between turns (the name, the plan, the library, the
   engines, GitHub) is a `system` message appended at the start of each turn,
-  after the person's message.
+  after the person's message. Where an Unreal engine runs, it also lists the
+  Unreal projects in that engine's workspace and which of them the agent has
+  not yet looked at with `unreal_projects` (`Agent.unreal_state`), so a project
+  the person just cloned is brought up without being asked; the machine is
+  asked only when such an engine runs.
 - A message is never rewritten once the model has answered past it. What a
   turn leaves unanswered is completed by the next: a call the turn ended
   before running is answered as not run, and `ask_user`'s call is answered
@@ -103,11 +110,14 @@ from generation import (
 )
 from github_client import GitHubError
 from service import (
+    DESKTOP,
     LIBRARY_BUCKET,
     OPEN,
     PLAN_STATUSES,
     SIGNED_URL_SECONDS,
     STARTABLE,
+    STREAMS,
+    UNREAL_VIEW,
     Catalog,
     Refused,
     Sessions,
@@ -339,7 +349,8 @@ def system_prompt(catalog: Catalog, project: dict[str, Any], skills: list[Skill]
         status = {
             "available": "can be started",
             "team": "can be started by the team's accounts only, with the user's own license",
-            "byol": "can be started once the person has linked their own license for it; starting it says how if not",
+            "byol": "can be started by anyone; the part on the person's own license comes with it once they have "
+            "linked that license, and using that part says how if not",
         }.get(app["status"], "not available yet")
         engines.append(f"- `{app['id']}`, {app['name']}: {app['tagline']} ({status})")
     other = [
@@ -387,9 +398,10 @@ The machines an engine runs on (`tier`):
   it belongs to (`save_to`). The person sees each result in the conversation; ask before you build on one.
 - An engine runs on a cloud machine and costs the person credits every minute it runs. Start one when the work
   needs it and stop it when that work is done; do not leave one running at the end of a turn unless the person is
-  using it. The person watches a running engine in the Screen panel. Every engine of this project opens in the
-  project's folder, `{folder}`, which they share; `engine_import` copies library entries into its `library`
-  folder.
+  using it. The person watches a running engine in the Screen panel, and `engine_show` puts the engine and view
+  you want them to look at there (an Unreal engine has two: Desktop and Unreal). Every engine of this project
+  opens in the project's folder, `{folder}`, which they share; `engine_import` copies library entries into its
+  `library` folder.
 - `github_save` keeps the project's documents in the GitHub repository the person linked, on a branch of your own
   (`lathe/...`), never on its default branch or a branch someone else made; give the person the branch and the
   compare link it returns, where they open a pull request. `github_read` reads the default branch, or your branch
@@ -564,6 +576,17 @@ TOOLS = [
         ["engine_id", "command"],
     ),
     tool(
+        "engine_show",
+        "Put a running engine on the person's Screen panel, in one of the pictures it streams: Desktop (its desktop: "
+        "files, the GitHub client, Firefox, Blender) or, for an Unreal engine, Unreal (the editor's own stream). Show "
+        "what you want the person to look at or work in, such as Desktop to sign in to GitHub and clone their game.",
+        {
+            "engine_id": ENGINE_ID,
+            "stream": {"type": "string", "enum": [DESKTOP, UNREAL_VIEW], "description": "Left out: Desktop."},
+        },
+        ["engine_id"],
+    ),
+    tool(
         "engine_import",
         "Copy library entries' media into a running engine, under the project folder's library/<tag>/ folders.",
         {"engine_id": ENGINE_ID, "tags": STRINGS},
@@ -617,6 +640,24 @@ TOOLS = [
             },
         },
         [],
+    ),
+    tool(
+        "unreal_projects",
+        "List the Unreal projects (.uproject files) in a running Unreal engine's workspace, such as a game the person "
+        "cloned there: each one's path, name, the engine version it was saved with (EngineAssociation) and how this "
+        "engine opens it, its C++ modules, its plugins, whether its repository uses Git LFS, and its size.",
+        {"engine_id": ENGINE_ID},
+        ["engine_id"],
+    ),
+    tool(
+        "unreal_open",
+        "Open an Unreal project of a running Unreal engine's workspace in the Unreal Editor, which streams to the "
+        "engine's Unreal view, and switch the person's screen to it. A project saved with an older engine is first "
+        "put on the agent's own branch in its clone, so the editor's upgrade stays off the team's branches; a newer "
+        "one is refused. Where the editor cannot open (no Epic link, or an engine started before it), says why and "
+        "what the person does.",
+        {"engine_id": ENGINE_ID, "path": {"type": "string", "description": "The .uproject's path, from unreal_projects."}},
+        ["engine_id", "path"],
     ),
 ]
 TOOL_NAMES = [definition["name"] for definition in TOOLS]
@@ -705,6 +746,31 @@ def agent_branch(project: dict[str, Any]) -> str:
     letters = unicodedata.normalize("NFKD", project["name"]).encode("ascii", "ignore").decode().lower()
     slug = re.sub(r"[^a-z0-9]+", "-", letters).strip("-")[:40].rstrip("-") or "project"
     return f"{BRANCH_PREFIX}{slug}-{project['id'][:8]}"
+
+
+def reported_unreal(history: list[dict[str, Any]]) -> set[str]:
+    """The `.uproject` paths that the conversation's `unreal_projects` calls returned to the model."""
+    calls = {
+        block.get("id")
+        for message in history
+        if message["role"] == "assistant" and isinstance(message["content"], list)
+        for block in message["content"]
+        if block.get("type") == "tool_use" and block.get("name") == "unreal_projects"
+    }
+    paths: set[str] = set()
+    for message in history:
+        if message["role"] != "user" or not isinstance(message["content"], list):
+            continue
+        for block in message["content"]:
+            if block.get("type") != "tool_result" or block.get("tool_use_id") not in calls or block.get("is_error"):
+                continue
+            try:
+                answer = json.loads(block["content"])
+            except (TypeError, ValueError):
+                continue
+            projects = answer.get("projects") if isinstance(answer, dict) else None
+            paths.update(project["path"] for project in projects or [] if isinstance(project, dict) and "path" in project)
+    return paths
 
 
 @dataclass
@@ -924,10 +990,10 @@ class Agent:
                 self.append(turn, history, "user", results)
         else:
             self.append(turn, history, "user", text)
-        self.append(turn, history, "system", self.state(turn))
+        self.append(turn, history, "system", self.state(turn, history))
         return history
 
-    def state(self, turn: Turn) -> str:
+    def state(self, turn: Turn, history: list[dict[str, Any]]) -> str:
         """The project as it is now, for the system message that starts a turn."""
         project = turn.project
         github = self.sessions.github_status(turn.user)
@@ -943,11 +1009,11 @@ class Agent:
             kinds = [item["kind"] for item in row["media"]]
             files = ", ".join(f"{kinds.count(kind)} {kind}" for kind in dict.fromkeys(kinds)) or "no media"
             entries.append(f"- {row['tag'] or '(untagged)'}: {row['name']} ({row['section']}; {files})")
+        open_engines = [engine for engine in self.sessions.engines(turn.user, project["id"]) if engine["status"] in OPEN]
         engines = [
-            f"- {engine['id']}: {self.sessions.catalog.apps.get(engine['app'], {}).get('name', engine['app'])}, "
-            f"{engine['status']}, tier {engine['tier']}"
-            for engine in self.sessions.engines(turn.user, project["id"])
-            if engine["status"] in OPEN
+            f"- {engine['id']}: {self.app_name(engine['app'])}, {engine['status']}, tier {engine['tier']}"
+            + (f", streaming {' and '.join(STREAMS[engine['app']])}" if engine["app"] in STREAMS else "")
+            for engine in open_engines
         ]
         credits = self.sessions.me(turn.user)["credits"]
         return "\n".join(
@@ -964,8 +1030,42 @@ class Agent:
                 *(entries or ["- (none)"]),
                 "Open engines:",
                 *(engines or ["- (none)"]),
+                *self.unreal_state(turn, open_engines, history),
             ]
         )
+
+    def unreal_state(self, turn: Turn, engines: list[dict[str, Any]], history: list[dict[str, Any]]) -> list[str]:
+        """What a turn's start says of the Unreal projects in each running Unreal engine's workspace.
+
+        The machine is asked only for a running Unreal engine, once per turn. A project no earlier
+        `unreal_projects` call of the conversation returned is marked as not reported yet, with
+        what to do about it: what the person cloned is what they want to talk about next.
+        """
+        lines = []
+        reported = reported_unreal(history)
+        for engine in engines:
+            if engine["app"] != "unreal" or engine["status"] != "running":
+                continue
+            try:
+                found = self.sessions.unreal_projects(turn.user, turn.project_id, engine["id"])
+            except Refused as refused:
+                lines.append(f"Unreal projects in engine {engine['id']}: not known right now ({refused.message})")
+                continue
+            if not found:
+                lines.append(f"Unreal projects in engine {engine['id']}'s workspace: none yet.")
+                continue
+            fresh = [project["path"] for project in found if project["path"] not in reported]
+            lines.append(f"Unreal projects in engine {engine['id']}'s workspace:")
+            lines.extend(
+                f"- {project['path']} ({project['name']})" + (", not reported yet" if project["path"] in fresh else "")
+                for project in found
+            )
+            if fresh:
+                lines.append(
+                    "Before anything else, call unreal_projects and tell the person what you found in the ones not "
+                    "reported yet (engine version, C++ or Blueprints, plugins, Git LFS), and offer to open it in Unreal."
+                )
+        return lines
 
     def run_tools(
         self, turn: Turn, calls: list[dict[str, Any]], cut_off: bool
@@ -1048,6 +1148,7 @@ class Agent:
             "engine_stop": "Stopping an engine",
             "engine_screenshot": "Looking at the screen",
             "engine_exec": "Running a command",
+            "engine_show": f"Showing {arguments.get('stream') or DESKTOP} on the screen",
             "engine_import": f"Importing {', '.join(arguments.get('tags', []))}",
             "filmcraft": f"FilmCraft: {arguments.get('method', '')}",
             "github_save": f"Saving {arguments.get('path', '')} to the agent's branch on GitHub",
@@ -1055,6 +1156,8 @@ class Agent:
             f"{'the agent' if arguments.get('ref') == 'agent' else 'the default'} branch on GitHub",
             "unreal_assets": f"Listing the Unreal project's {arguments.get('kind') or 'assets'}"
             + (f" in {arguments['path']}" if arguments.get("path") else ""),
+            "unreal_projects": "Looking for Unreal projects in the engine",
+            "unreal_open": f"Opening {PurePosixPath(arguments.get('path', '')).stem or 'the project'} in Unreal",
         }.get(name, name)
 
     # Plan and library
@@ -1361,6 +1464,19 @@ class Agent:
         shown = output if len(output) <= OUTPUT_LIMIT else f"[the first {len(output) - OUTPUT_LIMIT} characters left out]\n{output[-OUTPUT_LIMIT:]}"
         return Result(f"exit status {status}\n{shown}", f"Exit status {status}", ok=status == 0)
 
+    def tool_engine_show(self, turn: Turn, engine_id: str, stream: str = DESKTOP) -> Result:
+        row, _ = self.engine_sandbox(turn, engine_id)
+        name = self.app_name(row["app"])
+        if stream not in (DESKTOP, *STREAMS.get(row["app"], ())):
+            raise Refused(400, f"{name} streams its desktop only.")
+        self.show_on_screen(turn, engine_id, stream)
+        return Result(f"The person's Screen panel shows {name}'s {stream} view now.", f"{stream} on the screen")
+
+    @staticmethod
+    def show_on_screen(turn: Turn, engine_id: str, stream: str) -> None:
+        """Have the studio put an engine, in one of its pictures, on the person's screen."""
+        turn.event("screen", {"engine_id": engine_id, "stream": stream})
+
     def tool_engine_import(self, turn: Turn, engine_id: str, tags: list[str]) -> Result:
         _, sandbox = self.engine_sandbox(turn, engine_id)
         rows = self.sessions.assets_by_tags(turn.project, tags)
@@ -1537,3 +1653,102 @@ class Agent:
             counts = ", ".join(f"{count} {name}" for name, count in found["counts"].items() if count)
             summary = f"{sum(found['counts'].values())} assets: {counts}"
         return Result(json.dumps(answer), (summary + ("" if whole else ", in part of the repository"))[:200])
+
+    def tool_unreal_projects(self, turn: Turn, engine_id: str) -> Result:
+        found = self.sessions.unreal_projects(turn.user, turn.project_id, engine_id)
+        version = self.sessions.catalog.apps["unreal"]["version"]
+        notes = [
+            "Tell the person what you found in each: the version against this engine's and what `opens` says, C++ "
+            "modules (compiled for Linux before the editor opens, the first build the longest) or Blueprints only, "
+            "the plugins, and Git LFS. Then offer to open it with unreal_open.",
+        ]
+        if not found:
+            notes = [
+                "No .uproject in the workspace yet. The person clones their game in the Desktop view (sign in to "
+                "GitHub in the GitHub client, clone into the project's folder), or starts a new one from a template.",
+            ]
+        answer = {"engine_id": engine_id, "engine_version": version, "projects": found, "notes": notes}
+        summary = ", ".join(
+            f"{project['name']} ({project['engine_association'] or 'no version'}"
+            f"{', C++' if project['cpp_modules'] else ''})"
+            for project in found
+        )
+        return Result(json.dumps(answer), (summary or "No Unreal project yet")[:200])
+
+    def tool_unreal_open(self, turn: Turn, engine_id: str, path: str) -> Result:
+        row = self.sessions.running_unreal(turn.user, turn.project_id, engine_id)
+        where = path.strip()
+        if not where.lower().endswith(".uproject") or any(character in where for character in "\0\r\n"):
+            raise Refused(400, "Name the project's .uproject file, as unreal_projects gives it.")
+        found = next(
+            (project for project in self.sessions.unreal_projects(turn.user, turn.project_id, engine_id) if project["path"] == where),
+            None,
+        )
+        if found is None:
+            raise Refused(404, f"The engine's workspace has no {where}; unreal_projects lists the projects it has.")
+        if found["version"] == "newer":
+            raise Refused(409, found["opens"])
+        launcher = self.sessions.launcher
+        branch = None
+        if found["version"] != "same":
+            branch = self.agent_branch_in_clone(turn, row["sandbox_id"], where)
+        status, output = launcher.exec(row["sandbox_id"], f"selkies-modal-unreal-open {shlex.quote(where)}", EXEC_SECONDS)
+        said = output.strip()[-1500:] or f"exit status {status}"
+        if status != 0:
+            licensed, advice = self.sessions.editor_license(turn.user.id)
+            if not licensed:
+                return Result(
+                    f"The editor did not open: {said}\n\n{advice} Then stop this Unreal engine and start it again: a "
+                    "start on a linked account brings the person's own copy of the editor. Tell the person this one "
+                    "step plainly; the desktop and everything in the workspace stay as they are.",
+                    "The Unreal Editor needs the Epic link",
+                    ok=False,
+                )
+            return Result(
+                f"The editor did not open: {said}\n\nIf it says the editor is not installed, this engine started "
+                "before the person's Epic link was in place: stop it and start Unreal again, which brings their own "
+                "copy of the editor.",
+                "The Unreal Editor did not open",
+                ok=False,
+            )
+        self.show_on_screen(turn, engine_id, UNREAL_VIEW)
+        notes = [found["opens"], "The person's screen is on the Unreal view, which shows a placeholder until the editor streams."]
+        if branch:
+            notes.append(f"The clone is on {branch}, the agent's branch, so what the editor upgrades stays off the team's branches.")
+        if found["cpp_modules"]:
+            notes.append(
+                "Its C++ modules compile for Linux before the editor opens, the first build the longest; where code "
+                "written for an older engine fails, show the errors and fix them on the agent's branch."
+            )
+        answer = {"opened": where, "branch": branch, "screen": UNREAL_VIEW, "output": said, "notes": notes}
+        return Result(json.dumps(answer), f"{found['name']} is opening in Unreal")
+
+    def agent_branch_in_clone(self, turn: Turn, sandbox: str, uproject: str) -> str | None:
+        """Put the clone a `.uproject` is in on the agent's branch, made from where it stands; returns the branch.
+
+        Nothing is committed or pushed: the branch is the clone's, so what the editor upgrades when
+        it saves stays off the branch the developer cloned. A project outside any clone (a new one
+        from a template) has no branch, and nothing.
+
+        Raises:
+            Refused: 409 where the clone cannot switch, such as to an existing branch it has changes against.
+        """
+        branch = agent_branch(turn.project)
+        # The machine may name a project by its path in the workspace rather than from the root
+        folder = shlex.quote(str((PurePosixPath(WORKSPACE) / uproject).parent))
+        quoted = shlex.quote(branch)
+        script = "\n".join(
+            [
+                "set -e",
+                f"cd {folder}",
+                "git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0",
+                f'if [ "$(git branch --show-current)" != {quoted} ]; then',
+                f"  git switch -q {quoted} 2>/dev/null || git switch -q -c {quoted}",
+                "fi",
+                'echo "branch=$(git branch --show-current)"',
+            ]
+        )
+        status, output = self.sessions.launcher.exec(sandbox, script, EXEC_SECONDS)
+        if status != 0:
+            raise Refused(409, f"The clone could not be put on {branch}, so nothing was opened: {output.strip()[-500:]}")
+        return next((line[len("branch=") :] for line in output.splitlines() if line.startswith("branch=")), None)

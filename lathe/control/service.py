@@ -36,17 +36,28 @@ project's one turn in the database before a job runs it (`send_message`,
 `agent.py`). The user's GitHub account is connected through an OAuth App whose
 token is kept sealed (`github_client.py`).
 
-An app of status `byol` runs on a license the user brings, checked before it
-starts. Unreal Engine's is the user's Epic account, which Epic links to a
-GitHub account: the session starts only while the user's connected GitHub
-account shows that link (`epic_link`), and its image is pulled from Epic's
-registry with that user's own GitHub login and token, since Epic's license
-lets each user have their copy but not Lathe hand one copy around
-(`lathe/UNREAL.md`). The launcher keeps that credential as the user's own
-registry credential (`Launcher.keep_registry_credential`), written again at
-every start of the app and when the user connects GitHub again, and forgotten
-when they disconnect it; it is never kept beside a session or used for another
-user's image.
+An app of status `byol` has a part that runs on a license the user brings.
+Unreal Engine's is the editor, on the user's Epic account, which Epic links to
+a GitHub account. The engine starts for anyone on a tier with a GPU, so the
+desktop it streams (a GitHub client, Git LFS, Firefox, and Blender) is there
+before anyone mentions Epic; what the start reads is whether the user's
+connected GitHub account shows the link (`epic_link`). With it, the image is
+the user's own copy of the editor, pulled from Epic's registry with that user's
+own GitHub login and token, since Epic's license lets each user have their copy
+but not Lathe hand one copy around (`lathe/UNREAL.md`); without it, the image
+is the same desktop without the editor, and opening a project says what
+links it (`editor_license`). The launcher keeps that credential as the user's
+own registry credential (`Launcher.keep_registry_credential`), written again at
+every start of the app on a linked account and when the user connects GitHub
+again, and forgotten when they disconnect it; it is never kept beside a session
+or used for another user's image.
+
+An Unreal engine streams two pictures of one machine: its desktop, and the
+Unreal view, where the editor streams itself once it is open (a placeholder
+page until then). The engines a page lists report both as `streams`, each a
+link minted for that listing as `link` mints one, and the link route mints
+either again (`stream_link`). Links carry the session's credentials, so they
+go to the page that asked and are never written to the event log.
 """
 
 from __future__ import annotations
@@ -67,6 +78,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 import httpx
 
 from github_client import GitHub, GitHubError, read_state, reads_packages, seal, sign_state, unseal
+import unreal
 
 IDLE_SECONDS = 600
 LIFETIME_SECONDS = 8 * 3600
@@ -74,8 +86,13 @@ READY_SECONDS = 120
 # A session still `starting` after this long has lost its job
 START_LIMIT_SECONDS = 300
 OPEN = ("queued", "starting", "running")
-# The catalog statuses an app can be started under: anyone's, the team's, or on the user's own license
+# The catalog statuses an app can be started under: anyone's, the team's, or with a part on the user's own license
 STARTABLE = ("available", "team", "byol")
+# What a session's link opens, and the name of each picture an engine streams
+DESKTOP = "Desktop"
+UNREAL_VIEW = "Unreal"
+# The pictures an app's engines stream, by app: an app not named here streams its desktop alone
+STREAMS: dict[str, tuple[str, ...]] = {"unreal": (DESKTOP, UNREAL_VIEW)}
 SESSION_FIELDS = (
     "id",
     "project_id",
@@ -371,8 +388,9 @@ class Launcher(Protocol):
     ) -> str:
         """Start the session's Sandbox, wait until it streams, and return the Sandbox's ID.
 
-        `own_copy` is given for an app the user brings the license of, whose image is pulled with
-        the registry credential kept for the session's user.
+        `own_copy` is given for an app whose licensed part the user has linked, whose image is then
+        pulled with the registry credential kept for the session's user; without it, such an app
+        starts without that part.
         """
 
     def keep_registry_credential(self, user_id: str, username: str, token: str, create: bool = True) -> None:
@@ -389,6 +407,12 @@ class Launcher(Protocol):
 
     def link(self, sandbox_id: str) -> str:
         """A fresh link that opens the session."""
+
+    def unreal_link(self, sandbox_id: str) -> str:
+        """A fresh link that opens an Unreal engine's Unreal view, where the editor streams once it is open."""
+
+    def unreal_projects(self, sandbox_id: str) -> list[dict[str, Any]]:
+        """The `.uproject` files in an Unreal engine's workspace, as the machine reports them (`unreal.found_project`)."""
 
     def stop(self, sandbox_id: str) -> None:
         """End the session, keeping the scene Blender has open."""
@@ -595,18 +619,18 @@ class Sessions:
         since its license is the user's own (Nuke's is per person), and Nuke
         has as many seats open at once as `LATHE_NUKE_SEATS` says, counted by
         the database with the capacity (`lathe_request_session`). An app of
-        status `byol` starts for a user whose own license for it is linked
-        (`require_own_license`).
+        status `byol` starts for anyone, its licensed part coming with it where
+        the user has linked that license (`run_start`); the one such app is
+        Unreal Engine, since its license is the only one this service checks.
 
         Raises:
             Refused: 400 for an app, tier, or region that is not on offer, or a tier without the GPU
                 the app needs (`requires_gpu`: Unreal's editor renders only on one), 402 without the credits
-                for a first minute, 403 for a team app outside the team or an own license that is
-                not linked, 409 at the user's session limit, with every seat of the app taken, for a
-                tier that is switched off, or while the link cannot be checked.
+                for a first minute, 403 for a team app outside the team, 409 at the user's session limit,
+                with every seat of the app taken, or for a tier that is switched off.
         """
         offered = self.catalog.apps.get(app, {})
-        if offered.get("status") not in STARTABLE:
+        if offered.get("status") not in STARTABLE or (offered["status"] == "byol" and app != "unreal"):
             raise Refused(400, "That app is not available yet.")
         if tier not in self.catalog.tiers or region not in self.catalog.regions:
             raise Refused(400, "Unknown tier or region.")
@@ -614,8 +638,6 @@ class Sessions:
             raise Refused(409, "That tier is not switched on yet. Pick another one.")
         if offered.get("requires_gpu") and not self.catalog.tiers[tier]["gpu"]:
             raise Refused(400, f"{offered['name']} needs a GPU. Pick a tier with one.")
-        if offered["status"] == "byol":
-            self.require_own_license(user.id, offered)
         profile = self.me(user)
         if offered["status"] == "team" and (profile["email"] or user.email).lower() not in self.config.team_emails:
             raise Refused(403, f"{offered['name']} is open to the team's accounts only.")
@@ -634,16 +656,40 @@ class Sessions:
             self.jobs.start(row["id"])
         return self.public(row)
 
-    def link(self, user: User, session_id: str) -> str:
-        """A fresh link to the user's running session.
+    def link(self, user: User, session_id: str, stream: str | None = None) -> str:
+        """A fresh link to the user's running session: its desktop, or the picture `stream` names.
 
         Raises:
-            Refused: 409 while the session is not running.
+            Refused: 409 while the session is not running, 404 for a stream the session does not have.
         """
         row = self.owned(user, session_id)
         if row["status"] != "running":
             raise Refused(409, "This session is not running.")
+        if stream not in (None, DESKTOP, *STREAMS.get(row["app"], ())):
+            raise Refused(404, f"This engine streams no picture named {stream!r}.")
+        return self.stream_link(row, stream or DESKTOP)
+
+    def stream_link(self, row: dict[str, Any], stream: str) -> str:
+        """A fresh link to one picture of a running session, by its name in `STREAMS`."""
+        if stream == UNREAL_VIEW:
+            return self.launcher.unreal_link(row["sandbox_id"])
         return self.launcher.link(row["sandbox_id"])
+
+    def streams(self, row: dict[str, Any]) -> list[dict[str, str]] | None:
+        """Fresh links to each picture a running engine streams, for an app that streams more than its desktop.
+
+        Nothing for any other engine, and for one whose links cannot be minted right now (a
+        Sandbox that just ended, a launcher without the Unreal view), which the next listing
+        tries again; the page then opens the desktop through `link`, which says what failed.
+        """
+        names = STREAMS.get(row["app"])
+        if not names or row["status"] != "running":
+            return None
+        try:
+            return [{"name": name, "url": self.stream_link(row, name)} for name in names]
+        except (Exception, SystemExit):
+            # The launcher module reports a session it cannot read with SystemExit, as its command line does
+            return None
 
     def stop(self, user: User, session_id: str) -> dict[str, Any]:
         """Stop the user's session: at once where it has no Sandbox yet, through a job where it has."""
@@ -860,13 +906,25 @@ class Sessions:
 
     # Engines: a project's sessions
 
-    def engines(self, user: User, project_id: str) -> list[dict[str, Any]]:
-        """The project's open engines, then its ten most recent that are over."""
+    def engines(self, user: User, project_id: str, links: bool = False) -> list[dict[str, Any]]:
+        """The project's open engines, then its ten most recent that are over.
+
+        With `links`, a running engine that streams more than its desktop reports each picture
+        with a fresh link (`streams`): what the page that lists the engines opens them with. Minting
+        one counts as use of the session, so nothing else asks for them.
+        """
         row = self.owned_project(user, project_id)
         scope = {"user_id": f"eq.{user.id}", "project_id": f"eq.{row['id']}", "order": "created_at.desc"}
         active = self.store.rows("sessions", **scope, status=f"in.({','.join(OPEN)})")
         over = self.store.rows("sessions", **scope, status="in.(ended,failed)", limit="10")
-        return [self.public(session) for session in active + over]
+        listed = []
+        for session in active + over:
+            shown = self.public(session)
+            streams = self.streams(session) if links else None
+            if streams:
+                shown["streams"] = streams
+            listed.append(shown)
+        return listed
 
     def start_engine(self, user: User, project_id: str, app: str, tier: str, region: str) -> dict[str, Any]:
         """Start an engine for the user's project: a session that opens in the project's folder (`start`)."""
@@ -883,6 +941,42 @@ class Sessions:
         if row.get("project_id") != project_id:
             raise Refused(404, "No such engine in this project.")
         return row
+
+    def running_unreal(self, user: User, project_id: str, session_id: str) -> dict[str, Any]:
+        """One of the project's engines that runs Unreal Engine.
+
+        Raises:
+            Refused: 404 for a session that is not this project's, 409 for one that is not a running
+                Unreal engine, saying how to start one.
+        """
+        try:
+            row = self.project_engine(user, project_id, session_id)
+        except Refused as refused:
+            raise Refused(404, f"No such engine in this project. {self.start_unreal_hint()}") from refused
+        if row["app"] != "unreal" or row["status"] != "running":
+            what = "is not Unreal Engine" if row["app"] != "unreal" else f"is {row['status']}, not running"
+            raise Refused(409, f"That engine {what}. {self.start_unreal_hint()}")
+        return row
+
+    def start_unreal_hint(self) -> str:
+        """How an Unreal engine is started, for a refusal that needs one."""
+        gpus = [tier["id"] for tier in self.catalog.data["tiers"] if tier["gpu"] and tier["id"] in self.config.tiers]
+        tiers = f" ({', '.join(gpus)})" if gpus else ""
+        return f"Start Unreal Engine on a tier with a GPU{tiers} first."
+
+    def unreal_projects(self, user: User, project_id: str, session_id: str) -> list[dict[str, Any]]:
+        """The Unreal projects in a running Unreal engine's workspace, each with how the engine opens it.
+
+        Raises:
+            Refused: as `running_unreal` does, and 502 where the machine could not be read.
+        """
+        row = self.running_unreal(user, project_id, session_id)
+        version = self.catalog.apps["unreal"]["version"]
+        try:
+            found = self.launcher.unreal_projects(row["sandbox_id"])
+        except (Exception, SystemExit) as error:
+            raise Refused(502, f"The engine could not list its projects: {error}") from error
+        return [unreal.found_project(raw, version) for raw in found if isinstance(raw, dict)]
 
     # The library
 
@@ -1213,10 +1307,16 @@ class Sessions:
         """
         connection = self.github_connection(user_id) if self.config.github else None
         if connection is None:
-            return None, "Connect GitHub first: Unreal Engine runs on the Epic account your GitHub account is linked to."
+            return None, (
+                "Connect GitHub first, in the project's Environment panel: the Unreal Editor comes with the Epic "
+                "account your GitHub account is linked to."
+            )
         token = unseal(self.config.secret_key, connection["token_encrypted"])
         if token is None or not reads_packages(connection.get("scope") or ""):
-            return None, "Connect GitHub again, so Lathe can check your Epic link and pull the engine with your account."
+            return None, (
+                "Connect GitHub again, in the project's Environment panel, so Lathe can check your Epic link and pull "
+                "the editor with your account."
+            )
         try:
             return self.github.epic_access(token), ""
         except GitHubError as error:
@@ -1226,40 +1326,38 @@ class Sessions:
         except httpx.HTTPError:
             return None, "GitHub did not answer Lathe's check of your Epic link. Try again in a moment."
 
-    def require_own_license(self, user_id: str, app: dict[str, Any]) -> None:
-        """Refuse an app of status `byol` until the user's own license for it is linked.
+    def editor_license(self, user_id: str) -> tuple[bool, str]:
+        """Whether the user's own copy of the Unreal Editor can be pulled for them, and what to do where it cannot.
 
-        The one such license checked is Unreal Engine's Epic account; any other app of the status
-        is refused, since nothing here can check its license.
-
-        Raises:
-            Refused: 403 with the steps that link it, 409 while the link cannot be checked, 400 for an
-                app whose license this service cannot check.
+        The answer is `epic_link`'s; where the account is not linked, it is the catalog's steps
+        that link it, so the agent says the one thing the person does, at the moment they ask for
+        the editor.
         """
-        if app["id"] != "unreal":
-            raise Refused(400, "That app is not available yet.")
         linked, reason = self.epic_link(user_id)
+        if linked:
+            return True, ""
         if linked is None:
-            raise Refused(409, reason)
-        if not linked:
-            steps = " ".join(f"{number}. {step}" for number, step in enumerate(app["license"]["steps"], 1))
-            raise Refused(
-                403, f"{app['name']} runs on your own Epic account, and your GitHub account is not linked to one. {steps}"
-            )
+            return False, reason
+        app = self.catalog.apps["unreal"]
+        steps = " ".join(f"{number}. {step}" for number, step in enumerate(app["license"]["steps"], 1))
+        return False, (
+            f"The Unreal Editor runs on your own Epic account, and your GitHub account is not linked to one yet. {steps}"
+        )
 
-    def own_copy(self, session: dict[str, Any]) -> OwnCopy:
-        """Have the launcher keep the user's GitHub login and token for a start of their own copy, and describe it.
+    def own_copy(self, session: dict[str, Any]) -> OwnCopy | None:
+        """For a start of an app with a part on the user's own license, that part where they have linked it.
 
-        Written at the start itself, so a session that waited in the queue starts with the
-        connection the user has then.
-
-        Raises:
-            Refused: 409 for a user whose GitHub connection is gone or no longer opens.
+        Where the link shows, the launcher keeps the user's GitHub login and token, which their
+        copy is pulled with, and the copy is described; otherwise the app starts without it. Read
+        at the start itself, so a session that waited in the queue starts with the connection the
+        user has then, and a GitHub that does not answer starts the desktop rather than nothing.
         """
+        if self.catalog.apps.get(session["app"], {}).get("status") != "byol" or not self.epic_link(session["user_id"])[0]:
+            return None
         connection = self.github_connection(session["user_id"])
         token = unseal(self.config.secret_key, connection["token_encrypted"]) if connection else None
         if connection is None or token is None:
-            raise Refused(409, "Connect GitHub again: the engine is pulled with your own GitHub account.")
+            return None
         self.launcher.keep_registry_credential(session["user_id"], connection["login"], token)
         return OwnCopy(self.catalog.apps[session["app"]]["version"])
 
@@ -1430,10 +1528,7 @@ class Sessions:
         tier = self.catalog.tiers[session["tier"]]
         region = session["region"] if self.config.pin_regions and session["region"] != "auto" else None
         try:
-            if self.catalog.apps.get(session["app"], {}).get("status") == "byol":
-                sandbox_id = self.launcher.start(session, tier, region, own_copy=self.own_copy(session))
-            else:
-                sandbox_id = self.launcher.start(session, tier, region)
+            sandbox_id = self.launcher.start(session, tier, region, own_copy=self.own_copy(session))
         except Exception as error:
             self.store.rpc("lathe_end_session", p_session=session_id, p_reason=f"start failed: {error}"[:300], p_failed=True)
             return

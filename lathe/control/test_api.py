@@ -14,9 +14,12 @@ tool returns and refuses, that one user's sessions, projects, libraries, and
 engines are invisible to another, that the agent's conversation only ever
 grows, that GitHub's callback takes nothing it did not sign, that the agent
 writes to no branch of a repository but its own, that it reads an Unreal
-project's assets from the repository alone, and that Unreal Engine starts only
-for an account linked to Epic, pulled with that user's own token. Run with
-`pytest lathe/control`.
+project's assets from the repository alone, that Unreal Engine starts for
+anyone and brings the editor only to an account linked to Epic, pulled with
+that user's own token, that its two pictures are linked for the listing page
+alone, and that the agent brings up a project cloned into the engine, opens it
+(an older one on its own branch), and switches the person's screen to it. Run
+with `pytest lathe/control`.
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ import sys
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
@@ -59,6 +62,7 @@ from generation import IMAGE_MODELS, VIDEO_MODELS, Fal, GenerationStopped, video
 from github_client import GitHub, GitHubError, Grant, read_state, reads_packages, seal, sign_state, unseal
 from launcher import ModalLauncher, origin
 from service import OPEN, Catalog, Config, OwnCopy, Refused, Sessions, Store, User, hash_key
+import unreal
 
 CATALOG = Catalog(Path(__file__).resolve().parent.parent / "catalog.json")
 ALICE = User(id="00000000-0000-0000-0000-00000000000a", email="alice@example.test")
@@ -328,6 +332,12 @@ class FakeLauncher:
         self.fail_start = False
         self.commands: list[tuple[str, str]] = []
         self.calls: list[tuple[str, str, Any]] = []
+        # The .uproject files each Sandbox's workspace holds, as the machine reports them
+        self.uprojects: dict[str, list[dict[str, Any]]] = {}
+        self.project_reads: list[str] = []
+        self.links: list[tuple[str, str]] = []
+        # What a command containing each text answers, where it is not the default success
+        self.answers: list[tuple[str, tuple[int, str]]] = []
 
     def start(self, session: dict[str, Any], tier: dict[str, Any], region: str | None, own_copy: OwnCopy | None = None) -> str:
         if self.fail_start:
@@ -347,7 +357,16 @@ class FakeLauncher:
         return self.exits.get(sandbox_id)
 
     def link(self, sandbox_id: str) -> str:
+        self.links.append((sandbox_id, "Desktop"))
         return f"https://{sandbox_id}.example.test/?_modal_connect_token=x#token=y"
+
+    def unreal_link(self, sandbox_id: str) -> str:
+        self.links.append((sandbox_id, "Unreal"))
+        return f"https://{sandbox_id}-unreal.example.test/?_modal_connect_token=u"
+
+    def unreal_projects(self, sandbox_id: str) -> list[dict[str, Any]]:
+        self.project_reads.append(sandbox_id)
+        return copy.deepcopy(self.uprojects.get(sandbox_id, []))
 
     def stop(self, sandbox_id: str) -> None:
         self.stopped.append(sandbox_id)
@@ -360,7 +379,7 @@ class FakeLauncher:
 
     def exec(self, sandbox_id: str, command: str, timeout: int) -> tuple[int, str]:
         self.commands.append((sandbox_id, command))
-        return 0, f"ran in {sandbox_id}\n"
+        return next((answer for text, answer in self.answers if text in command), (0, f"ran in {sandbox_id}\n"))
 
     def filmcraft(self, sandbox_id: str, method: str, params: dict[str, Any] | None) -> dict[str, Any]:
         self.calls.append((sandbox_id, method, params))
@@ -1579,7 +1598,7 @@ def test_the_unreal_skill_is_read_for_the_disciplines_that_use_unreal():
     assert all("unreal" in chosen[discipline] for discipline in ("games", "architecture", "experiences"))
     assert "unreal" not in chosen["media"] and "filmcraft" in chosen["media"] and "filmcraft" not in chosen["games"]
     text = next(skill for skill in skills if skill.name == "unreal").body
-    assert "unreal_assets" in text and "github_save" in text
+    assert all(name in text for name in ("unreal_assets", "github_save", "unreal_projects", "unreal_open", "engine_show"))
 
 
 def connect_alice(studio: SimpleNamespace, return_to: str = f"{SITE}/app/", code: str = "good-code") -> Any:
@@ -1679,46 +1698,40 @@ def test_github_waits_for_its_oauth_app(world):
     assert refused.status_code == 400
 
 
-def test_unreal_starts_only_for_a_github_account_linked_to_epic(studio):
+def test_unreal_starts_for_anyone_and_brings_the_editor_only_for_an_account_linked_to_epic(studio):
     client, github, launcher, store = studio.client, studio.github, studio.launcher, studio.store
     game = new_project(client, discipline="games", format="World")
-    start = lambda token="alice-token", project=game: client.post(
-        f"/v1/projects/{project['id']}/engines", headers=auth(token), json={"app": "unreal", "tier": "t4"})
-    linked = lambda: client.get("/v1/github", headers=auth("alice-token")).json()["epic_linked"]
 
-    assert linked() is None, "unknown without GitHub"
+    def start(token: str = "alice-token", project: dict[str, Any] = game) -> dict[str, Any]:
+        response = client.post(f"/v1/projects/{project['id']}/engines", headers=auth(token), json={"app": "unreal", "tier": "t4"})
+        assert response.status_code == 200, response.text
+        engine = response.json()["engine"]
+        assert store.sessions[engine["id"]]["status"] == "running"
+        return engine
+
+    def stop(engine: dict[str, Any], token: str = "alice-token") -> None:
+        client.delete(f"/v1/sessions/{engine['id']}", headers=auth(token))
+
     no_gpu = client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "unreal", "tier": "cpu"})
     assert no_gpu.status_code == 400 and "needs a GPU" in no_gpu.json()["detail"], "the editor renders only on a GPU"
-    refused = start()
-    assert refused.status_code == 409 and "Connect GitHub first" in refused.json()["detail"]
 
+    stop(start())
     connect_alice(studio, code="repo-only-code")
-    assert linked() is None, "unknown for a grant without read:packages"
-    refused = start()
-    assert refused.status_code == 409 and "Connect GitHub again" in refused.json()["detail"]
+    stop(start())
     assert github.epic_checks == [], "GitHub is not asked what the grant cannot show"
-
     connect_alice(studio)
-    assert linked() is False
-    refused = start()
-    detail = refused.json()["detail"]
-    assert refused.status_code == 403
-    assert "epicgames.com" in detail and "Apps and Accounts" in detail and "EpicGames organization" in detail
-    assert detail.index("Apps and Accounts") < detail.index("EpicGames organization") < detail.index("Reconnect GitHub")
-
+    stop(start())
     github.epic_refusal = GitHubError(502, "Server Error")
-    assert linked() is None, "unknown while GitHub fails"
-    refused = start()
-    assert refused.status_code == 409 and "Server Error" in refused.json()["detail"]
+    stop(start())
     github.epic_refusal = None
-    assert launcher.started == [], "nothing started while the link was not shown"
+    assert launcher.own_copies == [None] * 4, (
+        "without GitHub, with an old grant, unlinked, and while GitHub fails, the engine starts without the editor"
+    )
+    assert launcher.credentials == {}, "a start without the editor keeps no credential for a pull"
 
-    assert launcher.credentials == {}, "connecting GitHub alone keeps no credential for a pull"
     github.linked_to_epic.add("gho_alice_token")
-    assert linked() is True
-    engine = start().json()["engine"]
-    assert engine["app"] == "unreal" and store.sessions[engine["id"]]["status"] == "running"
-    assert launcher.own_copies == [OwnCopy("5.8")]
+    engine = start()
+    assert launcher.own_copies[-1] == OwnCopy("5.8")
     assert launcher.credentials == {ALICE.id: {"REGISTRY_USERNAME": "alice-gh", "REGISTRY_PASSWORD": "gho_alice_token"}}, (
         "pulled with her own login and token, kept for her before the start"
     )
@@ -1727,15 +1740,16 @@ def test_unreal_starts_only_for_a_github_account_linked_to_epic(studio):
     connect_alice(studio, code="next-code")
     assert launcher.credentials[ALICE.id]["REGISTRY_PASSWORD"] == "gho_alice_next", "connecting again refreshes it"
     theirs = new_project(client, "bob-token", discipline="games", format="World")
-    assert start("bob-token", theirs).status_code == 409, "another user's link is not Bob's"
-    client.delete(f"/v1/sessions/{engine['id']}", headers=auth("alice-token"))
+    stop(start("bob-token", theirs), "bob-token")
+    assert launcher.own_copies[-1] is None and BOB.id not in launcher.credentials, "another user's link is not Bob's"
+    stop(engine)
     client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "blender", "tier": "t4"})
     assert launcher.own_copies[-1] is None, "an app on Lathe's own license gets no credential"
     client.delete("/v1/github", headers=auth("alice-token"))
     assert launcher.credentials == {}, "disconnecting GitHub deletes it"
 
 
-def test_a_queued_unreal_start_uses_the_github_connection_it_has_when_it_starts(studio):
+def test_a_queued_unreal_start_reads_the_epic_link_it_has_when_it_starts(studio):
     client, sessions, store, github = studio.client, studio.sessions, studio.store, studio.github
     connect_alice(studio)
     github.linked_to_epic.add("gho_alice_token")
@@ -1747,8 +1761,205 @@ def test_a_queued_unreal_start_uses_the_github_connection_it_has_when_it_starts(
     object.__setattr__(sessions.config, "capacity", 10)
     sessions.reconcile()
     (session,) = store.sessions.values()
-    assert session["status"] == "failed" and "Connect GitHub again" in session["end_reason"]
-    assert studio.launcher.started == [] and studio.launcher.credentials == {}
+    assert session["status"] == "running", "the desktop starts without the editor the disconnect took away"
+    assert studio.launcher.own_copies == [None] and studio.launcher.credentials == {}
+
+
+def running_unreal(studio: SimpleNamespace, linked: bool = True, sessions: int = 1) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """A Games project with a running Unreal engine, its account linked to Epic or not: the project, the engine, its Sandbox."""
+    studio.store.lathe_ensure_profile(ALICE.id, ALICE.email, 60)["max_sessions"] = sessions
+    connect_alice(studio)
+    if linked:
+        studio.github.linked_to_epic.add("gho_alice_token")
+    game = new_project(studio.client, name="Ember Ridge", discipline="games", format="Game")
+    engine = studio.client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "unreal", "tier": "t4"}).json()["engine"]
+    return game, engine, studio.store.sessions[engine["id"]]["sandbox_id"]
+
+
+def uproject(path: str, association: str = "5.8") -> dict[str, Any]:
+    """A .uproject as the machine reports what it found: a C++ game with one plugin on and one off, in Git LFS."""
+    return {
+        "path": path, "name": PurePosixPath(path).stem, "EngineAssociation": association,
+        "modules": [{"Name": "EmberRidge", "Type": "Runtime", "LoadingPhase": "Default"}],
+        "plugins": [{"Name": "ModelingToolsEditorMode", "Enabled": True}, {"Name": "Bridge", "Enabled": False}],
+        "lfs": True, "size": 2_400_000_000,
+    }
+
+
+def screens(client: TestClient, project_id: str) -> list[dict[str, Any]]:
+    """What the agent put on the person's screen, in order."""
+    return [event["data"] for event in events(client, project_id)["events"] if event["kind"] == "screen"]
+
+
+def turn_state(request: dict[str, Any]) -> str:
+    """The project's state a request's turn started with."""
+    return next(m["content"] for m in reversed(request["messages"]) if m["role"] == "system")
+
+
+def test_a_running_unreal_engine_reports_both_pictures_with_links_minted_for_the_page(studio):
+    client, launcher, model, store = studio.client, studio.launcher, studio.model, studio.store
+    game, engine, sandbox = running_unreal(studio, sessions=2)
+    blender = client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "blender", "tier": "cpu"}).json()["engine"]
+    listing = lambda: {e["id"]: e for e in client.get(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token")).json()["engines"]}
+    shown = listing()
+    assert "streams" not in shown[blender["id"]], "an engine that streams its desktop alone"
+    assert [stream["name"] for stream in shown[engine["id"]]["streams"]] == ["Desktop", "Unreal"]
+    desktop, view = (stream["url"] for stream in shown[engine["id"]]["streams"])
+    assert desktop.startswith(f"https://{sandbox}.") and view.startswith(f"https://{sandbox}-unreal.")
+    listing()
+    assert launcher.links == [(sandbox, "Desktop"), (sandbox, "Unreal")] * 2, "minted afresh for each listing"
+
+    link = lambda body=None, token="alice-token": client.post(f"/v1/sessions/{engine['id']}/link", headers=auth(token), json=body)
+    assert link().json()["url"].startswith(f"https://{sandbox}.") and link({"stream": "Desktop"}).json()["url"].startswith(f"https://{sandbox}.")
+    assert link({"stream": "Unreal"}).json()["url"].startswith(f"https://{sandbox}-unreal.")
+    assert link({"stream": "Sequencer"}).status_code == 404
+    assert link({"stream": "Unreal"}, "bob-token").status_code == 404, "another user's engine does not exist for Bob"
+    unreal_link = client.post(f"/v1/sessions/{blender['id']}/link", headers=auth("alice-token"), json={"stream": "Unreal"})
+    assert unreal_link.status_code == 404
+
+    minted = len(launcher.links)
+    model.script(reply(use("engine_list"), use("engine_show", engine_id=engine["id"], stream="Unreal")), reply(say("Both run.")))
+    message(client, game["id"], "What runs?")
+    assert len(launcher.links) == minted, "the agent's listing and its view switch mint nothing"
+    kept = json.dumps(store.tables["project_events"]) + json.dumps(store.tables["agent_messages"])
+    assert "connect_token" not in kept, "no link is written to the log or the conversation"
+
+
+def test_the_agent_is_told_of_an_unreal_project_until_it_has_looked_at_it(studio):
+    client, model, launcher = studio.client, studio.model, studio.launcher
+    film = new_project(client)
+    model.script(reply(say("Hello.")))
+    message(client, film["id"], "Hello")
+    assert launcher.project_reads == [], "no machine is asked where no Unreal engine runs"
+
+    game, engine, sandbox = running_unreal(studio)
+    model.script(reply(say("Nothing cloned yet.")))
+    message(client, game["id"], "Hi")
+    assert "none yet" in turn_state(model.requests[-1])
+
+    path = f"/home/ubuntu/workspace/projects/{game['id']}/ember-ridge/EmberRidge.uproject"
+    launcher.uprojects[sandbox] = [uproject(path)]
+    model.script(reply(say("Shall we look?")))
+    message(client, game["id"], "I cloned the game")
+    state = turn_state(model.requests[-1])
+    assert path in state and "not reported yet" in state and "unreal_projects" in state
+
+    looking = use("unreal_projects", engine_id=engine["id"])
+    model.script(reply(looking), reply(say("Ember Ridge, Unreal Engine 5.8, C++.")))
+    message(client, game["id"], "What did you find?")
+    found = json.loads(tool_results(model.requests[-1])[looking["id"]]["content"])
+    (project,) = found["projects"]
+    assert (project["path"], project["engine_association"], project["version"]) == (path, "5.8", "same")
+    assert project["cpp_modules"] == ["EmberRidge"] and project["plugins"] == ["ModelingToolsEditorMode"], "Bridge is switched off"
+    assert project["lfs"] is True and project["size_bytes"] == 2_400_000_000
+
+    model.script(reply(say("Open it?")))
+    message(client, game["id"], "Thanks")
+    state = turn_state(model.requests[-1])
+    assert path in state and "not reported yet" not in state, "what the agent looked at is not raised again"
+    assert launcher.project_reads == [sandbox] * 5, "once at each turn's start where Unreal runs, and once for the call"
+
+
+def test_unreal_open_opens_the_editor_on_the_agents_branch_for_an_older_project_and_shows_it(studio):
+    client, model, launcher = studio.client, studio.model, studio.launcher
+    game, engine, sandbox = running_unreal(studio)
+    folder = f"/home/ubuntu/workspace/projects/{game['id']}"
+    same, older, newer = (f"{folder}/{name}/{name}.uproject" for name in ("EmberRidge", "OldRidge", "NextRidge"))
+    launcher.uprojects[sandbox] = [uproject(same), uproject(older, "5.4"), uproject(newer, "5.9")]
+    branch = f"lathe/ember-ridge-{game['id'][:8]}"
+    launcher.answers.append(("git branch --show-current", (0, f"branch={branch}\n")))
+    calls = [use("unreal_open", engine_id=engine["id"], path=path) for path in (same, older, newer, f"{folder}/Missing.uproject")]
+    model.script(reply(*calls), reply(say("Opened.")))
+    message(client, game["id"], "Open them in Unreal")
+
+    results = [tool_results(model.requests[-1])[call["id"]] for call in calls]
+    assert [result.get("is_error", False) for result in results] == [False, False, True, True]
+    assert json.loads(results[0]["content"])["branch"] is None, "the engine's version opens as it is"
+    assert json.loads(results[1]["content"])["branch"] == branch
+    assert "older editor" in results[2]["content"] and "unreal_projects" in results[3]["content"]
+    commands = [command for _, command in launcher.commands]
+    opened = [command for command in commands if command.startswith("selkies-modal-unreal-open")]
+    assert opened == [f"selkies-modal-unreal-open {same}", f"selkies-modal-unreal-open {older}"], "nothing newer is opened"
+    switch = next(index for index, command in enumerate(commands) if "git switch" in command)
+    assert f"cd {folder}/OldRidge" in commands[switch] and branch in commands[switch]
+    assert commands.index(opened[1]) > switch, "the clone is on the agent's branch before the editor saves anything"
+    assert not any(word in command for command in commands for word in ("git commit", "git push", "git reset")), (
+        "nothing of the team's is written"
+    )
+    assert screens(client, game["id"]) == [{"engine_id": engine["id"], "stream": "Unreal"}] * 2
+
+
+def test_unreal_open_says_the_one_step_that_brings_the_editor_where_it_is_missing(studio):
+    client, model, launcher, github = studio.client, studio.model, studio.launcher, studio.github
+    game, engine, sandbox = running_unreal(studio, linked=False)
+    path = f"/home/ubuntu/workspace/projects/{game['id']}/EmberRidge/EmberRidge.uproject"
+    launcher.uprojects[sandbox] = [uproject(path)]
+    launcher.answers.append(("selkies-modal-unreal-open", (3, "The Unreal Editor is not installed in this engine.\n")))
+
+    opening = use("unreal_open", engine_id=engine["id"], path=path)
+    model.script(reply(opening), reply(say("Link Epic first.")))
+    message(client, game["id"], "Open it in Unreal")
+    unlinked = tool_results(model.requests[-1])[opening["id"]]
+    assert unlinked["is_error"] and "not installed" in unlinked["content"]
+    assert "Apps and Accounts" in unlinked["content"] and "start it again" in unlinked["content"]
+
+    github.linked_to_epic.add("gho_alice_token")
+    opening = use("unreal_open", engine_id=engine["id"], path=path)
+    model.script(reply(opening), reply(say("Restart the engine.")))
+    message(client, game["id"], "I linked it")
+    linked = tool_results(model.requests[-1])[opening["id"]]
+    assert linked["is_error"] and "started before" in linked["content"] and "Apps and Accounts" not in linked["content"]
+    assert screens(client, game["id"]) == [], "the screen stays where it is"
+    log = events(client, game["id"])["events"]
+    assert [e["data"]["summary"] for e in log if e["kind"] == "tool_end"] == [
+        "The Unreal Editor needs the Epic link", "The Unreal Editor did not open",
+    ]
+
+
+def test_the_unreal_tools_say_how_to_start_unreal_where_none_runs(studio):
+    client, model = studio.client, studio.model
+    studio.store.lathe_ensure_profile(ALICE.id, ALICE.email, 60)["max_sessions"] = 2
+    game = new_project(client, name="Ember Ridge", discipline="games", format="Game")
+    blender = client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "blender", "tier": "cpu"}).json()["engine"]
+    calls = [
+        use("unreal_open", engine_id=blender["id"], path="/home/ubuntu/workspace/Game.uproject"),
+        use("unreal_projects", engine_id=str(uuid.uuid4())),
+        use("engine_show", engine_id=blender["id"], stream="Unreal"),
+    ]
+    model.script(reply(*calls), reply(say("Start Unreal first.")))
+    message(client, game["id"], "Open my game")
+    results = [tool_results(model.requests[-1])[call["id"]] for call in calls]
+    assert all(result["is_error"] for result in results)
+    assert "is not Unreal Engine" in results[0]["content"] and "No such engine" in results[1]["content"]
+    assert all("Start Unreal Engine on a tier with a GPU (t4)" in result["content"] for result in results[:2])
+    assert "desktop only" in results[2]["content"] and screens(client, game["id"]) == []
+
+
+def test_the_studio_reads_the_unreal_projects_of_a_running_unreal_engine(studio):
+    client, launcher = studio.client, studio.launcher
+    game, engine, sandbox = running_unreal(studio)
+    path = f"/home/ubuntu/workspace/projects/{game['id']}/OldRidge/OldRidge.uproject"
+    snake = {
+        "path": f"/home/ubuntu/workspace/projects/{game['id']}/Next/Next.uproject", "engine_association": "5.9",
+        "cpp_modules": [], "plugins": [{"name": "CommonUI", "enabled": True}, {"name": "Bridge", "enabled": False}],
+        "repository": {"lfs": {"used": True, "fetched": False}}, "size_bytes": 512,
+    }
+    launcher.uprojects[sandbox] = [uproject(path, "5.4"), snake, "not a project"]
+    route = f"/v1/projects/{game['id']}/engines/{engine['id']}/unreal-projects"
+    project, spelled = client.get(route, headers=auth("alice-token")).json()["projects"]
+    assert project["version"] == "older" and "agent's branch" in project["opens"]
+    assert (spelled["name"], spelled["version"], spelled["plugins"], spelled["size_bytes"]) == ("Next", "newer", ["CommonUI"], 512)
+    assert "not fetched" in spelled["lfs"], "the machine's report in snake case reads the same"
+    assert client.get(route, headers=auth("bob-token")).status_code == 404
+    client.delete(f"/v1/sessions/{engine['id']}", headers=auth("alice-token"))
+    assert client.get(route, headers=auth("alice-token")).status_code == 409, "a stopped engine has no workspace to read"
+
+
+def test_a_project_opens_as_the_version_it_was_saved_with_says():
+    verdicts = {saved: unreal.version_verdict(saved, "5.8")[0] for saved in ("5.8", "5.4", "4.27", "5.9", "6.0", "{0A1B2C3D}", "")}
+    assert verdicts == {
+        "5.8": "same", "5.4": "older", "4.27": "older", "5.9": "newer", "6.0": "newer", "{0A1B2C3D}": "source", "": "unknown",
+    }
 
 
 def test_a_sealed_token_opens_only_under_its_secret():
@@ -1956,9 +2167,22 @@ def test_the_launcher_pulls_unreal_with_each_users_own_named_secret(monkeypatch)
     alice, bob = f"lathe-ghcr-{ALICE.id}", f"lathe-ghcr-{BOB.id}"
     assert pulls == [(alice, "5.8"), (bob, "5.8"), (alice, "5.8")], "each start pulls with its user's own named Secret"
     assert [settings["image"] for _, settings in module.started] == [f"unreal:{alice}", f"unreal:{bob}", f"unreal:{alice}"]
-    with pytest.raises(RuntimeError, match="own registry credential"):
-        launcher.start(session(ALICE), tier, None)
-    assert module.images == [], "no image of Unreal is kept for the next start"
+    assert module.images == [], "no image of the editor is kept for the next start"
+    for user in (ALICE, BOB):
+        launcher.start(session(user), tier, None)
+    assert module.images == ["unreal"], "without the Epic link, one desktop image with nothing of Epic's, defined once"
+    assert [settings["image"] for _, settings in module.started[3:]] == ["image:unreal", "image:unreal"]
+    assert len(pulls) == 3, "nothing is pulled with anyone's Secret for it"
+
+    launcher.sandbox = lambda sandbox_id: f"sandbox:{sandbox_id}"
+    with pytest.raises(RuntimeError, match="no unreal_view_link"):
+        launcher.unreal_link("sb-4")
+    with pytest.raises(RuntimeError, match="no unreal_projects"):
+        launcher.unreal_projects("sb-4")
+    module.unreal_view_link = lambda sandbox: f"https://{sandbox}.example.test/unreal"
+    module.unreal_projects = lambda sandbox: [{"path": f"/home/ubuntu/workspace/{sandbox}/Game.uproject"}]
+    assert launcher.unreal_link("sb-4") == "https://sandbox:sb-4.example.test/unreal"
+    assert launcher.unreal_projects("sb-4") == [{"path": "/home/ubuntu/workspace/sandbox:sb-4/Game.uproject"}]
 
     launcher.forget_registry_credential(ALICE.id)
     launcher.forget_registry_credential(ALICE.id)

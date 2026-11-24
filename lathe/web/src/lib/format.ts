@@ -46,6 +46,25 @@ export function creditCount(credits: number): string {
   return count.format(credits);
 }
 
+/** The units a size on disk is written in, each a thousand of the one before. */
+const SIZE_UNITS = ['bytes', 'KB', 'MB', 'GB', 'TB'] as const;
+
+/**
+ * Writes a size on disk in the largest unit it reaches, as a file manager would.
+ *
+ * @param bytes The size in bytes.
+ * @returns Text such as `2.4 GB` or `512 bytes`.
+ */
+export function sizeText(bytes: number): string {
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1000 && unit < SIZE_UNITS.length - 1) {
+    value /= 1000;
+    unit += 1;
+  }
+  return `${count.format(value)} ${SIZE_UNITS[unit] ?? 'bytes'}`;
+}
+
 /**
  * Writes a fraction as a whole percentage.
  *

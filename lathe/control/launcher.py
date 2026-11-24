@@ -18,9 +18,12 @@ waits on a definition another start already made; Modal itself caches what
 the definitions build. Nuke's is the exception: it is the image `nuke_image`
 makes from the user's own install in their workspace, defined at each start,
 since the install a user just made has to be in their next session. Unreal
-Engine's is another: the launcher's `unreal_image` pulls Epic's image with the
-user's own registry credential, defined at each start and never kept here, so
-one user's copy is never another's image. The credential is a named Modal
+Engine's is another where the user has linked Epic: the launcher's
+`unreal_image` pulls Epic's image with the user's own registry credential,
+defined at each start and never kept here, so one user's copy is never
+another's image. Without the link, an Unreal engine is the shared
+`session_image("unreal")`, the same desktop without the editor, which holds
+nothing of Epic's and is kept like any other app's. The credential is a named Modal
 Secret per user, `lathe-ghcr-<user id>` (`REGISTRY_USERNAME`, their GitHub
 login; `REGISTRY_PASSWORD`, their token), rather than one made for each start:
 the layer that pulls the engine is identified by the Secret it pulls with, and
@@ -31,9 +34,10 @@ they disconnect (`keep_registry_credential`, `forget_registry_credential`).
 
 Modal is imported where it is used, so the service's tests can stand in for
 the launcher module and run without Modal installed. FilmCraft's command
-channel (`filmcraft_call`) and Unreal Engine's image (`unreal_image`) are
-looked up on the launcher module when they are needed, so a launcher without
-them still starts every other app.
+channel (`filmcraft_call`) and Unreal Engine's parts (`unreal_image`, the
+Unreal view's link `unreal_view_link`, and the projects a machine found,
+`unreal_projects`) are looked up on the launcher module when they are needed,
+so a launcher without them still starts every other app.
 """
 
 from __future__ import annotations
@@ -90,21 +94,19 @@ class ModalLauncher:
         return modal.Sandbox.from_id(sandbox_id)
 
     def image(self, session: dict[str, Any], own_copy: OwnCopy | None = None) -> Any:
-        """The session image of the session's app: this container's for most apps, the user's own for Nuke and Unreal.
+        """The session image of the session's app: this container's for most apps, the user's own for Nuke and
+        for Unreal on a linked account.
 
         Raises:
-            RuntimeError: For Unreal Engine, a launcher without `unreal_image`, or a start that is not
-                of the user's own copy.
+            RuntimeError: For the user's own copy of Unreal Engine, a launcher without `unreal_image`.
         """
         app = session.get("app") or "blender"
         if app == "nuke":
             return self.launcher.nuke_image(f"users/{session['user_id']}")
-        if app == "unreal":
+        if app == "unreal" and own_copy is not None:
             build = getattr(self.launcher, "unreal_image", None)
             if build is None:
                 raise RuntimeError("This deployment's launcher cannot build Unreal Engine's image yet.")
-            if own_copy is None:
-                raise RuntimeError("Unreal Engine is pulled only with the user's own registry credential.")
             import modal
 
             return build(
@@ -186,6 +188,29 @@ class ModalLauncher:
 
     def link(self, sandbox_id: str) -> str:
         return self.launcher.session_link(self.sandbox(sandbox_id))
+
+    def unreal_link(self, sandbox_id: str) -> str:
+        """A link to the session's Unreal view (`unreal_view_link`).
+
+        Raises:
+            RuntimeError: This launcher has no Unreal view.
+        """
+        return self.unreal_part("unreal_view_link")(self.sandbox(sandbox_id))
+
+    def unreal_projects(self, sandbox_id: str) -> list[dict[str, Any]]:
+        """The `.uproject` files the session's workspace holds (`unreal_projects`).
+
+        Raises:
+            RuntimeError: This launcher cannot list them.
+        """
+        return self.unreal_part("unreal_projects")(self.sandbox(sandbox_id))
+
+    def unreal_part(self, name: str) -> Any:
+        """One of the launcher module's Unreal functions, which a launcher from before Unreal Engine lacks."""
+        found = getattr(self.launcher, name, None)
+        if found is None:
+            raise RuntimeError(f"This deployment's launcher has no {name} for Unreal Engine yet.")
+        return found
 
     def stop(self, sandbox_id: str) -> None:
         self.launcher.stop_session(self.sandbox(sandbox_id))

@@ -54,6 +54,12 @@ class NewSession(BaseModel):
     region: str = "auto"
 
 
+class LinkChoice(BaseModel):
+    """What `POST /v1/sessions/{sid}/link` takes, all of it optional: the picture to open, its desktop by default."""
+
+    stream: str | None = None
+
+
 class NewKey(BaseModel):
     """What `POST /v1/api-keys` takes."""
 
@@ -331,8 +337,8 @@ def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> F
         return {"session": service().start(who, body.app, body.tier, body.region)}
 
     @app.post("/v1/sessions/{session_id}/link")
-    def session_link(session_id: str, who: Who) -> dict[str, str]:
-        return {"url": service().link(who, session_id)}
+    def session_link(session_id: str, who: Who, body: LinkChoice | None = None) -> dict[str, str]:
+        return {"url": service().link(who, session_id, body.stream if body else None)}
 
     @app.delete("/v1/sessions/{session_id}")
     def stop_session(session_id: str, who: Who) -> dict[str, Any]:
@@ -389,11 +395,15 @@ def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> F
 
     @app.get("/v1/projects/{project_id}/engines")
     def list_engines(project_id: str, who: Who) -> dict[str, Any]:
-        return {"engines": service().engines(who, project_id)}
+        return {"engines": service().engines(who, project_id, links=True)}
 
     @app.post("/v1/projects/{project_id}/engines")
     def start_engine(project_id: str, body: NewEngine, who: Who) -> dict[str, Any]:
         return {"engine": service().start_engine(who, project_id, body.app, body.tier, body.region)}
+
+    @app.get("/v1/projects/{project_id}/engines/{session_id}/unreal-projects")
+    def unreal_projects(project_id: str, session_id: str, who: Who) -> dict[str, Any]:
+        return {"projects": service().unreal_projects(who, project_id, session_id)}
 
     # The agent
 
