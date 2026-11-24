@@ -3,27 +3,30 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 """Lathe's control plane as a Modal app: `modal deploy lathe/control/app.py`.
 
-Four functions, one image. `api` serves the web API and the MCP endpoint
+Five functions, one image. `api` serves the web API and the MCP endpoint
 (`api.py`). `start_job` and `stop_job` do the seconds-long work a request hands
-off, each in a container of its own so a request never holds one. `reconcile`
-runs once a minute and is the service's upkeep (`Sessions.reconcile`). `check`
-is for an operator: it starts and stops one session the way the service does.
+off, each in a container of its own so a request never holds one, and
+`agent_turn` runs one turn of a project's agent (`agent.py`), which can take
+minutes. `reconcile` runs once a minute and is the service's upkeep
+(`Sessions.reconcile`). `check` is for an operator: it starts and stops one
+session the way the service does.
 
 Everything the deployment is configured with is the environment of the Modal
-Secret `lathe`, read once per container (`config`). The Supabase secret key
-lives only there; Modal's own credentials are the function's identity, so
-this app starts Sandboxes without holding a Modal token.
+Secret `lathe`, read once per container (`config`). The Supabase secret key,
+the Anthropic, fal, and GitHub credentials, and the secret that seals GitHub
+tokens live only there; Modal's own credentials are the function's identity,
+so this app starts Sandboxes without holding a Modal token.
 
 The Sandboxes are the launcher's (`addons/modal/sandbox.py`), which this image
 carries beside the code that calls it, with the scripts the session image is
 built from: the image a session runs is defined in one place, and the Sandbox
-this service starts is the one `selkies-modal up` starts.
+this service starts is the one `selkies-modal up` starts (`launcher.py`). The
+agent's skills (`lathe/skills`) are carried too, read when a turn starts.
 """
 
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -31,18 +34,22 @@ import modal
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-LAUNCHER = "/root/launcher"
+SKILLS = HERE.parent / "skills"
+# A turn's worker may run this long; a turn is a few model calls, a few generations, and an engine's start
+AGENT_TURN_SECONDS = 3600
 
 app = modal.App("lathe-control")
 secret = modal.Secret.from_name("lathe")
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install_from_requirements(str(HERE / "requirements.txt"))
-    .add_local_dir(REPO / "addons" / "modal", LAUNCHER, ignore=["**/__pycache__", "*.md", "requirements.txt"])
+    .add_local_dir(REPO / "addons" / "modal", "/root/launcher", ignore=["**/__pycache__", "*.md", "requirements.txt"])
     .add_local_file(HERE.parent / "catalog.json", "/root/catalog.json")
-    .add_local_file(HERE / "service.py", "/root/service.py")
-    .add_local_file(HERE / "api.py", "/root/api.py")
 )
+for module in ("service.py", "api.py", "agent.py", "launcher.py", "generation.py", "github_client.py"):
+    image = image.add_local_file(HERE / module, f"/root/{module}")
+if SKILLS.is_dir():
+    image = image.add_local_dir(SKILLS, "/root/skills")
 
 
 def config() -> Any:
@@ -58,63 +65,18 @@ def config() -> Any:
         capacity=int(os.environ.get("LATHE_CAPACITY", "10")),
         tiers=frozenset(filter(None, os.environ.get("LATHE_TIERS", "cpu").split(","))),
         pin_regions=os.environ.get("LATHE_PIN_REGIONS", "true").lower() == "true",
+        anthropic_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+        agent_model=os.environ.get("LATHE_AGENT_MODEL", ""),
+        fal_key=os.environ.get("FAL_KEY", ""),
+        github_client_id=os.environ.get("GITHUB_CLIENT_ID", ""),
+        github_client_secret=os.environ.get("GITHUB_CLIENT_SECRET", ""),
+        secret_key=os.environ.get("LATHE_SECRET_KEY", ""),
+        team_emails=frozenset(
+            email.strip().lower() for email in os.environ.get("LATHE_TEAM_EMAILS", "").split(",") if email.strip()
+        ),
+        nuke_seats=int(os.environ.get("LATHE_NUKE_SEATS", "2")),
+        api_url=os.environ.get("LATHE_API_URL", "").rstrip("/"),
     )
-
-
-class ModalLauncher:
-    """The service's `Launcher` over the real thing: Modal Sandboxes through `addons/modal/sandbox.py`."""
-
-    def __init__(self) -> None:
-        sys.path.insert(0, LAUNCHER)
-        import sandbox as launcher
-        import service
-
-        self.launcher = launcher
-        self.service = service
-        self.app = modal.App.lookup(launcher.APP_NAME, create_if_missing=True)
-        self.image = launcher.session_image()
-
-    def start(self, session: dict[str, Any], tier: dict[str, Any], region: str | None) -> str:
-        """Start the session's Sandbox in its user's own directory of the workspace and wait until it streams.
-
-        A Sandbox that does not come up is ended before the failure is
-        reported, so a start that fails leaves nothing running.
-        """
-        sandbox = self.launcher.start_session(
-            self.app,
-            f"lathe-{session['id']}",
-            gpu=tier["gpu"],
-            # Reserved, and the most it may use: Modal bills the higher of the reservation and the use
-            cpu=(tier["cpu"], tier["cpu"] * 2),
-            memory=tier["memory_gb"] * 1024,
-            idle_seconds=self.service.IDLE_SECONDS,
-            lifetime_seconds=self.service.LIFETIME_SECONDS,
-            region=region,
-            workspace=f"/users/{session['user_id']}",
-            tags={"lathe_session": session["id"], "lathe_user": session["user_id"]},
-            image=self.image,
-        )
-        try:
-            sandbox.wait_until_ready(timeout=self.service.READY_SECONDS)
-        except Exception:
-            sandbox.terminate()
-            raise
-        return sandbox.object_id
-
-    def state(self, sandbox_id: str) -> int | None:
-        return modal.Sandbox.from_id(sandbox_id).poll()
-
-    def link(self, sandbox_id: str) -> str:
-        return self.launcher.session_link(modal.Sandbox.from_id(sandbox_id))
-
-    def stop(self, sandbox_id: str) -> None:
-        self.launcher.stop_session(modal.Sandbox.from_id(sandbox_id))
-
-    def blender_python(self, sandbox_id: str, code: str) -> tuple[int, str]:
-        return self.launcher.blender_python(modal.Sandbox.from_id(sandbox_id), code)
-
-    def screenshot(self, sandbox_id: str) -> bytes:
-        return self.launcher.screenshot(modal.Sandbox.from_id(sandbox_id))
 
 
 class ModalJobs:
@@ -126,9 +88,13 @@ class ModalJobs:
     def stop(self, session_id: str, reason: str) -> None:
         stop_job.spawn(session_id, reason)
 
+    def turn(self, project_id: str, turn_id: str) -> None:
+        agent_turn.spawn(project_id, turn_id)
+
 
 def sessions() -> Any:
     """The service, or nothing while no Supabase project is configured."""
+    from launcher import ModalLauncher
     from service import Catalog, Sessions, Store
 
     settings = config()
@@ -148,6 +114,14 @@ def start_job(session_id: str) -> None:
 def stop_job(session_id: str, reason: str) -> None:
     """Stop one session's Sandbox (`Sessions.run_stop`)."""
     sessions().run_stop(session_id, reason)
+
+
+@app.function(image=image, secrets=[secret], timeout=AGENT_TURN_SECONDS)
+def agent_turn(project_id: str, turn_id: str) -> None:
+    """Run one turn of a project's agent (`agent.Agent.run`)."""
+    from agent import Agent
+
+    Agent.for_deployment(sessions()).run(project_id, turn_id)
 
 
 @app.function(image=image, secrets=[secret], schedule=modal.Period(minutes=1), timeout=300)
@@ -171,8 +145,10 @@ def check(gpu: str = "") -> dict[str, Any]:
     """
     import time
 
+    from launcher import ModalLauncher
+
     launcher = ModalLauncher()
-    session = {"id": f"check-{int(time.time())}", "user_id": "check"}
+    session = {"id": f"check-{int(time.time())}", "user_id": "check", "app": "blender"}
     tier = {"gpu": gpu or None, "cpu": 2, "memory_gb": 4}
     started = time.monotonic()
     sandbox_id = launcher.start(session, tier, None)
@@ -182,9 +158,8 @@ def check(gpu: str = "") -> dict[str, Any]:
         report["blender"] = launcher.blender_python(
             sandbox_id, "import bpy, os\nprint(bpy.app.version_string, os.environ['SELKIES_MODAL_WORKSPACE'])"
         )
-        report["workspace_files"] = launcher.launcher.blender_python(
-            modal.Sandbox.from_id(sandbox_id),
-            "import os\nprint(sorted(os.listdir(os.environ['SELKIES_MODAL_WORKSPACE'])))",
+        report["workspace_files"] = launcher.blender_python(
+            sandbox_id, "import os\nprint(sorted(os.listdir(os.environ['SELKIES_MODAL_WORKSPACE'])))"
         )[1].strip()
         report["screenshot_bytes"] = len(launcher.screenshot(sandbox_id))
     finally:

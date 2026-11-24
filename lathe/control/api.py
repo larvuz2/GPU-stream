@@ -7,7 +7,15 @@ Both take a bearer credential and answer for the user it names
 (`Sessions.authenticate`): the site sends the Supabase access token of whoever
 is signed in, an agent sends an API key that user made. Neither route holds a
 rule of its own; `service.py` decides, and a refusal there becomes
-`{"error": ...}` with its status here, or the text of a failed tool call.
+`{"detail": ..., "error": ...}` (the same text under both names: `detail` is
+the Studio contract's, `error` what the first pages read) with its status
+here, or the text of a failed tool call.
+
+The Studio's routes (`lathe/STUDIO.md`, its contract) are projects, their
+library, their engines, their event log and agent, and the GitHub connection.
+One route takes no credential: GitHub's callback, which a browser reaches by
+redirect and whose signed `state` names the user instead
+(`Sessions.github_callback`).
 
 The API is open to any origin. It answers only to a bearer credential, which a
 browser never attaches by itself, so another site's page gains nothing by
@@ -24,9 +32,10 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 import anyio
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import Depends, FastAPI, File, Header, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from mcp.server.mcpserver import Context, Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
@@ -55,6 +64,76 @@ class Checkout(BaseModel):
     """What `POST /v1/billing/checkout` takes."""
 
     pack: str
+
+
+class NewProject(BaseModel):
+    """What `POST /v1/projects` takes."""
+
+    name: str = ""
+    discipline: str
+    format: str = ""
+
+
+class ProjectChanges(BaseModel):
+    """What `PATCH /v1/projects/{pid}` takes; a field left out is left as it is."""
+
+    name: str | None = None
+    pinned: bool | None = None
+    library_sections: list[str] | None = None
+
+
+class NewEngine(BaseModel):
+    """What `POST /v1/projects/{pid}/engines` takes."""
+
+    app: str
+    tier: str = "cpu"
+    region: str = "auto"
+
+
+class Message(BaseModel):
+    """What `POST /v1/projects/{pid}/messages` takes."""
+
+    text: str
+
+
+class NewAsset(BaseModel):
+    """What `POST /v1/projects/{pid}/library` takes."""
+
+    section: str
+    name: str
+    tag: str | None = None
+    description: str = ""
+    metadata: dict[str, Any] = {}
+
+
+class AssetChanges(BaseModel):
+    """What `PATCH /v1/projects/{pid}/library/{aid}` takes; only the fields sent change, and a blank tag clears it."""
+
+    section: str | None = None
+    name: str | None = None
+    tag: str | None = None
+    description: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class Connect(BaseModel):
+    """What `POST /v1/github/connect` takes: the page of the site to come back to."""
+
+    return_to: str
+
+
+class NewRepo(BaseModel):
+    """A repository to create for a project."""
+
+    name: str
+    private: bool = True
+
+
+class LinkRepo(BaseModel):
+    """What `POST /v1/projects/{pid}/github` takes: an existing repository, or one to create."""
+
+    repo: str | None = None
+    create: NewRepo | None = None
 
 
 def bearer(authorization: str | None) -> str:
@@ -207,7 +286,14 @@ def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> F
 
     @app.exception_handler(Refused)
     async def refused(_: Request, error: Refused) -> JSONResponse:
-        return JSONResponse({"error": error.message}, status_code=error.status)
+        return JSONResponse({"detail": error.message, "error": error.message}, status_code=error.status)
+
+    @app.exception_handler(RequestValidationError)
+    async def malformed(_: Request, error: RequestValidationError) -> JSONResponse:
+        problem = error.errors()[0] if error.errors() else {}
+        where = ".".join(str(part) for part in problem.get("loc", ())[1:]) or "the request"
+        message = f"{where}: {problem.get('msg', 'not valid')}"
+        return JSONResponse({"detail": message, "error": message}, status_code=422)
 
     def service() -> Sessions:
         if sessions is None:
@@ -222,7 +308,15 @@ def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> F
     @app.get("/v1/health")
     def health() -> dict[str, Any]:
         tiers = [tier["id"] for tier in catalog.data["tiers"] if tier["id"] in config.tiers]
-        return {"ok": True, "supabase": config.supabase, "billing": config.billing, "tiers": tiers}
+        return {
+            "ok": True,
+            "agent": config.agent and config.supabase,
+            "github": config.github and config.supabase,
+            "generation": config.generation,
+            "supabase": config.supabase,
+            "billing": config.billing,
+            "tiers": tiers,
+        }
 
     @app.get("/v1/me")
     def me(who: Who) -> dict[str, Any]:
@@ -268,6 +362,113 @@ def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> F
         signature = request.headers.get("stripe-signature", "")
         await anyio.to_thread.run_sync(service().stripe_event, payload, signature)
         return {"received": True}
+
+    # Projects
+
+    @app.get("/v1/projects")
+    def list_projects(who: Who) -> dict[str, Any]:
+        return {"projects": service().projects(who)}
+
+    @app.post("/v1/projects")
+    def create_project(body: NewProject, who: Who) -> dict[str, Any]:
+        return {"project": service().create_project(who, body.name, body.discipline, body.format)}
+
+    @app.get("/v1/projects/{project_id}")
+    def get_project(project_id: str, who: Who) -> dict[str, Any]:
+        return {"project": service().public_project(service().owned_project(who, project_id))}
+
+    @app.patch("/v1/projects/{project_id}")
+    def update_project(project_id: str, body: ProjectChanges, who: Who) -> dict[str, Any]:
+        changed = service().update_project(who, project_id, body.name, body.pinned, body.library_sections)
+        return {"project": changed}
+
+    @app.delete("/v1/projects/{project_id}", status_code=204)
+    def delete_project(project_id: str, who: Who) -> Response:
+        service().delete_project(who, project_id)
+        return Response(status_code=204)
+
+    @app.get("/v1/projects/{project_id}/engines")
+    def list_engines(project_id: str, who: Who) -> dict[str, Any]:
+        return {"engines": service().engines(who, project_id)}
+
+    @app.post("/v1/projects/{project_id}/engines")
+    def start_engine(project_id: str, body: NewEngine, who: Who) -> dict[str, Any]:
+        return {"engine": service().start_engine(who, project_id, body.app, body.tier, body.region)}
+
+    # The agent
+
+    @app.get("/v1/projects/{project_id}/events")
+    def project_events(project_id: str, who: Who, after: int = 0) -> dict[str, Any]:
+        return service().events(who, project_id, after)
+
+    @app.post("/v1/projects/{project_id}/messages", status_code=202)
+    def send_message(project_id: str, body: Message, who: Who) -> dict[str, str]:
+        return {"turn_id": service().send_message(who, project_id, body.text)}
+
+    @app.post("/v1/projects/{project_id}/stop")
+    def stop_turn(project_id: str, who: Who) -> dict[str, bool]:
+        return {"stopped": service().stop_turn(who, project_id)}
+
+    # The library
+
+    @app.get("/v1/projects/{project_id}/library")
+    def library(project_id: str, who: Who) -> dict[str, Any]:
+        return service().library(who, project_id)
+
+    @app.post("/v1/projects/{project_id}/library")
+    def create_asset(project_id: str, body: NewAsset, who: Who) -> dict[str, Any]:
+        asset = service().create_asset(
+            who, project_id, body.section, body.name, body.tag, body.description, body.metadata
+        )
+        return {"asset": asset}
+
+    @app.post("/v1/projects/{project_id}/library/{asset_id}/media")
+    def add_media(project_id: str, asset_id: str, file: Annotated[UploadFile, File()], who: Who) -> dict[str, Any]:
+        data = file.file.read()
+        content_type = file.content_type or "application/octet-stream"
+        asset = service().add_media(who, project_id, asset_id, file.filename or "file", content_type, data)
+        return {"asset": asset}
+
+    @app.patch("/v1/projects/{project_id}/library/{asset_id}")
+    def update_asset(project_id: str, asset_id: str, body: AssetChanges, who: Who) -> dict[str, Any]:
+        return {"asset": service().update_asset(who, project_id, asset_id, body.model_dump(exclude_unset=True))}
+
+    @app.delete("/v1/projects/{project_id}/library/{asset_id}", status_code=204)
+    def delete_asset(project_id: str, asset_id: str, who: Who) -> Response:
+        service().delete_asset(who, project_id, asset_id)
+        return Response(status_code=204)
+
+    # GitHub
+
+    @app.get("/v1/github")
+    def github_status(who: Who) -> dict[str, Any]:
+        return service().github_status(who)
+
+    @app.post("/v1/github/connect")
+    def github_connect(body: Connect, request: Request, who: Who) -> dict[str, str]:
+        return {"url": service().github_connect(who, body.return_to, str(request.base_url))}
+
+    @app.get("/v1/github/callback")
+    def github_callback(request: Request, state: str = "", code: str = "", error: str = "") -> Response:
+        destination = service().github_callback(code, state, error, str(request.base_url))
+        return RedirectResponse(destination, status_code=303)
+
+    @app.get("/v1/github/repos")
+    def github_repos(who: Who) -> dict[str, Any]:
+        return {"repos": service().github_repos(who)}
+
+    @app.delete("/v1/github")
+    def github_disconnect(who: Who) -> dict[str, Any]:
+        return service().github_disconnect(who)
+
+    @app.post("/v1/projects/{project_id}/github")
+    def link_repo(project_id: str, body: LinkRepo, who: Who) -> dict[str, Any]:
+        create = body.create.model_dump() if body.create else None
+        return {"project": service().link_repo(who, project_id, body.repo, create)}
+
+    @app.delete("/v1/projects/{project_id}/github")
+    def unlink_repo(project_id: str, who: Who) -> dict[str, Any]:
+        return {"project": service().unlink_repo(who, project_id)}
 
     app.mount("/", agent_app)
     return app

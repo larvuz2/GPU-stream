@@ -9,9 +9,10 @@ user works in, and this directory is everything around it.
 | Part | What it is | Where it runs |
 | --- | --- | --- |
 | [`web/`](web) | The site: landing page, sign-up, and the dashboard a user starts sessions from | Netlify, built from this repository (`netlify.toml`) |
-| [`control/`](control) | The control plane: the API the site calls, the MCP endpoint an agent calls, and the upkeep that meters and monitors sessions | Modal (`modal deploy`) |
-| [`supabase/`](supabase) | Accounts, credits, sessions, and API keys | A Supabase project |
-| [`catalog.json`](catalog.json) | The apps, machine tiers, regions, prices, and the name | Read by the site and the control plane alike |
+| [`control/`](control) | The control plane: the API the site calls, the MCP endpoint an agent calls, the Studio's projects and their agent, and the upkeep that meters and monitors sessions | Modal (`modal deploy`) |
+| [`supabase/`](supabase) | Accounts, credits, sessions, API keys, projects, their libraries and conversations, and GitHub connections | A Supabase project |
+| [`catalog.json`](catalog.json) | The disciplines, apps, machine tiers, regions, prices, and the name | Read by the site and the control plane alike |
+| [`skills/`](skills) | What the Studio's agent knows of a craft, one `SKILL.md` per skill | Carried into the control plane's image |
 
 `catalog.json` is the one place to change a price, switch an app from `soon`
 to `available`, or rename the service (`brand`).
@@ -38,13 +39,30 @@ An agent does the same over MCP with an API key the user made in the
 dashboard, and has two tools more: running Python in the session's Blender,
 and a screenshot of the result.
 
+## Lathe Studio
+
+The Studio ([`STUDIO.md`](STUDIO.md), the plan and the API's contract) puts
+projects around sessions. A user makes a project of a discipline of the
+catalog, and talks with its agent: Claude, with tools to keep the project's
+plan and library, generate images and video on fal.ai from the library's
+reference images, start engines (sessions opened in the project's folder of
+the user's workspace) and drive them, and save the project's documents to the
+GitHub repository the user linked. Each message runs one turn of the agent as a
+Modal function (`agent_turn`), which writes what it does to the project's event
+log as it goes; the page polls the log. The mechanism is in the docblocks of
+[`control/agent.py`](control/agent.py) and [`control/service.py`](control/service.py).
+
 ## Setting it up
 
 The order matters only in that the site needs the control plane's address and
 both need the Supabase project.
 
-**Supabase.** Create a project, open its SQL editor, and run
-[`supabase/migrations/20261121000000_lathe.sql`](supabase/migrations/20261121000000_lathe.sql).
+**Supabase.** Create a project, open its SQL editor, and run the migrations of
+[`supabase/migrations`](supabase/migrations) in the order of their names:
+[`20261121000000_lathe.sql`](supabase/migrations/20261121000000_lathe.sql), then
+[`20261124000000_studio.sql`](supabase/migrations/20261124000000_studio.sql),
+which adds the Studio's tables and the private Storage bucket `library` its
+media is kept in. A project that already ran the first runs only the second.
 Under Authentication, set the Site URL to the site's address and add
 `<site>/app/` to the redirect URLs; turn on the Google and GitHub providers if
 the sign-in buttons for them should work.
@@ -61,6 +79,23 @@ and set:
 | `LATHE_SITE_URL` | The site's address, which a finished payment returns to |
 | `LATHE_PIN_REGIONS` | `false` to let Modal place every session; unset, a session whose user picked a region is pinned to it, which Modal bills at a higher rate, and one left on automatic is not |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Stripe's, to sell credit packs; point a Stripe webhook for `checkout.session.completed` at `<api>/v1/billing/webhook` |
+| `ANTHROPIC_API_KEY` | The Anthropic API key the Studio's agent runs on; without it a message to the agent is refused with 503. Its default model, Claude Fable 5.2, needs the key's organization to keep 30-day data retention (not zero data retention) |
+| `LATHE_AGENT_MODEL` | The agent's model, `claude-fable-5-2` unless set; another must take adaptive thinking, mid-conversation system messages, and the betas `control/agent.py` names |
+| `FAL_KEY` | fal.ai's key, for the agent's image and video generation; without it those tools say generation is not configured |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | The GitHub OAuth App users connect their accounts through (below) |
+| `LATHE_SECRET_KEY` | A long random string (`python -c 'import secrets; print(secrets.token_urlsafe(48))'`) that signs GitHub's `state` and encrypts the tokens GitHub grants. Changing it disconnects every GitHub account, which their users connect again |
+| `LATHE_TEAM_EMAILS` | The accounts, by email and comma-separated, that may start apps of status `team` (Nuke) |
+| `LATHE_NUKE_SEATS` | Nuke sessions that may be open at once across all users, `2` unless set: the seats its license has |
+| `LATHE_API_URL` | The API's own address, where GitHub's callback should not be built from the address a request arrives at |
+
+**GitHub.** On GitHub, open Settings, Developer settings, OAuth Apps, and make a
+new OAuth App (under the organization that should own it, or a user). Its
+homepage URL is the site's address; its authorization callback URL is
+`<api>/v1/github/callback`, with the API's address the deploy below prints.
+Copy its client ID to `GITHUB_CLIENT_ID`, generate a client secret and copy it
+to `GITHUB_CLIENT_SECRET`, and set `LATHE_SECRET_KEY`. Users then connect their
+own accounts from a project's Environment panel; the app asks for the `repo`
+scope, and its token never leaves the control plane.
 
 Then build the session image and deploy:
 
@@ -95,18 +130,23 @@ needs no Supabase project.
 pip install -r lathe/control/requirements.txt pytest && pytest lathe/control
 ```
 
-runs the API and the MCP endpoint against stand-ins for Supabase and Modal:
-who a credential names, what each route and tool returns and refuses, and
-that one user's sessions do not exist for another.
+runs the API, the MCP endpoint, and the agent against stand-ins for Supabase,
+Modal, Anthropic, fal, and GitHub: who a credential names, what each route and
+tool returns and refuses, that one user's sessions and projects do not exist
+for another, the agent's loop driven by a scripted model through every tool,
+that its conversation only ever grows, that `ask_user` ends a turn and a second
+message waits for the first, Nuke's gate and seats, and that GitHub's callback
+refuses a state it did not sign and a page off the site.
 
 ```bash
 cd lathe/supabase && npm install && npm test
 ```
 
-applies the migration to a Postgres that runs in the test's own process and
+applies the migrations to a Postgres that runs in the test's own process and
 calls every function: what is refused and by which name, how a minute is
 charged and that a balance never goes below zero, that a payment delivered
-twice is credited once, and that the keys a browser holds reach no row and no
+twice is credited once, that a project runs one agent turn at a time and a dead
+turn does not hold it, and that the keys a browser holds reach no row and no
 function.
 
 ## What is not here yet
@@ -115,3 +155,10 @@ Payments are wired but have not been run against Stripe. Regions are a
 broad choice (`us`, `eu`, `ap`) the user makes; nothing measures latency to
 pick one. The GPU tiers are switched off until the Modal account can start
 GPUs, and the session has not been run on one.
+
+The Studio's backend has run only against its tests' stand-ins: not yet against
+Anthropic, fal, GitHub, or Supabase Storage. The agent's model and generation
+are not billed in credits yet, a conversation that outgrows the model's context
+window has no compaction yet, and an engine does not get the project's GitHub
+repository as a credential of its session yet. The MCP endpoint has no project
+tools.
