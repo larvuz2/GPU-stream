@@ -25,6 +25,7 @@ import hashlib
 import hmac
 import itertools
 import json
+import sys
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -308,6 +309,7 @@ class FakeLauncher:
     def __init__(self) -> None:
         self.started: list[tuple[dict[str, Any], dict[str, Any], str | None]] = []
         self.own_copies: list[OwnCopy | None] = []
+        self.credentials: dict[str, dict[str, str]] = {}
         self.stopped: list[str] = []
         self.exits: dict[str, int] = {}
         self.fail_start = False
@@ -320,6 +322,13 @@ class FakeLauncher:
         self.started.append((session, tier, region))
         self.own_copies.append(own_copy)
         return f"sb-{len(self.started)}"
+
+    def keep_registry_credential(self, user_id: str, username: str, token: str, create: bool = True) -> None:
+        if create or user_id in self.credentials:
+            self.credentials[user_id] = {"REGISTRY_USERNAME": username, "REGISTRY_PASSWORD": token}
+
+    def forget_registry_credential(self, user_id: str) -> None:
+        self.credentials.pop(user_id, None)
 
     def state(self, sandbox_id: str) -> int | None:
         return self.exits.get(sandbox_id)
@@ -377,7 +386,11 @@ class FakeGitHub:
     authorize_url = staticmethod(GitHub.authorize_url)
 
     def __init__(self) -> None:
-        self.codes = {"good-code": Grant("gho_alice_token", "read:packages,repo"), "repo-only-code": Grant("gho_alice_old", "repo")}
+        self.codes = {
+            "good-code": Grant("gho_alice_token", "read:packages,repo"),
+            "repo-only-code": Grant("gho_alice_old", "repo"),
+            "next-code": Grant("gho_alice_next", "read:packages,repo"),
+        }
         self.linked_to_epic: set[str] = set()
         self.epic_refusal: GitHubError | None = None
         self.epic_checks: list[str] = []
@@ -1368,18 +1381,26 @@ def test_unreal_starts_only_for_a_github_account_linked_to_epic(studio):
     github.epic_refusal = None
     assert launcher.started == [], "nothing started while the link was not shown"
 
+    assert launcher.credentials == {}, "connecting GitHub alone keeps no credential for a pull"
     github.linked_to_epic.add("gho_alice_token")
     assert linked() is True
     engine = start().json()["engine"]
     assert engine["app"] == "unreal" and store.sessions[engine["id"]]["status"] == "running"
-    assert launcher.own_copies == [OwnCopy("alice-gh", "gho_alice_token", "5.8")], "pulled with her own token"
+    assert launcher.own_copies == [OwnCopy("5.8")]
+    assert launcher.credentials == {ALICE.id: {"REGISTRY_USERNAME": "alice-gh", "REGISTRY_PASSWORD": "gho_alice_token"}}, (
+        "pulled with her own login and token, kept for her before the start"
+    )
     assert "gho_alice_token" not in json.dumps(store.sessions) + json.dumps(engine), "the token is kept nowhere with the session"
 
+    connect_alice(studio, code="next-code")
+    assert launcher.credentials[ALICE.id]["REGISTRY_PASSWORD"] == "gho_alice_next", "connecting again refreshes it"
     theirs = new_project(client, "bob-token", discipline="games", format="World")
     assert start("bob-token", theirs).status_code == 409, "another user's link is not Bob's"
     client.delete(f"/v1/sessions/{engine['id']}", headers=auth("alice-token"))
     client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "blender", "tier": "t4"})
     assert launcher.own_copies[-1] is None, "an app on Lathe's own license gets no credential"
+    client.delete("/v1/github", headers=auth("alice-token"))
+    assert launcher.credentials == {}, "disconnecting GitHub deletes it"
 
 
 def test_a_queued_unreal_start_uses_the_github_connection_it_has_when_it_starts(studio):
@@ -1395,7 +1416,7 @@ def test_a_queued_unreal_start_uses_the_github_connection_it_has_when_it_starts(
     sessions.reconcile()
     (session,) = store.sessions.values()
     assert session["status"] == "failed" and "Connect GitHub again" in session["end_reason"]
-    assert studio.launcher.started == []
+    assert studio.launcher.started == [] and studio.launcher.credentials == {}
 
 
 def test_a_sealed_token_opens_only_under_its_secret():
@@ -1535,25 +1556,81 @@ def test_the_launcher_starts_each_app_from_its_own_image_in_the_users_workspace(
     assert calls == [("sandbox:sb-1", "engine.commands", {}, 60)]
 
 
-def test_the_launcher_builds_unreal_for_each_start_from_that_users_own_copy():
+class FakeModal:
+    """Modal's named Secrets, as far as the launcher keeps registry credentials in them."""
+
+    def __init__(self) -> None:
+        self.secrets: dict[str, dict[str, str]] = {}
+        fake = self
+
+        class NotFoundError(Exception):
+            pass
+
+        class Secret:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            @staticmethod
+            def from_name(name: str) -> Secret:
+                return Secret(name)
+
+            def hydrate(self) -> Secret:
+                if self.name not in fake.secrets:
+                    raise NotFoundError(self.name)
+                return self
+
+            def update(self, values: dict[str, str]) -> None:
+                fake.secrets[self.hydrate().name].update(values)
+
+        def create(name: str, values: dict[str, str], *, allow_existing: bool = False) -> None:
+            if name in fake.secrets and not allow_existing:
+                raise AssertionError(f"{name} exists")
+            fake.secrets.setdefault(name, dict(values))
+
+        def delete(name: str, *, allow_missing: bool = False) -> None:
+            if name not in fake.secrets and not allow_missing:
+                raise NotFoundError(name)
+            fake.secrets.pop(name, None)
+
+        Secret.objects = SimpleNamespace(create=create, delete=delete)
+        self.module = SimpleNamespace(Secret=Secret, exception=SimpleNamespace(NotFoundError=NotFoundError))
+
+
+def test_the_launcher_pulls_unreal_with_each_users_own_named_secret(monkeypatch):
+    modal = FakeModal()
+    monkeypatch.setitem(sys.modules, "modal", modal.module)
     module = FakeSandboxModule()
     launcher = ModalLauncher(module, app="modal-app")
     tier = {"gpu": "L4", "cpu": 8, "memory_gb": 32}
     session = lambda user: {"id": str(uuid.uuid4()), "user_id": user.id, "app": "unreal", "project_id": None}
     with pytest.raises(RuntimeError, match="cannot build Unreal Engine's image yet"):
-        launcher.start(session(ALICE), tier, None, OwnCopy("alice-gh", "gho_a", "5.8"))
+        launcher.start(session(ALICE), tier, None, OwnCopy("5.8"))
+
+    launcher.keep_registry_credential(BOB.id, "bob-gh", "gho_b", create=False)
+    assert modal.secrets == {}, "refreshing makes no Secret for a user without one"
+    launcher.keep_registry_credential(ALICE.id, "alice-gh", "gho_a")
+    launcher.keep_registry_credential(ALICE.id, "alice-gh", "gho_a2")
+    launcher.keep_registry_credential(BOB.id, "bob-gh", "gho_b")
+    launcher.keep_registry_credential(BOB.id, "bob-gh", "gho_b2", create=False)
+    assert modal.secrets == {
+        f"lathe-ghcr-{ALICE.id}": {"REGISTRY_USERNAME": "alice-gh", "REGISTRY_PASSWORD": "gho_a2"},
+        f"lathe-ghcr-{BOB.id}": {"REGISTRY_USERNAME": "bob-gh", "REGISTRY_PASSWORD": "gho_b2"},
+    }, "one Secret per user, holding their latest token"
 
     pulls = []
-    module.unreal_image = lambda registry_username, registry_token, version: pulls.append(
-        (registry_username, registry_token, version)) or f"unreal:{registry_username}"
-    for user, own in ((ALICE, OwnCopy("alice-gh", "gho_a", "5.8")), (BOB, OwnCopy("bob-gh", "gho_b", "5.8")),
-                      (ALICE, OwnCopy("alice-gh", "gho_a2", "5.8"))):
-        launcher.start(session(user), tier, None, own)
-    assert pulls == [("alice-gh", "gho_a", "5.8"), ("bob-gh", "gho_b", "5.8"), ("alice-gh", "gho_a2", "5.8")], "one pull per start"
-    assert [settings["image"] for _, settings in module.started] == ["unreal:alice-gh", "unreal:bob-gh", "unreal:alice-gh"]
+    module.unreal_image = lambda registry_secret, version: pulls.append((registry_secret.name, version)) or f"unreal:{registry_secret.name}"
+    for user in (ALICE, BOB, ALICE):
+        launcher.start(session(user), tier, None, OwnCopy("5.8"))
+    alice, bob = f"lathe-ghcr-{ALICE.id}", f"lathe-ghcr-{BOB.id}"
+    assert pulls == [(alice, "5.8"), (bob, "5.8"), (alice, "5.8")], "each start pulls with its user's own named Secret"
+    assert [settings["image"] for _, settings in module.started] == [f"unreal:{alice}", f"unreal:{bob}", f"unreal:{alice}"]
     with pytest.raises(RuntimeError, match="own registry credential"):
         launcher.start(session(ALICE), tier, None)
     assert module.images == [], "no image of Unreal is kept for the next start"
+
+    launcher.forget_registry_credential(ALICE.id)
+    launcher.forget_registry_credential(ALICE.id)
+    assert list(modal.secrets) == [bob], "forgetting deletes the user's Secret, and a missing one is no error"
 
 
 def test_github_reads_an_epic_link_from_what_the_token_can_see():

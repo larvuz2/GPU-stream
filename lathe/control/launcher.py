@@ -18,9 +18,16 @@ waits on a definition another start already made; Modal itself caches what
 the definitions build. Nuke's is the exception: it is the image `nuke_image`
 makes from the user's own install in their workspace, defined at each start,
 since the install a user just made has to be in their next session. Unreal
-Engine's is another: Epic's image pulled with the user's own registry
-credential (`OwnCopy`) by the launcher's `unreal_image`, defined at each start
-and never kept here, so one user's copy is never another's image.
+Engine's is another: the launcher's `unreal_image` pulls Epic's image with the
+user's own registry credential, defined at each start and never kept here, so
+one user's copy is never another's image. The credential is a named Modal
+Secret per user, `lathe-ghcr-<user id>` (`REGISTRY_USERNAME`, their GitHub
+login; `REGISTRY_PASSWORD`, their token), rather than one made for each start:
+the layer that pulls the engine is identified by the Secret it pulls with, and
+a Secret of its own each start would pull about 40 GB again every time, where
+the user's named one keeps that layer cached for them. The service writes it
+before each start and when the user connects GitHub again, and deletes it when
+they disconnect (`keep_registry_credential`, `forget_registry_credential`).
 
 Modal is imported where it is used, so the service's tests can stand in for
 the launcher module and run without Modal installed. FilmCraft's command
@@ -39,6 +46,12 @@ from service import IDLE_SECONDS, LIFETIME_SECONDS, READY_SECONDS, OwnCopy
 
 LAUNCHER_DIR = "/root/launcher"
 FILMCRAFT_SECONDS = 60
+REGISTRY_SECRET_PREFIX = "lathe-ghcr-"
+
+
+def registry_secret(user_id: str) -> str:
+    """The name of the Modal Secret that holds a user's own registry credential."""
+    return f"{REGISTRY_SECRET_PREFIX}{user_id}"
 
 
 def origin(url: str) -> str:
@@ -80,8 +93,8 @@ class ModalLauncher:
         """The session image of the session's app: this container's for most apps, the user's own for Nuke and Unreal.
 
         Raises:
-            RuntimeError: For Unreal Engine, a launcher without `unreal_image`, or a start without the
-                user's own registry credential.
+            RuntimeError: For Unreal Engine, a launcher without `unreal_image`, or a start that is not
+                of the user's own copy.
         """
         app = session.get("app") or "blender"
         if app == "nuke":
@@ -92,10 +105,10 @@ class ModalLauncher:
                 raise RuntimeError("This deployment's launcher cannot build Unreal Engine's image yet.")
             if own_copy is None:
                 raise RuntimeError("Unreal Engine is pulled only with the user's own registry credential.")
+            import modal
+
             return build(
-                registry_username=own_copy.registry_username,
-                registry_token=own_copy.registry_token,
-                version=own_copy.version,
+                registry_secret=modal.Secret.from_name(registry_secret(session["user_id"])), version=own_copy.version
             )
         if app not in self.images:
             self.images[app] = self.launcher.session_image(app)
@@ -141,6 +154,32 @@ class ModalLauncher:
             sandbox.terminate()
             raise
         return sandbox.object_id
+
+    def keep_registry_credential(self, user_id: str, username: str, token: str, create: bool = True) -> None:
+        """Write the user's registry login and token into their own Secret, made first where `create` says to.
+
+        Without `create`, a user with no Secret yet is left without one: connecting GitHub alone
+        keeps no token in Modal.
+        """
+        import modal
+
+        name = registry_secret(user_id)
+        values = {"REGISTRY_USERNAME": username, "REGISTRY_PASSWORD": token}
+        if create:
+            # Made where missing; one that exists keeps its values until the update below
+            modal.Secret.objects.create(name, values, allow_existing=True)
+        else:
+            try:
+                modal.Secret.from_name(name).hydrate()
+            except modal.exception.NotFoundError:
+                return
+        modal.Secret.from_name(name).update(values)
+
+    def forget_registry_credential(self, user_id: str) -> None:
+        """Delete the user's registry Secret, if they have one."""
+        import modal
+
+        modal.Secret.objects.delete(registry_secret(user_id), allow_missing=True)
 
     def state(self, sandbox_id: str) -> int | None:
         return self.sandbox(sandbox_id).poll()

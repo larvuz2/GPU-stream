@@ -96,10 +96,13 @@ against stand-ins for it.
   user's token sees `EpicGames/UnrealEngine` and the
   `ghcr.io/epicgames/unreal-engine` package (`GET /v1/github`: `epic_linked`,
   `null` without GitHub or the scope). Starting `unreal` (catalog status `byol`)
-  is refused until it is linked, with the steps that link it, and a start hands
-  the launcher that user's own login and token for that start alone
-  (`OwnCopy`), which `launcher.py` passes to `unreal_image` where the launcher
-  has one.
+  is refused until it is linked, with the steps that link it. Each start writes
+  the user's login and token into their own named Modal Secret,
+  `lathe-ghcr-<user id>` (`REGISTRY_USERNAME`, `REGISTRY_PASSWORD`), which a
+  reconnect refreshes and a disconnect deletes, and `launcher.py` passes that
+  Secret to `unreal_image(registry_secret, version)` where the launcher has
+  one. Named rather than made per start, so the layer that pulls the engine
+  (about 40 GB) stays cached per user.
 - **The studio.** The catalog lists Unreal Engine 5.8 as `byol`, labeled "Your
   Epic account" on the landing page. Choosing it in the Environment panel shows
   the link: linked, not linked with the steps and Epic's page, or GitHub to
@@ -110,13 +113,12 @@ against stand-ins for it.
 
 ## What is open
 
-- `unreal_image(registry_username, registry_token, version)` in
-  `addons/modal/sandbox.py`, and the session on it: the editor started off
-  screen with editor streaming, the TURN relay, Blender beside it with the
-  add-on, `selkies-modal-project` and this folder on the editor's Python path,
-  and `DefaultRemoteControl.ini` in the editor's project. Whether Modal shares
-  a layer pulled with one user's credential with another user's build has to be
-  checked there.
+- `unreal_image(registry_secret, version)` in `addons/modal/sandbox.py`, and
+  the session on it: the editor started off screen with editor streaming, the
+  TURN relay, Blender beside it with the add-on, `selkies-modal-project` and
+  this folder on the editor's Python path, and `DefaultRemoteControl.ini` in
+  the editor's project. Whether Modal shares a layer pulled with one user's
+  Secret with another user's build has to be checked there.
 - The control plane does not report a session's `streams` yet: the editor's
   stream address comes with the transport (order of work, step 1).
 - Unverified against a running editor: the Remote Control body follows Epic's

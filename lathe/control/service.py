@@ -40,10 +40,13 @@ An app of status `byol` runs on a license the user brings, checked before it
 starts. Unreal Engine's is the user's Epic account, which Epic links to a
 GitHub account: the session starts only while the user's connected GitHub
 account shows that link (`epic_link`), and its image is pulled from Epic's
-registry with that user's own token, handed to the launcher for that one start
-(`OwnCopy`) and never kept beside the session or shared with another user's,
-since Epic's license lets each user have their copy but not Lathe hand one
-copy around (`lathe/UNREAL.md`).
+registry with that user's own GitHub login and token, since Epic's license
+lets each user have their copy but not Lathe hand one copy around
+(`lathe/UNREAL.md`). The launcher keeps that credential as the user's own
+registry credential (`Launcher.keep_registry_credential`), written again at
+every start of the app and when the user connects GitHub again, and forgotten
+when they disconnect it; it is never kept beside a session or used for another
+user's image.
 """
 
 from __future__ import annotations
@@ -133,15 +136,13 @@ class User:
 
 @dataclass(frozen=True)
 class OwnCopy:
-    """What the launcher pulls a user's own copy of an app with: their registry login and token, and the version.
+    """A start that pulls the user's own copy of an app, of this version.
 
-    It is made for one start from the user's sealed GitHub token and goes only to
-    that start's image (`launcher.py`), as the Modal Secret's `REGISTRY_USERNAME`
-    and `REGISTRY_PASSWORD`.
+    The copy is pulled with the registry credential the launcher keeps for the
+    session's user, which the service writes before the start
+    (`Launcher.keep_registry_credential`).
     """
 
-    registry_username: str
-    registry_token: str
     version: str
 
 
@@ -370,8 +371,18 @@ class Launcher(Protocol):
     ) -> str:
         """Start the session's Sandbox, wait until it streams, and return the Sandbox's ID.
 
-        `own_copy` is given for an app the user brings the license of, whose image is pulled with it.
+        `own_copy` is given for an app the user brings the license of, whose image is pulled with
+        the registry credential kept for the session's user.
         """
+
+    def keep_registry_credential(self, user_id: str, username: str, token: str, create: bool = True) -> None:
+        """Keep the user's own registry login and token, which their copies of an app are pulled with.
+
+        With `create` false, only a credential already kept for the user is written again.
+        """
+
+    def forget_registry_credential(self, user_id: str) -> None:
+        """Delete the registry credential kept for the user, if there is one."""
 
     def state(self, sandbox_id: str) -> int | None:
         """The Sandbox's exit status, or nothing while it runs."""
@@ -1234,10 +1245,10 @@ class Sessions:
             )
 
     def own_copy(self, session: dict[str, Any]) -> OwnCopy:
-        """What a start of the session's app pulls the user's own copy with: their GitHub login and token.
+        """Have the launcher keep the user's GitHub login and token for a start of their own copy, and describe it.
 
-        Read at the start itself, so a session that waited in the queue starts with the connection
-        the user has then.
+        Written at the start itself, so a session that waited in the queue starts with the
+        connection the user has then.
 
         Raises:
             Refused: 409 for a user whose GitHub connection is gone or no longer opens.
@@ -1246,7 +1257,8 @@ class Sessions:
         token = unseal(self.config.secret_key, connection["token_encrypted"]) if connection else None
         if connection is None or token is None:
             raise Refused(409, "Connect GitHub again: the engine is pulled with your own GitHub account.")
-        return OwnCopy(connection["login"], token, self.catalog.apps[session["app"]]["version"])
+        self.launcher.keep_registry_credential(session["user_id"], connection["login"], token)
+        return OwnCopy(self.catalog.apps[session["app"]]["version"])
 
     def site_page(self, url: str) -> bool:
         """Whether a URL is a page of the site, the only place GitHub's callback sends anyone back to.
@@ -1281,6 +1293,9 @@ class Sessions:
     def github_callback(self, code: str, state: str, error: str, api_url: str) -> str:
         """Finish a connection GitHub sent a user back from, and return the page to send them on to.
 
+        A registry credential the launcher already keeps for the user takes the new token; a user
+        who never started an app on their own license gets none from connecting.
+
         Raises:
             Refused: 400 for a state this deployment did not sign, one that expired, or one naming a
                 page off the site; then nothing is exchanged and no page is visited.
@@ -1309,10 +1324,22 @@ class Sessions:
             },
             on_conflict="user_id",
         )
+        try:
+            self.launcher.keep_registry_credential(payload["u"], account["login"], grant.token, create=False)
+        except Exception:
+            # The connection is made; the next start of an app on the user's own license writes
+            # the credential again before it pulls anything
+            pass
         return with_query(payload["r"], github="connected")
 
     def github_disconnect(self, user: User) -> dict[str, Any]:
-        """Forget the user's GitHub connection and its token; returns what `GET /v1/github` now says."""
+        """Forget the user's GitHub connection, its token, and the registry credential kept from it.
+
+        The credential goes first, so a disconnect the launcher fails leaves the connection there
+        for the user to disconnect again, rather than a token in Modal that nothing points at.
+        Returns what `GET /v1/github` now says.
+        """
+        self.launcher.forget_registry_credential(user.id)
         self.store.delete("github_connections", user_id=f"eq.{user.id}")
         return self.github_status(user, epic=True)
 

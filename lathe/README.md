@@ -113,11 +113,15 @@ through their GitHub account. What each user needs:
    `epic_linked: true` once the account sees Epic's `EpicGames/UnrealEngine`
    repository and its images on `ghcr.io/epicgames/unreal-engine`.
 
-What the deployment needs: the launcher's `unreal_image(registry_username,
-registry_token, version)` in `addons/modal/sandbox.py`, which pulls Epic's image
-with the credential the control plane hands it for that one start (the user's
-GitHub login and token) and layers the session, Blender, and the bridge on it;
-until it is there, an Unreal start fails saying so. A GPU tier with NVENC: the
+What the deployment needs: the launcher's `unreal_image(registry_secret,
+version)` in `addons/modal/sandbox.py`, which pulls Epic's image with the
+user's own named Modal Secret and layers the session, Blender, and the bridge on
+it; until it is there, an Unreal start fails saying so. The control plane keeps
+that Secret, `lathe-ghcr-<user id>` (`REGISTRY_USERNAME` and
+`REGISTRY_PASSWORD`, the user's GitHub login and token), writing it before
+each Unreal start and when the user connects GitHub again and deleting it when
+they disconnect; a named Secret keeps the layer that pulls the engine cached
+per user, where one made for each start would pull it again every time. A GPU tier with NVENC: the
 editor renders off screen on the GPU and streams itself. Inside the image, the
 Unreal project the session opens needs the Python Editor Script Plugin and the
 Remote Control API plugin, with `addons/modal/unreal/DefaultRemoteControl.ini`

@@ -17,7 +17,8 @@ which with the check that it lies under the site's own address
 The token is stored only encrypted, with Fernet under a key derived from the
 same secret (`seal`, `unseal`), and leaves the control plane only in requests
 to GitHub, and as the user's own credential for pulling their copy of an app
-from GitHub's container registry (`service.py`, `OwnCopy`). Each key derived
+from GitHub's container registry, which the launcher keeps as that user's own
+Modal Secret (`launcher.py`). Each key derived
 from the secret is for one purpose, so a signed state can never be read as a
 sealed token or the reverse.
 
