@@ -7,18 +7,19 @@
 /**
  * The landing page's questions and answers, each a native disclosure.
  *
- * The answers say what the product does today and stop there; what a number is comes from the
- * catalog. The questions written here are the first take's; the second take of the landing page
- * renders the same section with its own (`creative/CreativeLanding.tsx`).
+ * The answers say what the studio does today and stop there: what is live, what a number is, and
+ * which engine needs a license of the user's own all come from the catalog, and nothing is priced
+ * that the catalog does not price.
  * @module
  */
 import { ChevronDown } from 'lucide-react';
 import { brand, catalog, IDLE_SHUTDOWN_MINUTES, liveApps } from '../lib/catalog';
 import { usd } from '../lib/format';
 import { SectionHeading } from './SectionHeading';
+import { appsWithStatus, listFormat, liveDisciplines } from './studio';
 
 /** A question and its answer. */
-export interface Question {
+interface Question {
   /** The question, as a visitor would ask it. */
   question: string;
   /** The answer. */
@@ -26,71 +27,82 @@ export interface Question {
 }
 
 /**
- * The first take's questions, written from the catalog.
+ * The questions, answered from the catalog.
  *
  * @returns The questions in the order they are shown.
  */
-function technicalQuestions(): Question[] {
-  const app = liveApps[0]?.name ?? 'the app';
-  return [
+function questions(): Question[] {
+  const engines = listFormat.format(liveApps.map((app) => app.name));
+  const disciplines = listFormat.format(liveDisciplines.map((discipline) => discipline.name.toLowerCase()));
+  const next = listFormat.format(appsWithStatus('next').map((app) => app.name));
+  const team = appsWithStatus('team');
+  const answers: Question[] = [
     {
-      question: 'What happens to my files?',
+      question: 'What can I make today?',
       answer:
-        'Files in your workspace persist between sessions: save there, and they are back the next time you start one. Anything left elsewhere on the machine belongs to that session and goes away with it, so treat the workspace as your project folder.',
+        liveApps.length === 0
+          ? 'The first engines are being set up, and this page will say so when they are ready.'
+          : `Projects in ${disciplines}, worked in ${engines}.${
+              next === '' ? '' : ` ${next} ${appsWithStatus('next').length === 1 ? 'is' : 'are'} coming next.`
+            } You can start a project in any of the ${catalog.disciplines.length} disciplines, and the agent plans it with you while its engines are on the way.`,
     },
     {
-      question: 'What does idle shutdown mean?',
-      answer: `If a session sees no activity for ${IDLE_SHUTDOWN_MINUTES} minutes, it shuts itself down and stops spending credits. It is there so a tab you forgot does not run all night. Your workspace files are kept.`,
+      question: 'What is an engine?',
+      answer: `A real piece of creative software, such as ${engines === '' ? 'a video editor or a 3D suite' : engines}, running on a cloud GPU and streamed to your browser tab. The agent works in it through the same commands its menus run, and you can take the controls whenever you like.`,
     },
     {
-      question: 'Which browsers work?',
+      question: 'Do I need a powerful computer or anything installed?',
       answer:
-        'A current version of Chrome, Edge, Firefox, or Safari. Creative apps are built for a keyboard and a mouse, so a desktop or laptop is the comfortable way to use them.',
+        'No. The engines run and render on cloud GPUs. Your computer plays the stream and sends your keyboard and mouse, which any machine that plays video comfortably can do, in a current version of Chrome, Edge, Firefox, or Safari.',
     },
     {
-      question: 'Do I need a GPU on my own computer?',
-      answer: `No. ${app} runs and renders on the cloud workstation. Your computer plays the stream and sends your input, which any machine that plays video comfortably can do.`,
+      question: 'Who makes the decisions?',
+      answer:
+        'You do. The agent asks at every decision that is yours, such as the story, the cast, the ending, or the cut, and offers choices you can pick or answer in your own words. You can watch it work and steer at any moment.',
     },
     {
-      question: 'Can an AI agent use it?',
-      answer: `Yes. ${brand} has an MCP endpoint. Create an API key, add the endpoint to Claude with one command, and Claude can start a session, run Python inside the ${app} you are watching, take screenshots to check its work, and stop the session.`,
+      question: 'Where do my files live?',
+      answer:
+        'In the project. Every engine of a project opens the same project folder, so they work on the same files. Connect GitHub and the project also gets a repository, where the agent commits the script, the library, and the shot list as it works.',
+    },
+    {
+      question: 'What happens when I walk away?',
+      answer: `An engine that sees no activity for ${IDLE_SHUTDOWN_MINUTES} minutes shuts itself down and stops spending credits, so a forgotten tab does not run all night. The project and its files are kept.`,
     },
     {
       question: 'How is it billed?',
-      answer: `With credits. One credit is ${usd(catalog.credit_usd)}, and each tier spends a set number of credits per minute. A new account starts with ${catalog.signup_credits} credits; after that you buy credit packs when you want more. There is no subscription.`,
+      answer: `With credits, and no subscription. One credit is ${usd(catalog.credit_usd)}, each engine spends a set number of credits per minute on the tier it runs on, and a new account starts with ${catalog.signup_credits} free credits. Pricing for the agent's own model and for generation will be listed here before either is billed.`,
     },
   ];
-}
-
-/** Props of {@link Faq}. */
-interface FaqProps {
-  /** The section's title. */
-  title?: string;
-  /** The sentence under the title. */
-  lede?: string;
-  /** The questions to answer, in order; the first take's when left out. */
-  questions?: Question[];
+  for (const app of team) {
+    answers.push({
+      question: `Why is ${app.name} for teams only?`,
+      answer: `${app.name} is licensed per person by its maker, so each person signs in with their own license inside the session. Offering it beyond the team needs the maker's agreement, so for now ${brand} opens it to the team's accounts only.`,
+    });
+  }
+  return answers;
 }
 
 /**
  * Renders the FAQ section.
  *
- * @param props The component's props.
  * @returns The section.
  */
-export function Faq({
-  title = 'Fair questions, straight answers',
-  lede = 'The things people ask before they launch their first session.',
-  questions = technicalQuestions(),
-}: FaqProps) {
+export function Faq() {
   return (
     <section id="faq" className="section" aria-labelledby="faq-title">
       <div className="shell grid grid-cols-[minmax(0,1fr)] gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] lg:gap-16">
-        <div className="lg:sticky lg:top-[calc(7rem+var(--compare-bar))] lg:self-start">
-          <SectionHeading id="faq-title" eyebrow="FAQ" title={title} lede={lede} start />
+        <div className="lg:sticky lg:top-28 lg:self-start">
+          <SectionHeading
+            id="faq-title"
+            eyebrow="FAQ"
+            title="Fair questions, straight answers"
+            lede="The things people ask before they start their first project."
+            start
+          />
         </div>
         <div className="grid gap-3">
-          {questions.map(({ question, answer }) => (
+          {questions().map(({ question, answer }) => (
             <details key={question} className="faq glass group">
               <summary className="flex items-center justify-between gap-4 rounded-[inherit] p-5 text-[1.0625rem] font-semibold tracking-tight sm:px-6">
                 {question}

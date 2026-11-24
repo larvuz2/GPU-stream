@@ -11,8 +11,9 @@
  * here and every image that uses one tolerates its absence (`components/Art.tsx`): the art is
  * decoration over a gradient, and a logo falls back to the app's name in text.
  *
- * Art follows the catalog by name, one image per app identifier. Logos are listed, because only
- * some apps have one and an `<img>` needs each file's proportions to reserve its space.
+ * Art follows the catalog by name: one image per app identifier and one per discipline identifier.
+ * Engine pictures and logos are listed, because only some apps have one, and an `<img>` needs each
+ * logo's proportions to reserve its space.
  * @module
  */
 
@@ -32,14 +33,19 @@ const APP_LOGOS: Readonly<Record<string, LogoFile>> = {
   unreal: { src: '/logos/unreal.svg', width: 1002, height: 1092 },
 };
 
-/** The hero's art, 16:9. */
+/** The landing page's hero backdrop, 20:9, its subject in the right half. */
 export const HERO_ART = '/media/hero.webp';
 
-/** The art of the second landing page's hero, 16:9. */
-export const CREATIVE_HERO_ART = '/media/hero-creative.webp';
+/** The still the landing page's video frame shows until the product video plays, 16:9. */
+export const VIDEO_POSTER = '/media/video-poster.webp';
 
-/** The art beside the agent section's command, 3:2. */
-export const AGENT_ART = '/media/claude.webp';
+/**
+ * The product video the landing page's video frame plays, or `null` while there is none.
+ *
+ * The frame is built around this one value: setting it to the video's address turns the frame's
+ * play button from a "coming soon" note into the player, with {@link VIDEO_POSTER} as its poster.
+ */
+export const PRODUCT_VIDEO: string | null = null;
 
 /**
  * The art of an app's card, 3:2.
@@ -52,13 +58,45 @@ export function appImage(appId: string): string {
 }
 
 /**
- * The art of a use case on the second landing page, 3:2.
+ * The art of a discipline's card, 3:2.
  *
- * @param name The use case's short name, the stem its file is delivered under.
+ * @param disciplineId The catalog identifier of the discipline.
  * @returns The address the image is served from.
  */
-export function useCaseImage(name: string): string {
-  return `/media/use-${encodeURIComponent(name)}.webp`;
+export function disciplineImage(disciplineId: string): string {
+  return `/media/discipline-${encodeURIComponent(disciplineId)}.webp`;
+}
+
+/**
+ * The picture of an engine at work, 16:9, by app identifier: the engine's own interface where it
+ * is open source, and concept art where the software is someone else's product, whose interface the
+ * site does not show.
+ */
+const ENGINE_ART: Readonly<Record<string, string>> = {
+  filmcraft: '/media/engine-filmcraft.webp',
+  blender: '/media/engine-blender.webp',
+  photocraft: '/media/engine-photocraft.webp',
+  unreal: appImage('unreal'),
+};
+
+/**
+ * The picture of an engine at work.
+ *
+ * @param appId The catalog identifier of the app.
+ * @returns The address the image is served from, or `undefined` for an engine without one.
+ */
+export function engineImage(appId: string): string | undefined {
+  return Object.hasOwn(ENGINE_ART, appId) ? ENGINE_ART[appId] : undefined;
+}
+
+/**
+ * The portrait of a character in the landing page's illustration of a project library, 1:1.
+ *
+ * @param name The character's short name, the stem its file is delivered under.
+ * @returns The address the image is served from.
+ */
+export function characterImage(name: string): string {
+  return `/media/character-${encodeURIComponent(name)}.webp`;
 }
 
 /**
