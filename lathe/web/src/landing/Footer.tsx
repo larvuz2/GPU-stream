@@ -5,36 +5,22 @@
  */
 
 /**
- * The end of the landing page: the last call to action and the footer, which carries the
- * trademark notice for the apps the page names by their owners' logos. Both takes of the landing
- * page end here; the call to action takes each one's closing words.
+ * The end of the landing page: the last call to action, which sends the visitor back to the
+ * prompt box, and the footer, which carries the notice that the product names on the page are their
+ * owners' and that the art is illustrative.
  * @module
  */
 import { ArrowRight } from 'lucide-react';
 import { Brand } from '../components/Brand';
 import { brand, catalog } from '../lib/catalog';
-
-/** Props of {@link FinalCta}. */
-interface FinalCtaProps {
-  /** The opening words of the title. */
-  lead?: string;
-  /** The words of the title set in the gradient. */
-  accent?: string;
-  /** The sentence under the title, before the note on the free credits. */
-  body?: string;
-}
+import { CREATE_HASH } from './studio';
 
 /**
  * Renders the closing call to action.
  *
- * @param props The component's props.
  * @returns The section.
  */
-export function FinalCta({
-  lead = 'Your studio is',
-  accent = 'one tab away',
-  body = 'Create an account, pick an app, and open the tab.',
-}: FinalCtaProps) {
+export function FinalCta() {
   return (
     <section className="section pt-6" aria-labelledby="cta-title">
       <div className="shell">
@@ -52,14 +38,15 @@ export function FinalCta({
             aria-hidden="true"
           />
           <h2 id="cta-title" className="display mx-auto max-w-3xl text-[2.2rem] sm:text-6xl">
-            {lead} <span className="text-gradient">{accent}</span>
+            What will you <span className="text-gradient">create?</span>
           </h2>
           <p className="lede mx-auto mt-5 max-w-xl text-[1.0625rem] sm:text-lg">
-            {body} The first {catalog.signup_credits} credits are on us.
+            Describe it in a sentence, and an agent starts building it with you. The first {catalog.signup_credits}{' '}
+            credits are on us.
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <a href="#signup" className="btn btn-primary btn-lg w-full sm:w-auto">
-              Start free — {catalog.signup_credits} credits on us
+            <a href={CREATE_HASH} className="btn btn-primary btn-lg w-full sm:w-auto">
+              Start creating
               <ArrowRight className="size-4" aria-hidden="true" />
             </a>
             <a href="#pricing" className="btn btn-ghost btn-lg w-full sm:w-auto">
@@ -77,9 +64,10 @@ const YEAR = new Date().getFullYear();
 
 /** The footer's links, in reading order. */
 const FOOTER_LINKS = [
-  { href: '#apps', label: 'Apps' },
+  { href: '#disciplines', label: 'Disciplines' },
   { href: '#how', label: 'How it works' },
-  { href: '#claude', label: 'For Claude' },
+  { href: '#workspace', label: 'Workspace' },
+  { href: '#engines', label: 'Engines' },
   { href: '#pricing', label: 'Pricing' },
   { href: '#faq', label: 'FAQ' },
   { href: '#signin', label: 'Sign in' },
@@ -97,7 +85,7 @@ export function Footer() {
         <div className="flex flex-col gap-8 md:flex-row md:items-center md:justify-between">
           <div>
             <Brand href="#top" />
-            <p className="mt-3 max-w-xs text-sm text-muted">Spin up a GPU studio in your browser.</p>
+            <p className="mt-3 max-w-xs text-sm text-muted">Describe it. An agent builds it with you.</p>
           </div>
           <nav aria-label="Footer">
             <ul className="flex flex-wrap gap-x-6 gap-y-3 text-sm text-muted">
@@ -113,11 +101,8 @@ export function Footer() {
         </div>
         <div className="mt-10 grid gap-3 border-t border-line pt-8 text-xs leading-relaxed text-faint">
           <p>
-            Blender is a trademark of the Blender Foundation. Unreal Engine is a trademark of Epic Games. {brand} is
-            not affiliated with either.
-          </p>
-          <p>
-            Other product names and logos belong to their owners. Artwork on this page is illustrative.
+            Product names on this page are trademarks of their owners, and {brand} is not affiliated with them. The
+            artwork is illustrative, made for this page, and is not anyone&apos;s project.
           </p>
           <p>
             © {YEAR} {brand}
