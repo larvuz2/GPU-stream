@@ -71,6 +71,8 @@ from typing import Any, Callable, Protocol
 import anthropic
 
 from generation import (
+    VIDEO_LONGEST,
+    video_kilotokens,
     IMAGE_ASPECT_RATIOS,
     IMAGE_MODELS,
     IMAGE_REFERENCES,
@@ -1181,7 +1183,7 @@ class Agent:
         output = generator.run(endpoint, arguments, turn.alive, IMAGE_SECONDS)
         stem = ((target or {}).get("tag") or "image").lstrip("@")
         target, media = self.keep(turn, [image["url"] for image in output["images"]], target, stem)
-        cost = generator.cost(endpoint, {"image": len(media)})
+        cost = generator.cost(endpoint, {"image": len(media), "unit": len(media)})
         return self.generated("image", endpoint, media, target, output.get("seed"), cost)
 
     def tool_generate_video(
@@ -1200,6 +1202,8 @@ class Agent:
             raise Refused(400, f"A video takes at most {VIDEO_REFERENCES} references.")
         if model == "draft":
             resolution = "480p"
+        if duration_seconds and duration_seconds > VIDEO_LONGEST[model]:
+            raise Refused(400, f"The {model} model makes clips of at most {VIDEO_LONGEST[model]} seconds; use fast for longer.")
         if resolution not in VIDEO_RESOLUTIONS[model]:
             raise Refused(400, f"The {model} model makes {' or '.join(VIDEO_RESOLUTIONS[model])}; use standard for {resolution}.")
         chosen = self.references(turn, references or [], ("image", "video", "audio"))
@@ -1209,7 +1213,10 @@ class Agent:
         output = generator.run(endpoint, arguments, turn.alive, VIDEO_SECONDS)
         stem = ((target or {}).get("tag") or "video").lstrip("@")
         target, media = self.keep(turn, [output["video"]["url"]], target, stem)
-        units = {"video": 1.0, **({"second": float(duration_seconds)} if duration_seconds else {})}
+        units = {"video": 1.0}
+        if duration_seconds:
+            units["second"] = float(duration_seconds)
+            units["1000 token"] = video_kilotokens(resolution, aspect_ratio, duration_seconds)
         return self.generated("video", endpoint, media, target, output.get("seed"), generator.cost(endpoint, units))
 
     # Engines

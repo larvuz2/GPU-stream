@@ -57,7 +57,11 @@ VIDEO_MODELS = {
     "draft": "bytedance/seedance-2.5/reference-to-video",
 }
 VIDEO_RESOLUTIONS = {"standard": ("480p", "720p", "1080p"), "fast": ("480p", "720p"), "draft": ("480p",)}
+# The longest clip each video model makes, in seconds (its schema on fal lists 4 up to this)
+VIDEO_LONGEST = {"standard": 14, "fast": 30, "draft": 14}
 VIDEO_REFERENCES = 30
+# Seedance bills a video by tokens, computed at this frame rate whatever the output's
+VIDEO_TOKEN_FPS = 24
 IMAGE_ASPECT_RATIOS = ("auto", "21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16")
 VIDEO_ASPECT_RATIOS = ("auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16")
 # Seedream takes a size class, not a ratio: each ratio's nearest
@@ -132,6 +136,19 @@ def video_arguments(
     return VIDEO_MODELS[choice], arguments
 
 
+def video_kilotokens(resolution: str, aspect_ratio: str, seconds: float) -> float:
+    """Thousands of the tokens Seedance bills a video by: its pixels per frame, times its frames, over 1024.
+
+    A resolution (`720p`) names the frame's short side and the aspect ratio
+    its long one; `auto` is costed as 16:9, the widest frame Seedance picks.
+    At 720p and 16:9 a second is 21,600 tokens.
+    """
+    short = int(resolution.rstrip("p"))
+    wide, tall = (16, 9) if aspect_ratio == "auto" else (int(side) for side in aspect_ratio.split(":"))
+    pixels = short * short * max(wide, tall) / min(wide, tall)
+    return pixels * VIDEO_TOKEN_FPS * seconds / 1024 / 1000
+
+
 class Fal:
     """fal's queue API and pricing API with a key (`FAL_KEY`)."""
 
@@ -180,8 +197,10 @@ class Fal:
     def cost(self, model: str, units: dict[str, float]) -> float | None:
         """fal's estimate of a call's cost: its price per unit times the call's units of that kind.
 
-        `units` counts what the call made by unit name (`image`, `second`); a
-        model priced in another unit is estimated by fal from past calls. The
+        `units` counts what the call made by unit name, in the singular fal's
+        price names (`image`, `unit` for a model priced per output, `1000
+        token` for a video priced in tokens); a model priced in another unit is
+        estimated by fal from past calls. The
         estimate is something to show, never something a generation waits
         on, so a pricing API that does not answer leaves it out.
         """

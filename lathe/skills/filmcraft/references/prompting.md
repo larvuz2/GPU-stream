@@ -255,7 +255,7 @@ Change one thing per retake and say which, so the person learns with you what mo
 
 | Model id | Duration | Resolutions | Price |
 |---|---|---|---|
-| `bytedance/seedance-2.5/reference-to-video` | auto, 4-30 s | 480p, 720p, 1080p, 4k | $0.2205, $0.4730, $1.164, $1.840 per s |
+| `bytedance/seedance-2.5/reference-to-video` | auto, 4-14 s | 480p, 720p, 1080p, 4k | $0.2205, $0.4730, $1.164, $1.840 per s |
 | `bytedance/seedance-2.5/us/reference-to-video` | same | same | same |
 | `bytedance/seedance-2.5/flash/reference-to-video` | auto, 4-30 s | 480p, 720p | $0.1345, $0.3024 per s |
 | `bytedance/seedance-2.0/reference-to-video` | auto, 4-15 s | 480p to 4k | $0.014 per 1,000 tokens (720p about $0.30 per s) |

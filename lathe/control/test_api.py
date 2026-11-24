@@ -40,7 +40,7 @@ from fastapi.testclient import TestClient
 
 from agent import TOOL_NAMES, Agent, Claude, Reply, echoable, invalid, read_skills, replace_tags, skills_for
 from api import create_app
-from generation import IMAGE_MODELS, VIDEO_MODELS, Fal, GenerationStopped
+from generation import IMAGE_MODELS, VIDEO_MODELS, Fal, GenerationStopped, video_kilotokens
 from github_client import GitHub, GitHubError, read_state, seal, sign_state, unseal
 from launcher import ModalLauncher, origin
 from service import OPEN, Catalog, Config, Refused, Sessions, Store, User, hash_key
@@ -987,6 +987,21 @@ def test_a_dead_turn_does_not_hold_the_project(studio):
     assert kinds == ["user_message", "error", "turn_end", "user_message"]
 
 
+def test_a_clip_longer_than_its_model_makes_is_refused_before_fal_is_asked(studio):
+    client, fal, model = studio.client, studio.fal, studio.model
+    film = new_project(client)
+    model.script(
+        reply(use("generate_video", prompt="A wide coast at dusk.", duration_seconds=20, resolution="720p")),
+        reply(use("generate_video", prompt="A wide coast at dusk.", duration_seconds=20, resolution="720p", model="fast")),
+        reply(say("Done.")),
+    )
+    assert message(client, film["id"], "Make the long shot").status_code == 202
+    ends = [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "tool_end"]
+    assert not ends[0]["ok"] and "at most 14 seconds" in ends[0]["summary"], "the standard model stops at 14 s"
+    assert ends[1]["ok"], "the fast model makes 30 s"
+    assert [called for called, _ in fal.calls] == ["bytedance/seedance-2.5/flash/reference-to-video"]
+
+
 def test_the_agent_works_through_its_tools_and_only_ever_appends_to_the_conversation(studio):
     client, fal, model, store = studio.client, studio.fal, studio.model, studio.store
     film = new_project(client)
@@ -1505,7 +1520,12 @@ def test_fal_runs_a_generation_through_its_queue_and_prices_it():
     """The real `Fal` over a recorded fal: submit, poll the URLs fal gave, fetch, cancel when stopped, and price."""
     seen: list[httpx.Request] = []
     queue = "https://queue.fal.run/fal-ai/nano-banana-pro/requests/r1"
-    prices = {"fal-ai/nano-banana-pro": ("0.15", "images"), "bytedance/seedance-2.5/reference-to-video": ("0.014", "1000 tokens")}
+    prices = {
+        "fal-ai/nano-banana-pro": ("0.15", "images"),
+        "bytedance/seedream/v5.5/edit": ("0.03", "units"),
+        "bytedance/seedance-2.5/reference-to-video": ("0.0214", "1000 tokens"),
+        "fal-ai/other-video": ("0.014", "megapixels"),
+    }
 
     def answer(request: httpx.Request) -> httpx.Response:
         seen.append(request)
@@ -1540,5 +1560,10 @@ def test_fal_runs_a_generation_through_its_queue_and_prices_it():
     assert [(request.method, str(request.url)) for request in seen][1:] == [("PUT", f"{queue}/cancel")], "a stopped turn cancels what it queued"
 
     assert fal.cost("fal-ai/nano-banana-pro", {"image": 2}) == 0.3
-    assert fal.cost("bytedance/seedance-2.5/reference-to-video", {"video": 1, "second": 6}) == 2.5, "priced in tokens: fal's per-call estimate"
+    assert fal.cost("bytedance/seedream/v5.5/edit", {"image": 2, "unit": 2}) == 0.06, "priced per output"
+    tokens = video_kilotokens("720p", "16:9", 4)
+    assert tokens == 86.4, "720p 16:9 is 21,600 tokens a second"
+    assert video_kilotokens("720p", "9:16", 4) == tokens and video_kilotokens("720p", "auto", 4) == tokens
+    assert fal.cost("bytedance/seedance-2.5/reference-to-video", {"video": 1, "second": 4, "1000 token": tokens}) == 1.849
+    assert fal.cost("fal-ai/other-video", {"video": 1, "second": 6}) == 2.5, "priced in a unit the call does not count: fal's estimate"
     assert fal.cost("unknown/model", {"image": 1}) is None, "a price fal does not give is left out"
