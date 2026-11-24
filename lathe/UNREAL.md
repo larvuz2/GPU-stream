@@ -49,7 +49,7 @@ it is offered to the public.
 
 | Part | What it is |
 | --- | --- |
-| Identity | Needed for the editor only. The user connects GitHub (Lathe's existing step, now also asking `read:packages`) and links that GitHub account to their Epic account on epicgames.com. Lathe checks the link by whether their token can see `EpicGames/UnrealEngine`, and the agent says how to link when the user asks for the editor without it. |
+| Identity | Needed for the editor only. The user links a GitHub account to their Epic account on epicgames.com and connects it in Lathe with "Connect Epic", an OAuth App that asks for `read:packages` alone, apart from the GitHub App their repositories come through. Lathe checks the link with the registry itself: whether `ghcr.io`'s token service grants that account a pull of `epicgames/unreal-engine`. The studio shows the steps with the button, and the agent says them when the user asks for the editor without the link. |
 | Image | Without the Epic link: one shared desktop image (`session_image("unreal")`) with the GitHub client, Git LFS, Firefox, and Blender, nothing of Epic's in it. With it, per user: Epic's development image of 5.8.4 pulled with the user's token, with the same desktop, the bridge, and a TURN relay layered on it. Built once per user and version, then cached; never shared between users. |
 | Machine | L4 (24 GB, two NVENC, AV1), 8 cores, 32 GB by default; L40S (48 GB) for heavy scenes. A100 and H100 have no NVENC and are not offered. |
 | Picture | Two streams of one machine, `Desktop` (files, the GitHub client, Blender, the browser for Epic and Fab sign-ins) and `Unreal` (the editor's own stream, a placeholder page until it streams). The studio's Screen panel switches between them with a toggle (Alt+1, Alt+2), both kept loaded, and the agent switches it too (a `screen` event). |
@@ -65,38 +65,49 @@ repository, each developer clones it into a folder of their choosing, opens the
 own Git client under their own name. The engine does the same thing for them in
 the cloud, without changing how the team works.
 
-**The first time.** Nothing is linked before the engine starts:
+**The first time.**
 
-1. The developer signs up and starts an Unreal engine: one click, on a tier
-   with a GPU.
-2. The agent puts its Desktop on the screen. The developer signs in to GitHub
-   in the GitHub client there and clones the game into the project's folder of
-   their workspace, Git LFS included, as on their own machine; the clone is on
-   the workspace Volume, so it is there at every later start.
+1. The developer signs up, connects GitHub (Lathe's GitHub App), and makes a
+   Games project with "Import from GitHub", picking the game's repository, or
+   links an existing project to it in the Environment panel. A repository the
+   list lacks is one the app is not installed on: "Don't see your repository?"
+   opens the app's installation page, where the developer installs it, or, in
+   an organization that keeps installing to its owners, sends them the request
+   an owner approves once for everyone.
+2. They start an Unreal engine: one click, on a tier with a GPU. The engine
+   clones the repository into the project's folder of their workspace
+   (`<project folder>/<repository name>`), Git LFS included, with their own
+   GitHub App token and under their own GitHub name and noreply address, and
+   its card says "Cloning MultiverseBR…" until it is done. The clone is on the
+   workspace Volume, so it is there at every later start. Without a linked
+   repository, the Desktop's GitHub client clones it as on their own machine.
 3. At the start of each turn while an Unreal engine runs, the agent is told of
-   any `.uproject` in its workspace it has not looked at yet (or the developer
-   names the path), and says what it found: the engine version it was saved
-   with (`EngineAssociation`) against the engine's, C++ modules or Blueprints
-   only, its plugins, Git LFS, and its size. The engine's card in the
-   Environment panel lists the same, each with "Open in Unreal".
+   a clone still running or one that failed, and of any `.uproject` in its
+   workspace it has not looked at yet (or the developer names the path), and
+   says what it found: the engine version it was saved with
+   (`EngineAssociation`) against the engine's, C++ modules or Blueprints only,
+   its plugins, Git LFS, and its size. The engine's card in the Environment
+   panel lists the same, each with "Open in Unreal".
 4. The developer asks to open it. The agent opens it in the editor
    (`unreal_open`) and switches the screen to the Unreal view.
 
 The Epic link is asked for at step 4 and only there: where the editor is not
-in the engine, the agent gives the one step that links it (the catalog's three
-parts), after which the next start of the engine brings the user's own copy.
-Where the team's GitHub organization restricts third-party apps, which new
-organizations do by default, that affects only what the agent reads through
-Lathe's OAuth App (`unreal_assets`, `github_read`); the clone in the Desktop is
-the developer's own sign-in. Commits carry the person's own GitHub name and
-address, made from the GitHub client as on their own machine.
+in the engine, the agent gives the steps that link a GitHub account to Epic,
+and the studio shows them under "Connect Epic", after which the next start of
+the engine brings the user's own copy. An organization's restrictions on
+third-party OAuth Apps do not apply to the GitHub App: the organization
+installs it, once, which is the approval. Commits carry the person's own
+GitHub name and address, whether made in the clone the engine started with or
+from the GitHub client as on their own machine.
 
 **A new project.** With no repository yet, the agent copies one of the
 engine's Blueprint templates into the project's folder under the name the
 developer gives, with Unreal's `.gitignore` and a `.gitattributes` that keeps
 `.uasset` and `.umap` in Git LFS, and opens it. A repository comes after,
-when they want one: created in the Environment panel and cloned in the GitHub
-client, with the project copied into the clone.
+when they want one: made on GitHub's own page (the Environment panel's Create
+new opens it, since Lathe's GitHub App makes no repositories), linked, and
+cloned at the engine's next start or in the GitHub client, with the project
+copied into the clone.
 
 **Versions.** The engine runs one current version, 5.8.4 now, which carries
 Epic's Unreal MCP server (experimental in 5.8); 5.9 becomes the default when it
@@ -193,6 +204,41 @@ against stand-ins for it.
     rebuilt after a script change with the engine layer taken from the cache.
   - The open script's other outcomes ran against stand-ins for the editor.
 
+- **The team's repository, cloned at start** (`addons/modal/unreal/clone.py`,
+  README's Unreal section). A session started with `start_session(...,
+  secrets=[...])` holding `LATHE_GIT_REPO`, `LATHE_GIT_BRANCH`,
+  `LATHE_GIT_TOKEN`, `LATHE_GIT_NAME`, and `LATHE_GIT_EMAIL` clones the branch
+  into `<project folder>/<name>` in the background as the desktop comes up, Git
+  LFS's files included, with a progress line over the GitHub client, and opens
+  the clone in the client when it is there: no sign-in, no welcome, no
+  "Initialize Git LFS". An earlier clone on the workspace is fetched, and
+  fast-forwarded only when it is clean and on the branch; otherwise the status
+  says it was not updated and why. `clone_status(sandbox)` returns `{state:
+  cloning | done | failed, path, detail}`. The token reaches the session's Git
+  through a credential helper reading the environment (username
+  `x-access-token`), cleared of every other helper so none keeps it, and the
+  client's Git through an `Authorization` header for that repository alone in
+  the client's environment: the client runs every Git with only its own
+  helper, which answers github.com from its own signed-in accounts and asks no
+  other helper (`trampoline-credential-helper.ts` in its source). Its "Initialize
+  Git LFS" was asked for every repository tracking LFS files, whatever was
+  installed (`git lfs install --system` was already in the image); the bundle
+  now asks only where the repository's hooks do not run LFS, and a clone made
+  in the session has them. Checked on Modal with a public UE 5.3 sample
+  (228 MB and 109 LFS files) and a recognizable dummy token, timings in the
+  README:
+  - A first start cloned it and fetched every LFS file, `unreal_projects`
+    found the project, and the client opened on it with no prompt.
+  - Later starts fast-forwarded a clean clone one commit behind, and left a
+    clone with a changed file as it was ("has local changes, not updated").
+  - A repository that does not exist failed with GitHub's refusal in words,
+    after the helper had offered GitHub the token.
+  - The client's own fetch carried the token to GitHub, which refused the dummy.
+  - The token was in no file of the home, the workspace, `/tmp`, `/etc`, `/var`,
+    or `/root` but the base image's two copies of the session environment in
+    `/tmp/runtime-ubuntu`, and in no file of any of the four workspaces after
+    their sessions ended.
+
 - **The bridge** (`addons/modal/unreal`). Blender's add-on `send_to_unreal.py`
   (3D viewport sidebar, tab Unreal) exports the selection into the project's
   `bridge/` folder, as glTF binary for meshes and FBX for anything with an
@@ -208,16 +254,20 @@ against stand-ins for it.
   stand-in for the Remote Control API that records the request and runs its
   command against a stand-in `unreal` module, and the way back served by
   `blender/session.py` itself (`pytest addons/modal/unreal`).
-- **The control plane.** GitHub's OAuth App asks for `read:packages` beside
-  `repo` and keeps the scopes it was granted. `epic_link` reads whether the
-  user's token sees `EpicGames/UnrealEngine` and the
-  `ghcr.io/epicgames/unreal-engine` package (`GET /v1/github`: `epic_linked`,
-  `null` without GitHub or the scope). Starting `unreal` (catalog status `byol`)
-  asks for no link: a start reads it, and without it the engine is
-  `session_image("unreal")`, the desktop alone. A start on a linked account
-  writes the user's login and token into their own named Modal Secret,
-  `lathe-ghcr-<user id>` (`REGISTRY_USERNAME`, `REGISTRY_PASSWORD`), which a
-  reconnect refreshes and a disconnect deletes, and `launcher.py` passes that
+- **The control plane.** "Connect Epic" is an OAuth App of its own that asks
+  for `read:packages` alone; `epic_link` asks `ghcr.io`'s token service for a
+  pull of `epicgames/unreal-engine` with the connected login and token (`GET
+  /v1/epic`: `linked`, `null` without the connection or an answer). Starting
+  `unreal` (catalog status `byol`) asks for no link: a start reads it, and
+  without it the engine is `session_image("unreal")`, the desktop alone. A
+  start of a project linked to a repository mints the user's GitHub App token
+  and hands it to the machine in an ephemeral Secret with the repository, the
+  branch, and the name and address to commit under (`LATHE_GIT_*`), and the
+  engine's listing reports the clone the machine made (`clone`, from
+  `clone_status`). A start on a linked account
+  writes the Epic connection's login and token into the user's own named Modal
+  Secret, `lathe-ghcr-<user id>` (`REGISTRY_USERNAME`, `REGISTRY_PASSWORD`),
+  which a reconnect refreshes and a disconnect deletes, and `launcher.py` passes that
   Secret to `unreal_image(registry_secret, version)` where the launcher has
   one. Named rather than made per start, so the layer that pulls the engine
   (about 40 GB) stays cached per user. A running Unreal engine's listing
@@ -238,7 +288,10 @@ against stand-ins for it.
   skill holds the onboarding, step by step.
 - **The studio.** The catalog lists Unreal Engine 5.8 as `byol`, labeled "Your
   Epic account" on the landing page. Start in the Environment panel says what
-  the engine comes with and asks nothing of Epic. The Screen panel's header has
+  the engine comes with, and where the editor would not come, shows the steps
+  that link GitHub to Epic with "Connect Epic"; nothing of it is needed to
+  start. A running Unreal engine's card says "Cloning …" while the engine
+  clones the linked repository, then lists what it found. The Screen panel's header has
   a two-option toggle, Desktop and Unreal (Alt+1, Alt+2), kept in focus mode,
   with both pictures loaded at once so a switch is instant, and it follows the
   agent's `screen` events. A running Unreal engine's card lists its projects
@@ -255,6 +308,19 @@ against stand-ins for it.
   (`addons/modal/unreal/view/view.sh` has the plan), and a page on the player
   counting as use of the session. Whether Modal shares a layer pulled with one
   user's Secret with another user's build has to be checked there.
+- The clone at start with a real GitHub App user token: a private repository's
+  clone and fetch, and a push from the client, are unchecked; with the dummy
+  token GitHub refused the token where it was offered, which is as far as a
+  check without one goes. Git run in a terminal reaches the token only where the
+  terminal was opened from the client, whose environment carries it. A token
+  that expires in a session that outlives it (eight hours) leaves the client
+  refused for that repository until the next start, even after a sign-in, since
+  its header takes the place of any credential. The base image's entrypoint
+  writes the whole session environment, this token and the session's own tokens
+  with it, to `/tmp/runtime-ubuntu/container-env` (readable by every account in
+  the Sandbox) and `selkies-session-env.json`; they go with the Sandbox, and
+  narrowing them is a change to the base image or to `session.sh`, which every
+  app's image runs.
 - The GitHub client's sign-in with a real account: it is checked as far as
   GitHub's token exchange. The client signs in through Desktop Plus's own OAuth
   app, so an organization that restricts third-party apps has an owner approve
@@ -271,11 +337,23 @@ against stand-ins for it.
   settings that gate remote Python, and the errors each gives, are from a
   third-party package's notes, since Epic's settings page renders only in a
   browser. The add-on shows Unreal's own refusal either way.
-- Unverified against GitHub: whether the EpicGames organization restricts
-  third-party OAuth Apps. If it does, a linked user's token cannot see the
-  repository, so the check cannot show the link (it reads "not linked", or
-  unknown with GitHub's refusal), and Lathe needs Epic's approval of its OAuth
-  App or another way for a user to grant the pull.
+- Unverified against GitHub: whether `ghcr.io` grants an OAuth App's token
+  with `read:packages` a pull of Epic's image (GitHub's container registry
+  documentation names only personal access tokens (classic) and
+  `GITHUB_TOKEN`), and whether the EpicGames organization's restrictions on
+  third-party OAuth Apps reach its packages. The link check is the registry's
+  own answer, so either refusal reads "not linked"; Lathe would then need
+  Epic's approval of its Epic OAuth App, or another way for a user to grant the
+  pull.
+- Unverified against GitHub: the GitHub App, its installation page, and its
+  expiring tokens have run only against stand-ins. GitHub's documentation (of
+  Enterprise Server 3.2; today's says nothing either way) has it return no state
+  when it starts the authorization itself during an installation, and an owner
+  approving a member's request arrives from GitHub's email; the callback sends
+  such an arrival to the studio with nothing exchanged, where the user who
+  asked is already connected. Git over HTTPS with
+  a GitHub App user token, as the machine clones with, is not in GitHub's
+  documentation of those tokens and has to be checked on the machine.
 - **The base image the sessions are built on is gone from its registry.** The
   Selkies base digest `addons/modal/sandbox.py` pins
   (`ghcr.io/selkies-project/selkies/base@sha256:5e9d022a...`) answers 404 on

@@ -15,7 +15,7 @@ The app is three panes, the layout of a coding agent's workspace:
 | --- | --- |
 | Left sidebar | New project, search, **Pinned** and **Recent** projects, the account (credits, Connect Claude, sign out) |
 | Center | The project's conversation with the agent: messages, tool activity, the agent's questions as choices, generated images and videos inline, the composer |
-| Right pane | Modular panels the project shows as it needs them: **Screen** (the live stream of an engine), **Environment** (the engines running, start and stop, and **Connect GitHub**), **Plan** (the agent's tasks and their state), **Library** (the project's characters, environments, props, products, or whatever sections the project has) |
+| Right pane | Modular panels the project shows as it needs them: **Screen** (the live stream of an engine), **Environment** (the engines running, start and stop, **Connect GitHub**, and, for Unreal Engine, **Connect Epic**), **Plan** (the agent's tasks and their state), **Library** (the project's characters, environments, props, products, or whatever sections the project has) |
 
 Clicking the screen rearranges the panes: the stream becomes the largest area,
 above the conversation, which stays visible below it. The library's sections are
@@ -75,22 +75,43 @@ the steps that link it: Unreal Engine's editor on the user's Epic account,
 
 ## GitHub
 
-A person connects their own GitHub account once (an OAuth App the control plane
-holds: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`), then links a project to a
-repository, new or existing, from the Environment panel. The token stays in the
-control plane. The repository may be a whole team's, so the agent reads it
-freely and saves the project's documents only to a branch of its own,
-`lathe/<project name>-<the project id's first eight characters>`, made from the
-default branch's head the first time; it never writes to the default branch or
-to a branch it did not make, and each save gives the person the compare link
-from which they open a pull request. Engines that need the repository get it
-as a credential of their session. The same connection is how Unreal Engine's
-editor is licensed: the app asks for `read:packages` beside `repo`,
-`epic_linked` says whether the account is linked to Epic, and an Unreal engine
-started while it is brings the user's own copy of the editor, pulled with their
-own token. Without the link the engine still starts, as the desktop the editor
-would stream beside, and the agent says how to link when the person asks for
-the editor.
+A person connects their own GitHub account once, as the user authorization of a
+GitHub App the control plane holds (`GITHUB_APP_CLIENT_ID`,
+`GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_SLUG`), with repository Contents (read
+and write) and Metadata (read). Its user token lasts eight hours and is kept
+sealed beside the refresh token that renews it; the control plane refreshes it
+before using one about to expire. The repositories a person can link are those
+the app is installed on that they reach; where one is missing ("Don't see your
+repository?"), the app's installation page installs it, or sends an
+organization's owners the member's request, which an owner approves once. A
+Games project can start linked, imported from GitHub in the new-project
+dialog. The app makes no repositories: a new one is made on GitHub's own page,
+then linked. The token stays in the control plane. The repository may be a
+whole team's, so the agent reads it freely and saves the project's documents
+only to a branch of its own, `lathe/<project name>-<the project id's first
+eight characters>`, made from the default branch's head the first time; it
+never writes to the default branch or to a branch it did not make, and each
+save gives the person the compare link from which they open a pull request.
+
+An Unreal engine of a project linked to a repository clones it as it starts:
+the control plane mints the person's token afresh (refreshing it where it has
+less than seven hours left) and hands it to the machine in an ephemeral Secret
+of that start, with the repository, the branch (the project's, else the
+default), and the name and `<id>+<login>@users.noreply.github.com` address the
+person commits under. The machine clones into `<project folder>/<repository
+name>` with Git LFS and reports how far it has come (`clone`), which the
+engine's card and the agent's turn read.
+
+Unreal Engine's editor is licensed through a second, narrow connection,
+"Connect Epic": an OAuth App that asks for `read:packages` alone
+(`EPIC_GITHUB_CLIENT_ID`, `EPIC_GITHUB_CLIENT_SECRET`), since pulling from
+`ghcr.io/epicgames/unreal-engine` takes a token that reads packages across
+GitHub, which a GitHub App's token cannot. Whether the connected account is
+linked to Epic is the registry's own answer (`linked`), and an Unreal engine
+started while it is brings the user's own copy of the editor, pulled with that
+token. Without the link the engine still starts, as the desktop the editor
+would stream beside, and the studio shows the steps that link GitHub to Epic
+with the "Connect Epic" button.
 
 ## Contract: the control plane's API
 
@@ -101,9 +122,9 @@ with a signed `state` instead, and answers JSON. Refusals are
 the status that says why.
 
 ```text
-GET    /v1/health                          {ok, agent, github, generation}: which integrations are configured
+GET    /v1/health                          {ok, agent, github, epic, generation}: which integrations are configured
 GET    /v1/projects                        {projects: [Project]}, most recently updated first
-POST   /v1/projects                        {name, discipline, format} -> {project}
+POST   /v1/projects                        {name, discipline, format, github_repo?, github_branch?} -> {project}
 GET    /v1/projects/{pid}                  {project}
 PATCH  /v1/projects/{pid}                  {name?, pinned?, library_sections?} -> {project}
 DELETE /v1/projects/{pid}                  204
@@ -120,23 +141,33 @@ POST   /v1/projects/{pid}/library          {section, name, tag?, description?, m
 POST   /v1/projects/{pid}/library/{aid}/media   multipart file -> {asset}
 PATCH  /v1/projects/{pid}/library/{aid}    {section?, name?, tag?, description?, metadata?} -> {asset}
 DELETE /v1/projects/{pid}/library/{aid}    204
-GET    /v1/github                          {configured, connected, login?, avatar_url?, epic_linked: true | false | null}
-POST   /v1/github/connect                  {return_to} -> {url}: GitHub's authorization page
-GET    /v1/github/callback                 GitHub returns here; redirects to return_to?github=connected|failed
-GET    /v1/github/repos                    {repos: [{full_name, private, html_url, updated_at}]}
+GET    /v1/github                          {configured, connected, login?, avatar_url?}
+POST   /v1/github/connect                  {return_to} -> {url}: the GitHub App's authorization page
+POST   /v1/github/install                  {return_to} -> {url}: the GitHub App's installation page
+GET    /v1/github/callback                 GitHub returns here; redirects to return_to?github=connected|installed|
+                                           requested|failed, or, from an installation without Lathe's state,
+                                           to <site>/app/?github=installed|requested with nothing exchanged
+GET    /v1/github/repos                    {repos: [{full_name, private, html_url, updated_at}]}: the GitHub App's
+                                           installations' repositories the person reaches
 DELETE /v1/github                          disconnects -> the same as GET /v1/github
-POST   /v1/projects/{pid}/github           {repo} or {create: {name, private}} -> {project}
+POST   /v1/projects/{pid}/github           {repo, branch?} -> {project}
 DELETE /v1/projects/{pid}/github           -> {project}
+GET    /v1/epic                            {configured, connected, login?, linked: true | false | null, detail?}
+POST   /v1/epic/connect                    {return_to} -> {url}: the Epic OAuth App's authorization page
+GET    /v1/epic/callback                   GitHub returns here; redirects to return_to?epic=connected|failed
+DELETE /v1/epic                            disconnects -> the same as GET /v1/epic
 ```
 
 ```text
 Project  {id, name, discipline, format, pinned, created_at, updated_at,
-          github_repo: "owner/name" | null, library_sections: [string],
+          github_repo: "owner/name" | null, github_branch: string | null, library_sections: [string],
           plan: [{id, title, status: "pending" | "active" | "done" | "blocked"}]}
 Session  the existing session shape, with project_id and app, and streams?: [{name, url}]
          for a running engine that streams more than its desktop: an Unreal engine's
          [{name: "Desktop", url}, {name: "Unreal", url}], each link minted for that
-         listing of the engines, and never written to the event log
+         listing of the engines, and never written to the event log; and clone?:
+         {state: "cloning" | "done" | "failed", path, detail} for a running Unreal
+         engine whose machine cloned the project's repository as it started
 UnrealProject  {path, name, engine_association, version: "same" | "older" | "newer"
           | "source" | "unknown", opens, cpp_modules: [string], plugins: [string],
           lfs: true | false | string | null, size_bytes: number | null}: a .uproject

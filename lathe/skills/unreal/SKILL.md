@@ -1,6 +1,6 @@
 ---
 name: unreal
-description: Work on an Unreal Engine project, from a GitHub repository a whole team shares or from a template. Bring a developer's game into a cloud Unreal engine step by step (start the engine, clone in the Desktop view, report what the project is, open it in the editor, switch the view to Unreal), answer what is in it (maps, animations, textures, meshes, materials, blueprints, sounds, effects, UI, data) from the repository with unreal_assets, and leave the team's branches and files as they are. Use for Games, Architecture, and Experiences projects, and whenever someone asks about an Unreal project or wants to work in Unreal Engine.
+description: Work on an Unreal Engine project, from a GitHub repository a whole team shares or from a template. Bring a developer's game into a cloud Unreal engine step by step (start the engine, which clones the linked repository, report what the project is, open it in the editor, switch the view to Unreal), answer what is in it (maps, animations, textures, meshes, materials, blueprints, sounds, effects, UI, data) from the repository with unreal_assets, and leave the team's branches and files as they are. Use for Games, Architecture, and Experiences projects, and whenever someone asks about an Unreal project or wants to work in Unreal Engine.
 ---
 
 <!--
@@ -22,14 +22,19 @@ description: Work on an Unreal Engine project, from a GitHub repository a whole 
   - **Unreal**: the editor's own stream, a placeholder until a project is open.
 - The editor runs on the person's own Epic account. Mention Epic only when they want the editor:
   `unreal_open` says when the link is missing, with the steps. Give those steps as one numbered
-  list, then say that once linked they stop the Unreal engine and start it again, which brings
-  their copy of the editor. The Desktop keeps working meanwhile.
+  list (the last is "Connect Epic" in the Environment panel), then say that once linked they stop
+  the Unreal engine and start it again, which brings their copy of the editor. The Desktop keeps
+  working meanwhile.
 
 ## Bringing in their game (an existing repository)
 
-1. Start the engine, then `engine_show` Desktop. Tell them: open the GitHub client, sign in, and
-   clone the game into the project's folder (the one this prompt names under `projects/`), so the
-   clone stays in their workspace between sessions. Git LFS content comes with the clone.
+1. With the project linked to the game's repository (the turn's state says `GitHub: linked to`),
+   start the engine: it clones the repository into the project's folder as it starts, Git LFS
+   included, with their GitHub account and under their name, and the turn's state says while it
+   is still cloning or why it failed. Not linked: they link it in the Environment panel (or import
+   it when making a Games project) before the start, or, after it, you `engine_show` Desktop and
+   they clone it in the GitHub client into the project's folder (the one this prompt names under
+   `projects/`). Either way the clone stays in their workspace between sessions.
 2. When the turn's state lists a project "not reported yet", or they name a path, call
    `unreal_projects` and say in a few lines what you found: the name, the engine version it was
    saved with against the engine's and what `opens` says, C++ modules or Blueprints only, the
@@ -47,9 +52,10 @@ description: Work on an Unreal Engine project, from a GitHub repository a whole 
 3. Write Unreal's `.gitignore` (`Binaries/`, `DerivedDataCache/`, `Intermediate/`, `Saved/`) and
    a `.gitattributes` that stores `*.uasset` and `*.umap` with Git LFS beside it, then
    `unreal_open` it.
-4. If they want a repository: they create it in the Environment panel (GitHub, Create new) and
-   clone it in the GitHub client into the project's folder; you copy the project into the clone
-   and open it from there. They commit and push from the GitHub client, under their own name.
+4. If they want a repository: they create it on GitHub (the Environment panel's GitHub, Create
+   new, opens GitHub's page for it), link it, and clone it in the GitHub client into the project's
+   folder or start the engine again; you copy the project into the clone and open it from there.
+   They commit and push from the GitHub client, under their own name.
 
 ## Versions
 

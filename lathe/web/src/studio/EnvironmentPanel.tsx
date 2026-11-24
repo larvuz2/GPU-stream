@@ -14,21 +14,26 @@
  * license can be started, and the rest show their status. A tier the control plane does not list
  * as open is shown but cannot be chosen. Unreal Engine, whose editor runs on the person's Epic
  * account, starts at once whatever that account: the form says what the engine comes with, the
- * editor too where the control plane reads the Epic link through their GitHub account, and asks
- * nothing of Epic, which the agent explains when the person wants the editor.
+ * editor too where Epic's registry lets the person's Epic connection pull it, and otherwise offers
+ * "Connect Epic" under the steps that link a GitHub account to Epic first. Nothing of it is
+ * required to start: the engine starts as its desktop either way.
  *
  * A running Unreal engine's card lists the Unreal projects in its workspace, each with what it is
  * and an "Open in Unreal" button that asks the agent to open it, the way the person would in a
- * message. Before there is one, the card says how one gets there, with the Desktop view a click
- * away. The list is read when the card appears, whenever the agent starts or ends a turn (it may
- * have cloned or made one), and when the person asks to look again, never on a timer: reading the
- * machine counts as use of it, and a page left open must not keep an engine from shutting down
- * once it is idle.
+ * message. An engine of a project linked to a repository clones it as it starts, and the card says
+ * so ("Cloning MultiverseBR…") until the machine reports it done, then lists what it found; a clone
+ * that failed says why, with the Desktop view a click away to clone by hand. Before there is a
+ * project, the card says how one gets there. The list is read when the card appears, when the
+ * clone finishes, whenever the agent starts or ends a turn (it may have cloned or made one), and
+ * when the person asks to look again, never on a timer: reading the machine counts as use of it,
+ * and a page left open must not keep an engine from shutting down once it is idle.
  *
- * GitHub is the person's own account, connected once through the control plane's OAuth App and
- * then linked per project to a repository, existing or created for it; connecting it again is in
- * its menu, which the Epic link's last step asks for. The block says plainly when this server has
- * no GitHub configured, or no studio routes yet, instead of failing.
+ * GitHub is the person's own account, connected once through the control plane's GitHub App and
+ * then linked per project to a repository of the app's installations they reach. A repository the
+ * list lacks is one the app is not installed on: "Don't see your repository?" opens the app's
+ * installation page, where the person installs it, or asks their organization's owners to. The app
+ * makes no repositories, so a new one is made on GitHub's own page and then linked. The block says
+ * plainly when this server has no GitHub configured, or no studio routes yet, instead of failing.
  * @module
  */
 import { useEffect, useId, useMemo, useState, type ReactNode, type SubmitEvent } from 'react';
@@ -36,7 +41,7 @@ import {
   Box,
   CircleStop,
   ExternalLink,
-  Lock,
+  FolderGit2,
   LogOut,
   Monitor,
   MonitorPlay,
@@ -53,6 +58,7 @@ import {
   type Health,
   type Me,
   type Project,
+  type EngineClone,
   type RepoLink,
   type Session,
   type UnrealProject,
@@ -75,8 +81,9 @@ import { useNow } from './hooks';
 import { GitHubMark, Menu } from './Menu';
 import { describeEndReason, describeError } from './messages';
 import { ErrorNotice, Notice } from './Notice';
-import { ago, appStatusLabel, canStart } from './present';
-import type { GitHub } from './useAccount';
+import { RepoList } from './RepoList';
+import { appStatusLabel, canStart } from './present';
+import type { Epic, GitHub } from './useAccount';
 
 /** Props of {@link EngineSection}. */
 interface EngineSectionProps {
@@ -92,8 +99,10 @@ interface EngineSectionProps {
   health: Health | null;
   /** The signed-in account. */
   me: Me | null;
-  /** The GitHub connection, through which an app on the person's own license is linked. */
-  github: GitHub;
+  /** The Epic connection, through which Unreal Engine's editor, on the person's own license, is pulled. */
+  epic: Epic;
+  /** The outcome of a return from connecting Epic, shown once. */
+  epicReturned: EpicReturn;
   /** Starts an engine. */
   onStart: (app: string, tier: string) => Promise<Session>;
   /** Stops an engine. */
@@ -127,7 +136,8 @@ export function EngineSection({
   screenId,
   health,
   me,
-  github,
+  epic,
+  epicReturned,
   onStart,
   onStop,
   onShow,
@@ -146,6 +156,7 @@ export function EngineSection({
   return (
     <div>
       <h3 className="section-label">Engines</h3>
+      <EpicReturnNotice returned={epicReturned} epic={epic} />
       {enginesStatus === 'missing' ? (
         <p className="mt-2 text-sm text-faint">Engines per project arrive with the studio&rsquo;s backend.</p>
       ) : enginesStatus === 'failed' ? (
@@ -167,6 +178,7 @@ export function EngineSection({
               {engine.app === 'unreal' && engine.status === 'running' ? (
                 <UnrealProjects
                   engine={engine}
+                  repo={project.github_repo}
                   load={unrealProjects}
                   agentRunning={agentRunning}
                   canAsk={canAsk}
@@ -185,7 +197,7 @@ export function EngineSection({
           project={project}
           health={health}
           me={me}
-          github={github}
+          epic={epic}
           onStart={onStart}
           onAddCredits={onAddCredits}
         />
@@ -356,6 +368,8 @@ function EngineRow({ engine, onScreen, onShow, onStop, children }: EngineRowProp
 interface UnrealProjectsProps {
   /** The running Unreal engine. */
   engine: Session;
+  /** The repository the project is linked to, which the engine clones as it starts, or `null`. */
+  repo: string | null;
   /** Lists the Unreal projects in its workspace. */
   load: (engineId: string) => Promise<UnrealProject[]>;
   /** Whether the agent is working on a turn. */
@@ -369,13 +383,25 @@ interface UnrealProjectsProps {
 }
 
 /**
+ * The name a clone is shown by: the folder it clones into, which is the repository's name.
+ *
+ * @param clone The clone.
+ * @param repo The repository the project is linked to, as `owner/name`, or `null`.
+ * @returns The name.
+ */
+function cloneName(clone: EngineClone, repo: string | null): string {
+  return clone.path.split('/').filter(Boolean).pop() ?? repo?.split('/').pop() ?? 'the repository';
+}
+
+/**
  * Renders the Unreal projects a running Unreal engine found in its workspace, each with a button
- * that asks the agent to open it in the editor.
+ * that asks the agent to open it in the editor, after the clone the engine made as it started
+ * while that is still running or where it failed.
  *
  * @param props The component's props.
  * @returns The block, or nothing on a control plane that cannot list them.
  */
-function UnrealProjects({ engine, load, agentRunning, canAsk, onAsk, onShowDesktop }: UnrealProjectsProps) {
+function UnrealProjects({ engine, repo, load, agentRunning, canAsk, onAsk, onShowDesktop }: UnrealProjectsProps) {
   const [found, setFound] = useState<UnrealProject[] | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
   const [asked, setAsked] = useState<string | null>(null);
@@ -399,7 +425,10 @@ function UnrealProjects({ engine, load, agentRunning, canAsk, onAsk, onShowDeskt
     return () => {
       current = false;
     };
-  }, [engine.id, load, agentRunning, reading]);
+  }, [engine.id, load, agentRunning, reading, engine.clone?.state]);
+
+  const clone = engine.clone;
+  const cloning = clone?.state === 'cloning';
 
   /**
    * Asks the agent to open a project in the editor.
@@ -439,15 +468,36 @@ function UnrealProjects({ engine, load, agentRunning, canAsk, onAsk, onShowDeskt
         </button>
       </div>
       <div aria-live="polite">
-        {found === null ? (
+        {clone === undefined || clone.state === 'done' ? null : (
+          <div className="mt-1.5 text-xs leading-relaxed">
+            <p className={cx('flex items-center gap-1.5', cloning ? 'text-muted' : 'text-bad')}>
+              {cloning ? (
+                <span className="spinner size-3" aria-hidden="true" />
+              ) : (
+                <FolderGit2 className="size-3.5" aria-hidden="true" />
+              )}
+              {cloning
+                ? `Cloning ${cloneName(clone, repo)}…`
+                : `Could not clone ${cloneName(clone, repo)}${clone.detail === '' ? '.' : `: ${clone.detail}`}`}
+            </p>
+            {cloning && clone.detail !== '' ? <p className="mt-0.5 text-faint">{clone.detail}</p> : null}
+            {cloning ? null : (
+              <button type="button" className="btn btn-ghost btn-sm mt-2 h-7 px-2.5 text-xs" onClick={onShowDesktop}>
+                <Monitor className="size-3.5" aria-hidden="true" />
+                Clone it in the Desktop
+              </button>
+            )}
+          </div>
+        )}
+        {cloning ? null : found === null ? (
           <p className="mt-1.5 text-xs text-faint">
             {failure === null ? 'Looking for projects…' : `Could not look for projects: ${describeError(failure)}`}
           </p>
         ) : found.length === 0 ? (
           <div className="mt-1.5 text-xs leading-relaxed text-muted">
             <p>
-              No project here yet. Clone your game in the Desktop view (sign in to the GitHub client first), or ask the
-              agent for a new one from a template.
+              No project here yet. Link the project to your game&rsquo;s repository below and start Unreal again to clone
+              it, clone it in the Desktop view&rsquo;s GitHub client, or ask the agent for a new one from a template.
             </p>
             <button type="button" className="btn btn-ghost btn-sm mt-2 h-7 px-2.5 text-xs" onClick={onShowDesktop}>
               <Monitor className="size-3.5" aria-hidden="true" />
@@ -561,8 +611,8 @@ interface StartFormProps {
   health: Health | null;
   /** The signed-in account. */
   me: Me | null;
-  /** The GitHub connection, through which an app on the person's own license is linked. */
-  github: GitHub;
+  /** The Epic connection, through which an app on the person's own license is linked. */
+  epic: Epic;
   /** Starts an engine. */
   onStart: (app: string, tier: string) => Promise<Session>;
   /** Opens the credits dialog. */
@@ -575,7 +625,7 @@ interface StartFormProps {
  * @param props The component's props.
  * @returns The form.
  */
-function StartForm({ project, health, me, github, onStart, onAddCredits }: StartFormProps) {
+function StartForm({ project, health, me, epic, onStart, onAddCredits }: StartFormProps) {
   const appId = useId();
   const tierId = useId();
   const discipline = findDiscipline(project.discipline);
@@ -684,7 +734,7 @@ function StartForm({ project, health, me, github, onStart, onAddCredits }: Start
           ? 'No tier is switched on right now.'
           : `${gpuLabel(tier)}${minutes === null ? '' : ` · about ${minutesText(minutes)} on your credits`}`}
       </p>
-      {app !== undefined && isOwnLicense(app) ? <EditorNote app={app} github={github} /> : null}
+      {app !== undefined && isOwnLicense(app) ? <EditorNote app={app} epic={epic} health={health} /> : null}
       {error === null ? null : (
         <div className="mt-2">
           <ErrorNotice error={error} onAddCredits={onAddCredits} />
@@ -698,32 +748,144 @@ function StartForm({ project, health, me, github, onStart, onAddCredits }: Start
 interface EditorNoteProps {
   /** The app with a part on the person's own license: Unreal Engine, whose editor is. */
   app: CatalogApp;
-  /** The GitHub connection, which carries the Epic link. */
-  github: GitHub;
+  /** The Epic connection, which the editor is pulled with. */
+  epic: Epic;
+  /** What the control plane can do. */
+  health: Health | null;
 }
 
 /**
  * Renders what an Unreal engine starts with: its desktop always, and the person's own copy of the
- * editor where the control plane reads their Epic link.
+ * editor where Epic's registry lets their Epic connection pull it.
  *
- * It asks nothing of the person: the engine starts either way, and the agent says how to link
- * Epic when they ask for the editor.
+ * Where it does not, the catalog's steps say how to link a GitHub account to Epic, and "Connect
+ * Epic" connects that account; once linked on Epic's site, "Check again" asks the registry anew.
+ * The engine starts either way, as its desktop.
  *
  * @param props The component's props.
  * @returns The note.
  */
-function EditorNote({ app, github }: EditorNoteProps) {
+function EditorNote({ app, epic, health }: EditorNoteProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const status = epic.status;
+  const desktop = 'Starts with a desktop: the GitHub client, Git LFS, Firefox, and Blender.';
+  if (status?.linked === true) {
+    return (
+      <p className="mt-1.5 px-0.5 text-xs leading-relaxed text-muted" aria-live="polite">
+        With your own Unreal Editor {app.version}, on your Epic account ({status.login ?? 'connected'}), beside a desktop
+        with the GitHub client, Git LFS, Firefox, and Blender.
+      </p>
+    );
+  }
+  if (health?.epic === false || !status?.configured) {
+    return (
+      <p className="mt-1.5 px-0.5 text-xs leading-relaxed text-muted" aria-live="polite">
+        {desktop} The Unreal Editor comes on your Epic account; the agent says how to link it when you open a project.
+      </p>
+    );
+  }
+
+  /** Sends the browser to GitHub to connect the account linked to Epic. */
+  async function connect(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      await epic.connect();
+    } catch (failure) {
+      setError(failure);
+      setBusy(false);
+    }
+  }
+
+  // The last of the catalog's steps is connecting here, which the button does
+  const steps = (app.license?.steps ?? []).slice(0, -1);
   return (
-    <p className="mt-1.5 px-0.5 text-xs leading-relaxed text-muted" aria-live="polite">
-      {github.status?.epic_linked === true
-        ? `With your own Unreal Editor ${app.version}, on your Epic account, beside a desktop with the GitHub client, Git LFS, Firefox, and Blender.`
-        : 'Starts with a desktop: the GitHub client, Git LFS, Firefox, and Blender. The Unreal Editor comes on your Epic account; the agent says how to link it when you open a project.'}
-    </p>
+    <div className="mt-1.5 px-0.5 text-xs leading-relaxed text-muted" aria-live="polite">
+      <p>
+        {desktop}{' '}
+        {status.connected && status.linked === false
+          ? `Your GitHub account ${status.login ?? ''} is not linked to Epic yet, so the Unreal Editor does not come with it.`
+          : status.connected
+            ? `Lathe could not check your Epic link: ${status.detail ?? 'no answer'}`
+            : 'The Unreal Editor comes on your own Epic account, through the GitHub account linked to it.'}
+      </p>
+      {steps.length === 0 || (status.connected && status.linked === null) ? null : (
+        <ol className="mt-1.5 list-decimal space-y-0.5 pl-4 text-faint">
+          {steps.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+      )}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm h-7 px-2.5 text-xs"
+          disabled={busy}
+          onClick={() => {
+            void connect();
+          }}
+        >
+          {busy ? <span className="spinner size-3" aria-hidden="true" /> : <GitHubMark className="size-3.5" />}
+          {status.connected ? 'Connect Epic again' : 'Connect Epic'}
+        </button>
+        {status.connected ? (
+          <button type="button" className="btn btn-quiet btn-sm h-7 px-2.5 text-xs" onClick={epic.refresh}>
+            <RefreshCw className="size-3.5" aria-hidden="true" />
+            Check again
+          </button>
+        ) : null}
+      </div>
+      {error === null ? null : (
+        <div className="mt-2">
+          <ErrorNotice error={error} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The outcome of returning from connecting Epic, as its callback reports it. */
+export type EpicReturn = 'connected' | 'failed' | null;
+
+/** Props of {@link EpicReturnNotice}. */
+interface EpicReturnNoticeProps {
+  /** The outcome of a return from connecting Epic. */
+  returned: EpicReturn;
+  /** The Epic connection, as read since. */
+  epic: Epic;
+}
+
+/**
+ * Renders, once, what connecting Epic came to: the editor coming with Unreal Engine, an account not
+ * linked to Epic yet, or a connection that did not go through.
+ *
+ * @param props The component's props.
+ * @returns The notice, or nothing when the page did not come back from connecting Epic.
+ */
+function EpicReturnNotice({ returned, epic }: EpicReturnNoticeProps) {
+  if (returned === null || (returned === 'connected' && epic.status === null)) {
+    return null;
+  }
+  const linked = epic.status?.linked;
+  return (
+    <div className="mt-2">
+      {returned === 'failed' ? (
+        <Notice tone="warn">Epic did not connect. Try again, and approve the access GitHub asks for.</Notice>
+      ) : linked === true ? (
+        <Notice tone="info">Epic is connected: Unreal Engine starts with your own editor from its next start.</Notice>
+      ) : (
+        <Notice tone="warn">
+          Epic is connected, but that GitHub account is not linked to an Epic account yet. Link it on Epic&rsquo;s site,
+          then check again under Unreal Engine.
+        </Notice>
+      )}
+    </div>
   );
 }
 
 /** The outcome of returning from GitHub, as its callback reports it. */
-export type GitHubReturn = 'connected' | 'failed' | null;
+export type GitHubReturn = 'connected' | 'installed' | 'requested' | 'failed' | null;
 
 /** Props of {@link GitHubSection}. */
 interface GitHubSectionProps {
@@ -793,7 +955,7 @@ export function GitHubSection({ project, github, health, returned, onLink, onUnl
           className="btn btn-ghost btn-sm mt-3 w-full"
           disabled={busy}
           onClick={() => {
-            void run(github.connect);
+            void run(() => github.connect());
           }}
         >
           {busy ? <span className="spinner size-3.5" aria-hidden="true" /> : <GitHubMark className="size-4" />}
@@ -816,10 +978,17 @@ export function GitHubSection({ project, github, health, returned, onLink, onUnl
             triggerClassName="icon-btn"
             items={[
               {
+                label: 'Add repositories',
+                icon: <Plus aria-hidden="true" />,
+                onSelect: () => {
+                  void run(() => github.install());
+                },
+              },
+              {
                 label: 'Reconnect GitHub',
                 icon: <RefreshCw aria-hidden="true" />,
                 onSelect: () => {
-                  void run(github.connect);
+                  void run(() => github.connect());
                 },
               },
               {
@@ -839,6 +1008,7 @@ export function GitHubSection({ project, github, health, returned, onLink, onUnl
             loadRepos={github.repos}
             busy={busy}
             onLink={(link) => run(() => onLink(link))}
+            onInstall={() => run(() => github.install())}
           />
         ) : (
           <div className="flex items-center gap-2 rounded-xl border border-line bg-white/[0.025] py-2 pr-1.5 pl-3">
@@ -888,6 +1058,19 @@ export function GitHubSection({ project, github, health, returned, onLink, onUnl
         {returned === 'connected' && status?.connected === true ? (
           <div className="mb-2.5">
             <Notice tone="info">GitHub is connected. Link this project to a repository below.</Notice>
+          </div>
+        ) : null}
+        {returned === 'installed' ? (
+          <div className="mb-2.5">
+            <Notice tone="info">Lathe&rsquo;s GitHub App is installed. Its repositories are listed below.</Notice>
+          </div>
+        ) : null}
+        {returned === 'requested' ? (
+          <div className="mb-2.5">
+            <Notice tone="info">
+              Your organization&rsquo;s owners were asked to install Lathe&rsquo;s GitHub App. Its repositories appear
+              here once one of them approves.
+            </Notice>
           </div>
         ) : null}
         {returned === 'failed' ? (
@@ -958,65 +1141,59 @@ function repoSlug(name: string): string {
   );
 }
 
+/**
+ * GitHub's page for a new repository, filled with a name and a visibility.
+ *
+ * @param name The repository's name.
+ * @param privateRepo Whether it is private.
+ * @returns The page's address.
+ */
+function newRepoPage(name: string, privateRepo: boolean): string {
+  const page = new URL('https://github.com/new');
+  page.searchParams.set('name', name);
+  page.searchParams.set('visibility', privateRepo ? 'private' : 'public');
+  return page.href;
+}
+
 /** Props of {@link RepoPicker}. */
 interface RepoPickerProps {
   /** The open project. */
   project: Project;
-  /** Lists the person's repositories. */
+  /** Lists the repositories of the GitHub App's installations the person reaches. */
   loadRepos: () => Promise<GitHubRepo[]>;
   /** Whether a link is being made. */
   busy: boolean;
   /** Links the project. */
   onLink: (link: RepoLink) => Promise<void>;
+  /** Sends the browser to the GitHub App's installation page. */
+  onInstall: () => Promise<void>;
 }
 
 /**
- * Renders the choice of a repository: an existing one, or a new one.
+ * Renders the choice of a repository: one of the GitHub App's, or a new one made on GitHub.
  *
  * @param props The component's props.
  * @returns The picker.
  */
-function RepoPicker({ project, loadRepos, busy, onLink }: RepoPickerProps) {
+function RepoPicker({ project, loadRepos, busy, onLink, onInstall }: RepoPickerProps) {
   const [mode, setMode] = useState<'existing' | 'new'>('existing');
-  const [repos, setRepos] = useState<GitHubRepo[] | null>(null);
-  const [loadError, setLoadError] = useState<unknown>(null);
-  const [query, setQuery] = useState('');
+  // Bumped to read the list again, as after a repository is made on GitHub
+  const [reading, setReading] = useState(0);
   const [name, setName] = useState(() => repoSlug(project.name));
   const [privateRepo, setPrivateRepo] = useState(true);
-  const now = useNow(false);
   const nameId = useId();
 
-  useEffect(() => {
-    if (mode !== 'existing' || repos !== null) {
-      return;
-    }
-    let current = true;
-    loadRepos()
-      .then((listed) => {
-        if (current) {
-          setRepos(listed);
-        }
-      })
-      .catch((failure: unknown) => {
-        if (current) {
-          setLoadError(failure);
-        }
-      });
-    return () => {
-      current = false;
-    };
-  }, [mode, repos, loadRepos]);
-
-  const shown = (repos ?? []).filter((repo) => repo.full_name.toLowerCase().includes(query.trim().toLowerCase()));
-
   /**
-   * Creates the repository and links it.
+   * Opens GitHub's page for the new repository in a new tab, and goes back to the list, read again,
+   * to link it once it is made.
    *
    * @param event The form's submission.
    */
   function create(event: SubmitEvent<HTMLFormElement>): void {
     event.preventDefault();
-    void onLink({ create: { name: name.trim(), private: privateRepo } });
+    window.open(newRepoPage(name.trim(), privateRepo), '_blank', 'noopener,noreferrer');
+    setReading(reading + 1);
+    setMode('existing');
   }
 
   return (
@@ -1039,45 +1216,17 @@ function RepoPicker({ project, loadRepos, busy, onLink }: RepoPickerProps) {
       </div>
       {mode === 'existing' ? (
         <div className="mt-2.5">
-          <input
-            type="search"
-            className="field field-sm"
-            placeholder="Find a repository"
-            aria-label="Find a repository"
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
+          <RepoList
+            key={reading}
+            loadRepos={loadRepos}
+            busy={busy}
+            onPick={(repo) => {
+              void onLink({ repo: repo.full_name });
+            }}
+            onInstall={() => {
+              void onInstall();
             }}
           />
-          {loadError === null ? null : (
-            <div className="mt-2">
-              <ErrorNotice error={loadError} />
-            </div>
-          )}
-          <ul className="thin-scroll mt-1.5 max-h-48 overflow-y-auto">
-            {repos === null && loadError === null ? (
-              <li className="px-2 py-2 text-xs text-faint">Loading your repositories…</li>
-            ) : shown.length === 0 && loadError === null ? (
-              <li className="px-2 py-2 text-xs text-faint">No repository matches.</li>
-            ) : (
-              shown.map((repo) => (
-                <li key={repo.full_name}>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-white/[0.05]"
-                    disabled={busy}
-                    onClick={() => {
-                      void onLink({ repo: repo.full_name });
-                    }}
-                  >
-                    {repo.private ? <Lock className="size-3 flex-none text-faint" aria-label="Private" /> : null}
-                    <span className="min-w-0 flex-1 truncate">{repo.full_name}</span>
-                    <span className="text-[0.6875rem] text-faint">{ago(repo.updated_at, now)}</span>
-                  </button>
-                </li>
-              ))
-            )}
-          </ul>
         </div>
       ) : (
         <form className="mt-2.5 grid grid-cols-1 gap-2" onSubmit={create}>
@@ -1107,13 +1256,13 @@ function RepoPicker({ project, loadRepos, busy, onLink }: RepoPickerProps) {
             Private repository
           </label>
           <button type="submit" className="btn btn-ghost btn-sm h-8" disabled={busy || name.trim() === ''}>
-            {busy ? (
-              <span className="spinner size-3.5" aria-hidden="true" />
-            ) : (
-              <Plus className="size-3.5" aria-hidden="true" />
-            )}
-            Create and link
+            <ExternalLink className="size-3.5" aria-hidden="true" />
+            Create on GitHub
           </button>
+          <p className="text-xs leading-relaxed text-faint">
+            GitHub makes the repository in a new tab. Then link it under Link existing; where Lathe&rsquo;s app is on
+            only some of your repositories, add it to the app first.
+          </p>
         </form>
       )}
     </div>

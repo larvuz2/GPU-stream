@@ -30,7 +30,7 @@ import { AUTO_REGION } from '../lib/catalog';
 import { isBoolean, isRecord, type Guard } from '../lib/narrow';
 import { Composer } from './Composer';
 import { Conversation } from './Conversation';
-import { EngineSection, GitHubSection, type GitHubReturn } from './EnvironmentPanel';
+import { EngineSection, GitHubSection, type EpicReturn, type GitHubReturn } from './EnvironmentPanel';
 import { GitHubMark } from './Menu';
 import { usePreference } from './hooks';
 import { LibraryBody } from './LibraryPanel';
@@ -39,7 +39,7 @@ import { PlanBody } from './PlanPanel';
 import { DisciplineIcon } from './DisciplineIcon';
 import { disciplineName, planProgress } from './present';
 import { Stage, type StreamStandIn } from './Stage';
-import { connected, type Account, type GitHub, type Projects } from './useAccount';
+import { connected, type Account, type Epic, type GitHub, type Projects } from './useAccount';
 import { useProject } from './useProject';
 
 /** The tabs a narrow screen shows the studio's regions under. */
@@ -90,6 +90,10 @@ interface WorkspaceProps {
   github: GitHub;
   /** The outcome of a return from GitHub, shown once. */
   githubReturned: GitHubReturn;
+  /** The Epic connection, which Unreal Engine's editor is pulled with. */
+  epic: Epic;
+  /** The outcome of a return from connecting Epic, shown once. */
+  epicReturned: EpicReturn;
   /** Whether focus mode is on. */
   focus: boolean;
   /** Turns focus mode on or off. */
@@ -374,7 +378,8 @@ export function Workspace(props: WorkspaceProps) {
                 screenId={screen?.id ?? null}
                 health={account.health}
                 me={account.me}
-                github={github}
+                epic={props.epic}
+                epicReturned={props.epicReturned}
                 onStart={async (app, tier) => {
                   const engine = await data.startEngine({ app, tier, region: AUTO_REGION });
                   setScreenId(engine.id);

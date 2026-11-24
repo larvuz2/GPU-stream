@@ -29,15 +29,25 @@ login; `REGISTRY_PASSWORD`, their token), rather than one made for each start:
 the layer that pulls the engine is identified by the Secret it pulls with, and
 a Secret of its own each start would pull about 40 GB again every time, where
 the user's named one keeps that layer cached for them. The service writes it
-before each start and when the user connects GitHub again, and deletes it when
-they disconnect (`keep_registry_credential`, `forget_registry_credential`).
+before each start and when the user connects Epic again, and deletes it when
+they disconnect (`keep_registry_credential`, `forget_registry_credential`); its
+login and token are those of the user's Epic connection, the GitHub account
+linked to Epic, which reads packages.
+
+An Unreal engine of a project linked to a repository clones it as it starts.
+The repository, its branch, the user's GitHub App token, and the name and
+address they commit under reach the Sandbox in an ephemeral Secret made for
+that start alone (`Clone.environment`, passed to `start_session` as
+`secrets`), never in its environment, its tags, or a named Secret that would
+outlive it; what the machine reports of the clone is `clone_status`.
 
 Modal is imported where it is used, so the service's tests can stand in for
 the launcher module and run without Modal installed. FilmCraft's command
 channel (`filmcraft_call`) and Unreal Engine's parts (`unreal_image`, the
 Unreal view's link `unreal_view_link`, and the projects a machine found,
-`unreal_projects`) are looked up on the launcher module when they are needed,
-so a launcher without them still starts every other app.
+`unreal_projects`, and the clone a machine made, `clone_status`) are looked up
+on the launcher module when they are needed, so a launcher without them still
+starts every other app.
 """
 
 from __future__ import annotations
@@ -46,7 +56,7 @@ import sys
 from typing import Any
 from urllib.parse import urlsplit
 
-from service import IDLE_SECONDS, LIFETIME_SECONDS, READY_SECONDS, OwnCopy
+from service import IDLE_SECONDS, LIFETIME_SECONDS, READY_SECONDS, Clone, OwnCopy
 
 LAUNCHER_DIR = "/root/launcher"
 FILMCRAFT_SECONDS = 60
@@ -117,13 +127,20 @@ class ModalLauncher:
         return self.images[app]
 
     def start(
-        self, session: dict[str, Any], tier: dict[str, Any], region: str | None, own_copy: OwnCopy | None = None
+        self,
+        session: dict[str, Any],
+        tier: dict[str, Any],
+        region: str | None,
+        own_copy: OwnCopy | None = None,
+        clone: Clone | None = None,
     ) -> str:
         """Start the session's Sandbox in its user's own directory of the workspace and wait until it streams.
 
         A Sandbox that does not come up is ended before the failure is
         reported, so a start that fails leaves nothing running. `own_copy` is
-        the user's registry credential, for an app pulled with it.
+        the user's registry credential, for an app pulled with it; `clone` is
+        the repository the machine clones as it starts, handed over in an
+        ephemeral Secret of this start's own.
         """
         project = session.get("project_id")
         env = {}
@@ -134,6 +151,11 @@ class ModalLauncher:
         tags = {"lathe_session": session["id"], "lathe_user": session["user_id"]}
         if project:
             tags["lathe_project"] = project
+        extra: dict[str, Any] = {}
+        if clone is not None:
+            import modal
+
+            extra["secrets"] = [modal.Secret.from_dict(clone.environment())]
         sandbox = self.launcher.start_session(
             self.app,
             f"lathe-{session['id']}",
@@ -149,6 +171,7 @@ class ModalLauncher:
             tags=tags,
             image=self.image(session, own_copy),
             application=session.get("app") or "blender",
+            **extra,
         )
         try:
             sandbox.wait_until_ready(timeout=READY_SECONDS)
@@ -204,6 +227,15 @@ class ModalLauncher:
             RuntimeError: This launcher cannot list them.
         """
         return self.unreal_part("unreal_projects")(self.sandbox(sandbox_id))
+
+    def clone_status(self, sandbox_id: str) -> dict[str, Any] | None:
+        """What the session's machine reports of the clone it made as it started (`clone_status`), or nothing.
+
+        Nothing where the launcher module cannot say, which a launcher from before cloning at the
+        start cannot.
+        """
+        status = getattr(self.launcher, "clone_status", None)
+        return status(self.sandbox(sandbox_id)) if status is not None else None
 
     def unreal_part(self, name: str) -> Any:
         """One of the launcher module's Unreal functions, which a launcher from before Unreal Engine lacks."""

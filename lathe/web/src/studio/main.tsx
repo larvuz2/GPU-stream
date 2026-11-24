@@ -19,8 +19,10 @@
  * server with no integrations configured, `?demo=empty` an account with no projects, and
  * `?demo=legacy` a control plane from before the studio.
  *
- * GitHub's callback returns here with `?github=connected` or `?github=failed`, which is read once
- * and dropped from the address.
+ * GitHub's callback returns here with `?github=` and what happened (`connected`, `installed` for
+ * the GitHub App installed on more repositories, `requested` for an installation an organization's
+ * owners were asked for, or `failed`), and the Epic connection's with `?epic=connected` or
+ * `?epic=failed`; each is read once and dropped from the address.
  * @module
  */
 import { StrictMode, type ReactNode } from 'react';
@@ -31,12 +33,30 @@ import { createControlPlane } from '../lib/api';
 import { apiUrl } from '../lib/env';
 import { accessToken, currentSession, loadSupabase, SIGN_IN_PATH } from '../lib/supabase';
 import { clearDraftFromAddress, draftFromAddress, keepDraft, takeKeptDraft } from './deeplink';
-import type { GitHubReturn } from './EnvironmentPanel';
+import type { EpicReturn, GitHubReturn } from './EnvironmentPanel';
 import { Studio } from './Studio';
-import { GITHUB_RESULT_PARAMETER } from './useAccount';
+import { EPIC_RESULT_PARAMETER, GITHUB_RESULT_PARAMETER } from './useAccount';
 
 /** The query parameter that asks for the demo. */
 const DEMO_PARAMETER = 'demo';
+
+/**
+ * Reads, and drops from the address, one query parameter a callback reported its outcome in.
+ *
+ * @param parameters The page's query parameters.
+ * @param name The parameter.
+ * @returns Its value, or `null` when the page was not opened by that callback.
+ */
+function takeReturn(parameters: URLSearchParams, name: string): string | null {
+  const value = parameters.get(name);
+  if (value === null) {
+    return null;
+  }
+  const address = new URL(window.location.href);
+  address.searchParams.delete(name);
+  window.history.replaceState(null, '', address);
+  return value;
+}
 
 /**
  * Reads, and drops from the address, the outcome of a return from GitHub.
@@ -45,13 +65,24 @@ const DEMO_PARAMETER = 'demo';
  * @returns The outcome, or `null` when the page was not opened by GitHub's callback.
  */
 function takeGitHubReturn(parameters: URLSearchParams): GitHubReturn {
-  const value = parameters.get(GITHUB_RESULT_PARAMETER);
+  const value = takeReturn(parameters, GITHUB_RESULT_PARAMETER);
   if (value === null) {
     return null;
   }
-  const address = new URL(window.location.href);
-  address.searchParams.delete(GITHUB_RESULT_PARAMETER);
-  window.history.replaceState(null, '', address);
+  return value === 'connected' || value === 'installed' || value === 'requested' ? value : 'failed';
+}
+
+/**
+ * Reads, and drops from the address, the outcome of a return from connecting Epic.
+ *
+ * @param parameters The page's query parameters.
+ * @returns The outcome, or `null` when the page was not opened by that callback.
+ */
+function takeEpicReturn(parameters: URLSearchParams): EpicReturn {
+  const value = takeReturn(parameters, EPIC_RESULT_PARAMETER);
+  if (value === null) {
+    return null;
+  }
   return value === 'connected' ? 'connected' : 'failed';
 }
 
@@ -77,6 +108,7 @@ async function resolve(): Promise<ReactNode> {
         draft={linked}
         onDraftDone={clearDraftFromAddress}
         githubReturned={takeGitHubReturn(parameters)}
+        epicReturned={takeEpicReturn(parameters)}
         standIn={DemoScreen}
         onSignOut={() => {
           window.location.assign('/');
@@ -109,6 +141,7 @@ async function resolve(): Promise<ReactNode> {
       draft={linked ?? kept}
       onDraftDone={clearDraftFromAddress}
       githubReturned={takeGitHubReturn(parameters)}
+      epicReturned={takeEpicReturn(parameters)}
       onSignOut={() => {
         void supabase.auth.signOut();
       }}

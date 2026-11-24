@@ -28,8 +28,9 @@ reasoning, so:
   engines, GitHub) is a `system` message appended at the start of each turn,
   after the person's message. Where an Unreal engine runs, it also lists the
   Unreal projects in that engine's workspace and which of them the agent has
-  not yet looked at with `unreal_projects` (`Agent.unreal_state`), so a project
-  the person just cloned is brought up without being asked; the machine is
+  not yet looked at with `unreal_projects`, and a clone of the linked repository
+  the engine started with that is still running or failed (`Agent.unreal_state`),
+  so a project just cloned is brought up without being asked; the machine is
   asked only when such an engine runs.
 - A message is never rewritten once the model has answered past it. What a
   turn leaves unanswered is completed by the next: a call the turn ended
@@ -1039,13 +1040,28 @@ class Agent:
 
         The machine is asked only for a running Unreal engine, once per turn. A project no earlier
         `unreal_projects` call of the conversation returned is marked as not reported yet, with
-        what to do about it: what the person cloned is what they want to talk about next.
+        what to do about it: what the person cloned is what they want to talk about next. A clone
+        the engine made as it started and has not finished, or that failed, is said first: until
+        it is done the project is not there to report, and a failed one the person clones by hand.
         """
         lines = []
         reported = reported_unreal(history)
         for engine in engines:
             if engine["app"] != "unreal" or engine["status"] != "running":
                 continue
+            clone = self.sessions.engine_clone(turn.user, turn.project_id, engine["id"])
+            repo = turn.project["github_repo"] or "the linked repository"
+            if clone is not None and clone["state"] == "cloning":
+                lines.append(
+                    f"Engine {engine['id']} is still cloning {repo} into {clone['path'] or 'the project folder'}"
+                    + (f" ({clone['detail']})" if clone["detail"] else "")
+                    + ". Say so if the person asks for the project; it is listed once the clone is done."
+                )
+            elif clone is not None and clone["state"] == "failed":
+                lines.append(
+                    f"Engine {engine['id']} could not clone {repo} as it started: {clone['detail'] or 'no reason given'}. "
+                    "Tell the person, and that they can clone it in the Desktop view's GitHub client instead."
+                )
             try:
                 found = self.sessions.unreal_projects(turn.user, turn.project_id, engine["id"])
             except Refused as refused:
@@ -1664,8 +1680,10 @@ class Agent:
         ]
         if not found:
             notes = [
-                "No .uproject in the workspace yet. The person clones their game in the Desktop view (sign in to "
-                "GitHub in the GitHub client, clone into the project's folder), or starts a new one from a template.",
+                "No .uproject in the workspace yet. An Unreal engine of a project linked to the game's repository "
+                "clones it as it starts; otherwise the person links the repository in the Environment panel and "
+                "starts Unreal again, clones it in the Desktop view's GitHub client into the project's folder, or "
+                "starts a new one from a template.",
             ]
         answer = {"engine_id": engine_id, "engine_version": version, "projects": found, "notes": notes}
         summary = ", ".join(
