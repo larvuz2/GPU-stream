@@ -5,15 +5,16 @@
  */
 
 /**
- * How the dashboard words what the control plane reports: a failed request, and why a session
+ * How the studio words what the control plane reports: a failed request, and why an engine
  * ended.
  *
  * The statuses with a meaning of their own are introduced as what they are (402 out of credits,
- * 409 a limit, 503 a feature not configured), the last two followed by the control plane's own
- * explanation of which limit or feature; anything else is shown in its words alone.
+ * 404 a route this control plane does not serve yet, 409 a limit, 503 a feature not configured),
+ * the last two followed by the control plane's own explanation of which limit or feature; anything
+ * else is shown in its words alone.
  * @module
  */
-import { ApiError } from '../lib/api';
+import { ApiError, NOT_FOUND } from '../lib/api';
 import { IDLE_SHUTDOWN_MINUTES } from '../lib/catalog';
 
 /** The status of a request the account lacks the credits for. */
@@ -26,7 +27,7 @@ const LIMIT_REACHED = 409;
 export const NOT_CONFIGURED = 503;
 
 /**
- * Words a failed request for the person looking at the dashboard.
+ * Words a failed request for the person looking at the studio.
  *
  * @param error What the request rejected with.
  * @returns A sentence to show beside what failed.
@@ -38,6 +39,9 @@ export function describeError(error: unknown): string {
   switch (error.status) {
     case OUT_OF_CREDITS:
       return 'You are out of credits. Add credits to keep going.';
+    case NOT_FOUND:
+      // The web framework's own answer to a route it does not serve, as opposed to a record it lacks.
+      return error.message === 'Not Found' ? 'This server does not offer that yet.' : error.message;
     case LIMIT_REACHED:
       return `You have reached a limit: ${error.message}`;
     case NOT_CONFIGURED:
@@ -47,7 +51,7 @@ export function describeError(error: unknown): string {
   }
 }
 
-/** The reasons a session ends that the dashboard can say better than the identifier does. */
+/** The reasons an engine ends that the studio can say better than the identifier does. */
 const END_REASONS: Readonly<Record<string, string>> = {
   idle: `Shut down after ${IDLE_SHUTDOWN_MINUTES} idle minutes`,
   idle_timeout: `Shut down after ${IDLE_SHUTDOWN_MINUTES} idle minutes`,

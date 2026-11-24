@@ -5,7 +5,7 @@
  */
 
 /**
- * The dashboard's "Add credits" dialog: the catalog's credit packs, each a button that starts a
+ * The studio's "Add credits" dialog: the catalog's credit packs, each a button that starts a
  * checkout.
  *
  * The checkout itself is hosted elsewhere: the control plane returns its address and the browser

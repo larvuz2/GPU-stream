@@ -5,14 +5,14 @@
   file, You can obtain one at https://mozilla.org/MPL/2.0/.
 -->
 
-<!-- The signed-in dashboard, served at /app/. The brand token is filled from the catalog at build
-     time (vite.config.ts). -->
+<!-- The signed-in studio, served at /app/: the projects a person and the agent make together. The
+     brand token is filled from the catalog at build time (vite.config.ts). -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Studio — %BRAND%</title>
-    <meta name="description" content="Launch and manage your %BRAND% sessions." />
+    <meta name="description" content="Make creative projects with an agent that opens creative engines on cloud GPUs and streams them to you." />
     <!-- An account page has nothing for a search engine. -->
     <meta name="robots" content="noindex" />
     <meta name="theme-color" content="#05050a" />
@@ -31,9 +31,9 @@
     </div>
     <noscript>
       <p style="padding: 2rem; font-family: system-ui, sans-serif; color: #f5f5f8; background: #05050a">
-        The %BRAND% dashboard needs JavaScript to run.
+        The %BRAND% studio needs JavaScript to run.
       </p>
     </noscript>
-    <script type="module" src="/src/dashboard/main.tsx"></script>
+    <script type="module" src="/src/studio/main.tsx"></script>
   </body>
 </html>

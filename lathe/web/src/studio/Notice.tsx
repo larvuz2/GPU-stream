@@ -5,7 +5,7 @@
  */
 
 /**
- * The dashboard's inline messages: a banner, and the notice a failed request leaves beside the
+ * The studio's inline messages: a banner, and the notice a failed request leaves beside the
  * control that made it.
  * @module
  */

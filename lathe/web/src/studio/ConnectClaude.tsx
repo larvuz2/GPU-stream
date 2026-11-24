@@ -5,47 +5,110 @@
  */
 
 /**
- * The dashboard's "Connect Claude" card: create, list, and revoke API keys, and the command that
- * hands one to Claude.
+ * The studio's "Connect Claude" dialog, opened from the account menu: create, list, and revoke API
+ * keys, and the command that hands one to Claude.
  *
- * The control plane returns a key's secret once, when it is created, so the card shows it then,
+ * The control plane returns a key's secret once, when it is created, so the dialog shows it then,
  * with the setup command already filled in, and holds it only in this component's state: closing
- * that panel or leaving the page is the last anyone sees of it.
+ * the dialog or leaving the page is the last anyone sees of it. The keys are read each time the
+ * dialog opens, since the content mounts afresh then.
  * @module
  */
-import { useId, useState, type SubmitEvent } from 'react';
+import { useEffect, useId, useState, type SubmitEvent } from 'react';
 import { KeyRound, Plus, Sparkles, Trash2, X } from 'lucide-react';
 import { CommandBlock, CopyButton } from '../components/Copy';
+import { Dialog } from '../components/Dialog';
 import type { ApiKey, CreatedKey } from '../lib/api';
 import { shortDate } from '../lib/format';
 import { mcpEndpoint, mcpSetupCommand, SECRET_PLACEHOLDER } from '../lib/mcp';
 import { ErrorNotice, Notice } from './Notice';
 
-/** Props of {@link ConnectClaude}. */
-interface ConnectClaudeProps {
-  /** The account's API keys. */
-  keys: ApiKey[];
+/** What the dialog does with the account's keys. */
+interface KeyActions {
   /** Whether a control plane is connected; without one no key can be made. */
   connected: boolean;
+  /** Lists the account's keys. */
+  onList: () => Promise<ApiKey[]>;
   /** Creates a key and returns its secret. */
   onCreate: (name: string) => Promise<CreatedKey>;
   /** Revokes a key. */
   onRevoke: (id: string) => Promise<void>;
 }
 
+/** Props of {@link ConnectClaudeDialog}. */
+interface ConnectClaudeDialogProps extends KeyActions {
+  /** Whether the dialog is shown. */
+  open: boolean;
+  /** Closes the dialog. */
+  onClose: () => void;
+}
+
 /**
- * Renders the card.
+ * Renders the dialog.
  *
  * @param props The component's props.
- * @returns The card.
+ * @returns The dialog.
  */
-export function ConnectClaude({ keys, connected, onCreate, onRevoke }: ConnectClaudeProps) {
+export function ConnectClaudeDialog({ open, onClose, ...actions }: ConnectClaudeDialogProps) {
   const titleId = useId();
+  return (
+    <Dialog open={open} onClose={onClose} labelledBy={titleId} wide>
+      <ConnectClaude titleId={titleId} {...actions} />
+    </Dialog>
+  );
+}
+
+/** Props of {@link ConnectClaude}. */
+interface ConnectClaudeProps extends KeyActions {
+  /** The `id` the dialog is titled by. */
+  titleId: string;
+}
+
+/**
+ * Renders the dialog's content.
+ *
+ * @param props The component's props.
+ * @returns The content.
+ */
+function ConnectClaude({ titleId, connected, onList, onCreate, onRevoke }: ConnectClaudeProps) {
   const nameId = useId();
+  const [keys, setKeys] = useState<ApiKey[] | null>(null);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [created, setCreated] = useState<CreatedKey | null>(null);
+
+  useEffect(() => {
+    if (!connected) {
+      return;
+    }
+    let current = true;
+    onList()
+      .then((listed) => {
+        if (current) {
+          setKeys(listed);
+        }
+      })
+      .catch((failure: unknown) => {
+        if (current) {
+          setLoadError(failure);
+        }
+      });
+    return () => {
+      current = false;
+    };
+  }, [connected, onList]);
+
+  /**
+   * Revokes a key and drops it from the list.
+   *
+   * @param id The key to revoke.
+   */
+  async function revoke(id: string): Promise<void> {
+    await onRevoke(id);
+    setKeys((previous) => previous?.filter((key) => key.id !== id) ?? null);
+  }
 
   /**
    * Creates a key under the name entered and shows its secret.
@@ -57,7 +120,9 @@ export function ConnectClaude({ keys, connected, onCreate, onRevoke }: ConnectCl
     setBusy(true);
     setError(null);
     try {
-      setCreated(await onCreate(name.trim()));
+      const made = await onCreate(name.trim());
+      setCreated(made);
+      setKeys((previous) => [made.key, ...(previous ?? [])]);
       setName('');
     } catch (failure) {
       setError(failure);
@@ -67,13 +132,9 @@ export function ConnectClaude({ keys, connected, onCreate, onRevoke }: ConnectCl
   }
 
   return (
-    <section className="glass relative overflow-hidden p-5 sm:p-7" aria-labelledby={titleId}>
-      <div
-        className="pointer-events-none absolute -top-24 -right-16 size-64 rounded-full bg-iris/20 blur-3xl"
-        aria-hidden="true"
-      />
-      <div className="relative">
-        <h2 id={titleId} className="flex items-center gap-2.5 text-lg font-semibold tracking-tight">
+    <div>
+      <div>
+        <h2 id={titleId} className="flex items-center gap-2.5 pr-10 text-xl font-semibold tracking-tight">
           <Sparkles className="size-[1.1rem] text-ember-300" aria-hidden="true" />
           Connect Claude
         </h2>
@@ -115,7 +176,7 @@ export function ConnectClaude({ keys, connected, onCreate, onRevoke }: ConnectCl
         )}
 
         <form
-          className="mt-5 flex flex-col gap-2.5 sm:flex-row lg:flex-col xl:flex-row"
+          className="mt-5 flex flex-col gap-2.5 sm:flex-row"
           onSubmit={(event) => {
             void create(event);
           }}
@@ -148,12 +209,19 @@ export function ConnectClaude({ keys, connected, onCreate, onRevoke }: ConnectCl
         )}
 
         <h3 className="mt-7 text-xs font-semibold tracking-[0.14em] text-faint uppercase">Your keys</h3>
-        {keys.length === 0 ? (
+        {loadError === null ? null : (
+          <div className="mt-3">
+            <ErrorNotice error={loadError} />
+          </div>
+        )}
+        {keys === null ? (
+          <p className="mt-3 text-sm text-muted">{connected ? 'Loading your keys…' : 'Keys appear here once the control plane is connected.'}</p>
+        ) : keys.length === 0 ? (
           <p className="mt-3 text-sm text-muted">No keys yet. Create one to connect Claude.</p>
         ) : (
           <ul className="mt-2 divide-y divide-line">
             {keys.map((key) => (
-              <KeyRow key={key.id} apiKey={key} onRevoke={onRevoke} />
+              <KeyRow key={key.id} apiKey={key} onRevoke={revoke} />
             ))}
           </ul>
         )}
@@ -170,7 +238,7 @@ export function ConnectClaude({ keys, connected, onCreate, onRevoke }: ConnectCl
           </>
         ) : null}
       </div>
-    </section>
+    </div>
   );
 }
 
