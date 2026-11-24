@@ -193,6 +193,41 @@ against stand-ins for it.
     rebuilt after a script change with the engine layer taken from the cache.
   - The open script's other outcomes ran against stand-ins for the editor.
 
+- **The team's repository, cloned at start** (`addons/modal/unreal/clone.py`,
+  README's Unreal section). A session started with `start_session(...,
+  secrets=[...])` holding `LATHE_GIT_REPO`, `LATHE_GIT_BRANCH`,
+  `LATHE_GIT_TOKEN`, `LATHE_GIT_NAME`, and `LATHE_GIT_EMAIL` clones the branch
+  into `<project folder>/<name>` in the background as the desktop comes up, Git
+  LFS's files included, with a progress line over the GitHub client, and opens
+  the clone in the client when it is there: no sign-in, no welcome, no
+  "Initialize Git LFS". An earlier clone on the workspace is fetched, and
+  fast-forwarded only when it is clean and on the branch; otherwise the status
+  says it was not updated and why. `clone_status(sandbox)` returns `{state:
+  cloning | done | failed, path, detail}`. The token reaches the session's Git
+  through a credential helper reading the environment (username
+  `x-access-token`), cleared of every other helper so none keeps it, and the
+  client's Git through an `Authorization` header for that repository alone in
+  the client's environment: the client runs every Git with only its own
+  helper, which answers github.com from its own signed-in accounts and asks no
+  other helper (`trampoline-credential-helper.ts` in its source). Its "Initialize
+  Git LFS" was asked for every repository tracking LFS files, whatever was
+  installed (`git lfs install --system` was already in the image); the bundle
+  now asks only where the repository's hooks do not run LFS, and a clone made
+  in the session has them. Checked on Modal with a public UE 5.3 sample
+  (228 MB and 109 LFS files) and a recognizable dummy token, timings in the
+  README:
+  - A first start cloned it and fetched every LFS file, `unreal_projects`
+    found the project, and the client opened on it with no prompt.
+  - Later starts fast-forwarded a clean clone one commit behind, and left a
+    clone with a changed file as it was ("has local changes, not updated").
+  - A repository that does not exist failed with GitHub's refusal in words,
+    after the helper had offered GitHub the token.
+  - The client's own fetch carried the token to GitHub, which refused the dummy.
+  - The token was in no file of the home, the workspace, `/tmp`, `/etc`, `/var`,
+    or `/root` but the base image's two copies of the session environment in
+    `/tmp/runtime-ubuntu`, and in no file of any of the four workspaces after
+    their sessions ended.
+
 - **The bridge** (`addons/modal/unreal`). Blender's add-on `send_to_unreal.py`
   (3D viewport sidebar, tab Unreal) exports the selection into the project's
   `bridge/` folder, as glTF binary for meshes and FBX for anything with an
@@ -255,6 +290,19 @@ against stand-ins for it.
   (`addons/modal/unreal/view/view.sh` has the plan), and a page on the player
   counting as use of the session. Whether Modal shares a layer pulled with one
   user's Secret with another user's build has to be checked there.
+- The clone at start with a real GitHub App user token: a private repository's
+  clone and fetch, and a push from the client, are unchecked; with the dummy
+  token GitHub refused the token where it was offered, which is as far as a
+  check without one goes. Git run in a terminal reaches the token only where the
+  terminal was opened from the client, whose environment carries it. A token
+  that expires in a session that outlives it (eight hours) leaves the client
+  refused for that repository until the next start, even after a sign-in, since
+  its header takes the place of any credential. The base image's entrypoint
+  writes the whole session environment, this token and the session's own tokens
+  with it, to `/tmp/runtime-ubuntu/container-env` (readable by every account in
+  the Sandbox) and `selkies-session-env.json`; they go with the Sandbox, and
+  narrowing them is a change to the base image or to `session.sh`, which every
+  app's image runs.
 - The GitHub client's sign-in with a real account: it is checked as far as
   GitHub's token exchange. The client signs in through Desktop Plus's own OAuth
   app, so an organization that restricts third-party apps has an owner approve

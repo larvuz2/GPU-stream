@@ -298,16 +298,74 @@ version a studio runs on Windows) and publishes Linux packages
 (`DESKTOP_PLUS_VERSION` and `DESKTOP_PLUS_SHA256` in `sandbox.py`). The older
 Linux fork, shiftkey/desktop, installs and opens here too, but its last release
 is 3.4.13 of February 2025, with the Electron of then holding the team's token
-and open sign-in failures on Ubuntu (`unreal/install.sh`). Its clone dialog is
-made to offer the session's folder by a change to one function of its bundled
-code, which the build checks for, so a new version that is not that shape fails
-the build rather than offering the wrong folder.
+and open sign-in failures on Ubuntu (`unreal/install.sh`). Four things in its
+bundled code are changed for the session (`unreal/desktop-plus.py`): its clone
+dialog offers the session's folder, a repository named on its command line is
+added without its Add dialog, it asks to initialize Git LFS only for a
+repository whose hooks do not run LFS yet, and a session given a repository
+opens on it rather than on the client's welcome. Each change is found by the
+shape of the code it changes, which the build checks for, so a new version
+that is not that shape fails the build rather than doing something else.
 
 Firefox, Blender, and the client are on the desktop and in the quick launch
 beside the start button. Blender is the blender app's, started in the project
 folder with the Send to Unreal add-on enabled (the sidebar's Unreal tab;
 [`unreal/send_to_unreal.py`](unreal/send_to_unreal.py)), and the launcher's
 `blender` verb runs Python in it as in a Blender session.
+
+### The team's repository, cloned at start
+
+A project linked to a GitHub repository needs none of the steps above: the
+control plane starts its session with the repository and a token for it in a
+Modal Secret of that start, and the session clones it by itself.
+
+```python
+start_session(..., application="unreal", secrets=[modal.Secret.from_dict({
+    "LATHE_GIT_REPO": "studio/capyverse", "LATHE_GIT_BRANCH": "main",
+    "LATHE_GIT_TOKEN": token,  # a GitHub App user token for that repository, 8 hours
+    "LATHE_GIT_NAME": "Dev Eloper", "LATHE_GIT_EMAIL": "dev@example.com",
+})])
+```
+
+- **The clone.** As the desktop comes up, `selkies-modal-unreal-clone`
+  ([`unreal/clone.py`](unreal/clone.py)) clones the branch into the clone folder
+  (`<project folder>/<name>`) in the background, Git LFS's files included, with
+  a progress line over the client. A folder that already holds the clone, from
+  an earlier session on the workspace, is fetched, and fast-forwarded only when
+  it is on that branch with no tracked file changed: local changes, local
+  commits, and another branch are left as they are, and the status says so
+  ("has local changes, not updated"). The commits carry `LATHE_GIT_NAME` and
+  `LATHE_GIT_EMAIL`. The clone counts as use of the session while it runs.
+- **The client.** When the clone is there the client opens it, added to its
+  list with no question and no "Initialize Git LFS" (Git LFS is installed
+  system-wide and the clone has its hooks), and with no welcome to sign in
+  through. Where the clone fails, a line over the client says why and to clone
+  by hand.
+- **How far it is.** `clone_status(sandbox)` returns
+  `{"state": "cloning" | "done" | "failed", "path": ..., "detail": ...}`,
+  `detail` being one line: Git's progress, then Git LFS's ("fetching the Git LFS
+  files: 49 of 109"), then what happened ("cloned studio/capyverse at main
+  (13622e3); 109 Git LFS files fetched", "has local changes, not updated
+  (origin/main fetched)", or GitHub's refusal in words). `path` is null until
+  the clone starts. Asking does not count as use of the session.
+- **The token.** It is in no remote URL, `.git/config`, log, or status, and no
+  file of the workspace keeps it. The session's Git reaches it through a
+  credential helper that reads it from the environment
+  ([`unreal/git-credential.sh`](unreal/git-credential.sh)), given to the
+  clone's commands alone with every other helper cleared, and asked only when
+  GitHub refuses without it, so a public repository is cloned without sending
+  it. The client cannot use such a helper: it runs every Git with the helpers
+  cleared and its own in their place, and its own answers github.com only from
+  an account signed in to the client. So the client is given the token as an
+  `Authorization` header for that repository's address alone, in its
+  environment (`http.<url>.extraHeader` through `GIT_CONFIG_COUNT`;
+  [`unreal/github.sh`](unreal/github.sh)), and fetches and pushes with it. The
+  header goes with every request, so once the token expires, after eight hours,
+  GitHub refuses that repository to the client for the rest of the session, a
+  sign-in included; a session lives eight hours unless started for longer.
+  The base image copies the whole session environment, the token with the
+  session's own tokens, into `/tmp/runtime-ubuntu` (`container-env`,
+  `selkies-session-env.json`), which goes with the Sandbox.
 
 ### Finding the project
 
@@ -379,6 +437,11 @@ On 2026-11-24, with the image cached unless said otherwise:
 | `git lfs pull` of its 109 LFS files | 3.4 s, 187 MB |
 | `unreal_projects`, two projects | 1.3 to 1.6 s; 19.5 s on a new machine, which reads the clones from the Volume for the first time |
 | `unreal_image`'s recipe with a public image in place of Epic's | 199 s; 77 s after a script change, the engine layer taken from the cache |
+| Clone at start of the UE sample (228 MB, then 109 LFS files of 187 MB) into an empty workspace, no GPU | `done` 12 to 22 s after Selkies listened (git 8 to 16 s, LFS 3 to 4 s); the client open on it 0.7 s after |
+| A later start with the clone one commit behind, clean | fetched and fast-forwarded in 2.2 s |
+| A later start with local changes | `done`, not updated, in 0.7 s; 150 s before the clone set `core.checkStat=minimal`, Git then reading the whole clone from the Volume on a new machine (`unreal/clone.py`) |
+| A repository that does not exist | `failed` 0.7 s after the clone started |
+| Rebuild after a change to the client's package script, or to the bundle changes | 220 s, or 95 to 130 s |
 
 ## The session
 
