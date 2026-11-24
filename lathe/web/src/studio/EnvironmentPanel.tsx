@@ -10,21 +10,53 @@
  * Engines are catalog apps running as sessions of the project. Each shows its state, its clock
  * while it runs, and the controls that put it on the screen or stop it. The start form offers the
  * discipline's engines first, then every other app; only an available app, a team one, which the
- * control plane admits for the team's accounts alone, or one on the person's own license can be
- * started, and the rest show their status. A tier the control plane does not list as open is shown
- * but cannot be chosen. Choosing an app on the person's own license (Unreal Engine, on their Epic
- * account) shows whether that license is linked, as the control plane reads it through their
- * GitHub account: linked; not linked, with the steps that link it and Epic's page on them; or
- * unknown, with GitHub to connect first or again. It starts once linked.
+ * control plane admits for the team's accounts alone, or one with a part on the person's own
+ * license can be started, and the rest show their status. A tier the control plane does not list
+ * as open is shown but cannot be chosen. Unreal Engine, whose editor runs on the person's Epic
+ * account, starts at once whatever that account: the form says what the engine comes with, the
+ * editor too where the control plane reads the Epic link through their GitHub account, and asks
+ * nothing of Epic, which the agent explains when the person wants the editor.
+ *
+ * A running Unreal engine's card lists the Unreal projects in its workspace, each with what it is
+ * and an "Open in Unreal" button that asks the agent to open it, the way the person would in a
+ * message. Before there is one, the card says how one gets there, with the Desktop view a click
+ * away. The list is read when the card appears, whenever the agent starts or ends a turn (it may
+ * have cloned or made one), and when the person asks to look again, never on a timer: reading the
+ * machine counts as use of it, and a page left open must not keep an engine from shutting down
+ * once it is idle.
  *
  * GitHub is the person's own account, connected once through the control plane's OAuth App and
- * then linked per project to a repository, existing or created for it. The block says plainly
- * when this server has no GitHub configured, or no studio routes yet, instead of failing.
+ * then linked per project to a repository, existing or created for it; connecting it again is in
+ * its menu, which the Epic link's last step asks for. The block says plainly when this server has
+ * no GitHub configured, or no studio routes yet, instead of failing.
  * @module
  */
-import { useEffect, useId, useMemo, useState, type SubmitEvent } from 'react';
-import { CircleStop, ExternalLink, Lock, LogOut, MonitorPlay, Play, Plus, Unlink } from 'lucide-react';
-import { isActive, type GitHubRepo, type Health, type Me, type Project, type RepoLink, type Session } from '../lib/api';
+import { useEffect, useId, useMemo, useState, type ReactNode, type SubmitEvent } from 'react';
+import {
+  Box,
+  CircleStop,
+  ExternalLink,
+  Lock,
+  LogOut,
+  Monitor,
+  MonitorPlay,
+  Play,
+  Plus,
+  RefreshCw,
+  Unlink,
+} from 'lucide-react';
+import {
+  DESKTOP_STREAM,
+  isActive,
+  isMissing,
+  type GitHubRepo,
+  type Health,
+  type Me,
+  type Project,
+  type RepoLink,
+  type Session,
+  type UnrealProject,
+} from '../lib/api';
 import {
   catalog,
   findApp,
@@ -34,15 +66,14 @@ import {
   tierFits,
   isOwnLicense,
   minutesFor,
-  ownLicenseLabel,
   type CatalogApp,
   type Tier,
 } from '../lib/catalog';
 import { cx } from '../lib/cx';
-import { clock, minutesText, timestamp } from '../lib/format';
+import { clock, minutesText, sizeText, timestamp } from '../lib/format';
 import { useNow } from './hooks';
 import { GitHubMark, Menu } from './Menu';
-import { describeEndReason } from './messages';
+import { describeEndReason, describeError } from './messages';
 import { ErrorNotice, Notice } from './Notice';
 import { ago, appStatusLabel, canStart } from './present';
 import type { GitHub } from './useAccount';
@@ -69,8 +100,18 @@ interface EngineSectionProps {
   onStop: (id: string) => Promise<void>;
   /** Puts an engine on screen. */
   onShow: (id: string) => void;
+  /** Puts one picture of an engine on screen, such as an Unreal engine's Desktop. */
+  onShowPicture: (id: string, stream: string) => void;
   /** Opens the credits dialog. */
   onAddCredits: () => void;
+  /** Lists the Unreal projects in a running Unreal engine's workspace. */
+  unrealProjects: (engineId: string) => Promise<UnrealProject[]>;
+  /** Whether the agent is working on a turn, when nothing more can be asked of it. */
+  agentRunning: boolean;
+  /** Whether the agent can be asked at all on this server. */
+  canAsk: boolean;
+  /** Asks the agent, as the person's message. */
+  onAsk: (text: string) => Promise<void>;
 }
 
 /**
@@ -90,7 +131,12 @@ export function EngineSection({
   onStart,
   onStop,
   onShow,
+  onShowPicture,
   onAddCredits,
+  unrealProjects,
+  agentRunning,
+  canAsk,
+  onAsk,
 }: EngineSectionProps) {
   const active = engines.filter(isActive);
   const ended = engines
@@ -117,7 +163,20 @@ export function EngineSection({
               onScreen={engine.id === screenId}
               onShow={onShow}
               onStop={onStop}
-            />
+            >
+              {engine.app === 'unreal' && engine.status === 'running' ? (
+                <UnrealProjects
+                  engine={engine}
+                  load={unrealProjects}
+                  agentRunning={agentRunning}
+                  canAsk={canAsk}
+                  onAsk={onAsk}
+                  onShowDesktop={() => {
+                    onShowPicture(engine.id, DESKTOP_STREAM);
+                  }}
+                />
+              ) : null}
+            </EngineRow>
           ))}
         </ul>
       )}
@@ -161,6 +220,8 @@ interface EngineRowProps {
   onShow: (id: string) => void;
   /** Stops it. */
   onStop: (id: string) => Promise<void>;
+  /** What the card shows below its header, such as a running Unreal engine's projects. */
+  children?: ReactNode;
 }
 
 /**
@@ -169,7 +230,7 @@ interface EngineRowProps {
  * @param props The component's props.
  * @returns The list item.
  */
-function EngineRow({ engine, onScreen, onShow, onStop }: EngineRowProps) {
+function EngineRow({ engine, onScreen, onShow, onStop, children }: EngineRowProps) {
   const running = engine.status === 'running';
   const now = useNow(running);
   const [confirming, setConfirming] = useState(false);
@@ -286,6 +347,208 @@ function EngineRow({ engine, onScreen, onShow, onStop }: EngineRowProps) {
           <ErrorNotice error={error} />
         </div>
       )}
+      {children}
+    </li>
+  );
+}
+
+/** Props of {@link UnrealProjects}. */
+interface UnrealProjectsProps {
+  /** The running Unreal engine. */
+  engine: Session;
+  /** Lists the Unreal projects in its workspace. */
+  load: (engineId: string) => Promise<UnrealProject[]>;
+  /** Whether the agent is working on a turn. */
+  agentRunning: boolean;
+  /** Whether the agent can be asked at all. */
+  canAsk: boolean;
+  /** Asks the agent, as the person's message. */
+  onAsk: (text: string) => Promise<void>;
+  /** Puts the engine's Desktop on screen. */
+  onShowDesktop: () => void;
+}
+
+/**
+ * Renders the Unreal projects a running Unreal engine found in its workspace, each with a button
+ * that asks the agent to open it in the editor.
+ *
+ * @param props The component's props.
+ * @returns The block, or nothing on a control plane that cannot list them.
+ */
+function UnrealProjects({ engine, load, agentRunning, canAsk, onAsk, onShowDesktop }: UnrealProjectsProps) {
+  const [found, setFound] = useState<UnrealProject[] | null>(null);
+  const [failure, setFailure] = useState<unknown>(null);
+  const [asked, setAsked] = useState<string | null>(null);
+  const [askError, setAskError] = useState<unknown>(null);
+  const [reading, setReading] = useState(0);
+
+  useEffect(() => {
+    let current = true;
+    load(engine.id)
+      .then((listed) => {
+        if (current) {
+          setFound(listed);
+          setFailure(null);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (current) {
+          setFailure(reason);
+        }
+      });
+    return () => {
+      current = false;
+    };
+  }, [engine.id, load, agentRunning, reading]);
+
+  /**
+   * Asks the agent to open a project in the editor.
+   *
+   * @param project The project.
+   */
+  async function open(project: UnrealProject): Promise<void> {
+    setAsked(project.path);
+    setAskError(null);
+    try {
+      await onAsk(`Open ${project.name} in Unreal (${project.path}).`);
+    } catch (reason) {
+      setAskError(reason);
+    }
+  }
+
+  if (isMissing(failure)) {
+    return null;
+  }
+  return (
+    <div className="mt-2.5 border-t border-line pt-2.5">
+      <div className="flex items-center gap-1.5">
+        <p className="flex flex-1 items-center gap-1.5 text-[0.6875rem] font-semibold tracking-wide text-faint uppercase">
+          <Box className="size-3" aria-hidden="true" />
+          Unreal projects
+        </p>
+        <button
+          type="button"
+          className="icon-btn icon-btn-sm"
+          aria-label="Look for projects again"
+          title="Look again"
+          onClick={() => {
+            setReading(reading + 1);
+          }}
+        >
+          <RefreshCw aria-hidden="true" />
+        </button>
+      </div>
+      <div aria-live="polite">
+        {found === null ? (
+          <p className="mt-1.5 text-xs text-faint">
+            {failure === null ? 'Looking for projects…' : `Could not look for projects: ${describeError(failure)}`}
+          </p>
+        ) : found.length === 0 ? (
+          <div className="mt-1.5 text-xs leading-relaxed text-muted">
+            <p>
+              No project here yet. Clone your game in the Desktop view (sign in to the GitHub client first), or ask the
+              agent for a new one from a template.
+            </p>
+            <button type="button" className="btn btn-ghost btn-sm mt-2 h-7 px-2.5 text-xs" onClick={onShowDesktop}>
+              <Monitor className="size-3.5" aria-hidden="true" />
+              Show Desktop
+            </button>
+          </div>
+        ) : (
+          <ul className="mt-1.5 grid grid-cols-1 gap-1.5">
+            {found.map((project) => (
+              <UnrealProjectCard
+                key={project.path}
+                project={project}
+                asked={agentRunning && asked === project.path}
+                askable={canAsk && !agentRunning}
+                busyReason={!canAsk ? 'The agent is not switched on here.' : agentRunning ? 'The agent is busy.' : null}
+                onOpen={() => {
+                  void open(project);
+                }}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+      {askError === null ? null : (
+        <div className="mt-2">
+          <ErrorNotice error={askError} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Props of {@link UnrealProjectCard}. */
+interface UnrealProjectCardProps {
+  /** The project. */
+  project: UnrealProject;
+  /** Whether the agent was just asked to open it. */
+  asked: boolean;
+  /** Whether the agent can be asked now. */
+  askable: boolean;
+  /** Why it cannot, when it cannot. */
+  busyReason: string | null;
+  /** Asks the agent to open it. */
+  onOpen: () => void;
+}
+
+/**
+ * Renders one Unreal project: its name, its version, what it is made of, and how it opens.
+ *
+ * @param props The component's props.
+ * @returns The list item.
+ */
+function UnrealProjectCard({ project, asked, askable, busyReason, onOpen }: UnrealProjectCardProps) {
+  const facts = [
+    project.cpp_modules.length === 0
+      ? 'Blueprints'
+      : `C++, ${project.cpp_modules.length} module${project.cpp_modules.length === 1 ? '' : 's'}`,
+    `${project.plugins.length} plugin${project.plugins.length === 1 ? '' : 's'}`,
+    project.lfs === true ? 'Git LFS' : typeof project.lfs === 'string' ? `Git LFS: ${project.lfs}` : null,
+    project.size_bytes === null ? null : sizeText(project.size_bytes),
+  ].filter((fact) => fact !== null);
+  const opensAsIs = project.version === 'same';
+  const refused = project.version === 'newer';
+  return (
+    <li className="rounded-lg border border-line bg-white/[0.02] p-2.5">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium" title={project.path}>
+          {project.name}
+        </span>
+        <span
+          className={cx('pill h-5 px-2 text-[0.6875rem]', refused ? 'text-bad' : opensAsIs ? 'text-ok' : 'text-warn')}
+        >
+          {project.engine_association === '' ? 'No version' : `UE ${project.engine_association}`}
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-muted">{facts.join(' · ')}</p>
+      {opensAsIs ? null : <p className="mt-1 text-xs leading-relaxed text-faint">{project.opens}</p>}
+      {project.plugins_to_check.length === 0 ? null : (
+        <p className="mt-1 text-xs leading-relaxed text-warn">
+          May not come along: {project.plugins_to_check.join(', ')}
+        </p>
+      )}
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          className="btn btn-primary btn-sm h-7 px-2.5 text-xs"
+          disabled={!askable || refused}
+          title={refused ? project.opens : (busyReason ?? undefined)}
+          onClick={onOpen}
+        >
+          {asked ? (
+            <span className="spinner size-3" aria-hidden="true" />
+          ) : (
+            <Box className="size-3.5" aria-hidden="true" />
+          )}
+          {asked ? 'Asked the agent' : 'Open in Unreal'}
+        </button>
+        <span className="mono min-w-0 flex-1 truncate text-[0.6875rem] text-faint" title={project.path}>
+          {project.path}
+        </span>
+      </div>
     </li>
   );
 }
@@ -332,11 +595,7 @@ function StartForm({ project, health, me, github, onStart, onAddCredits }: Start
     catalog.tiers.find(usable);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const ready =
-    app !== undefined &&
-    canStart(app) &&
-    tier !== undefined &&
-    (!isOwnLicense(app) || github.status?.epic_linked === true);
+  const ready = app !== undefined && canStart(app) && tier !== undefined;
 
   /**
    * Starts the engine the form describes.
@@ -425,7 +684,7 @@ function StartForm({ project, health, me, github, onStart, onAddCredits }: Start
           ? 'No tier is switched on right now.'
           : `${gpuLabel(tier)}${minutes === null ? '' : ` · about ${minutesText(minutes)} on your credits`}`}
       </p>
-      {app !== undefined && isOwnLicense(app) ? <EpicLink app={app} github={github} /> : null}
+      {app !== undefined && isOwnLicense(app) ? <EditorNote app={app} github={github} /> : null}
       {error === null ? null : (
         <div className="mt-2">
           <ErrorNotice error={error} onAddCredits={onAddCredits} />
@@ -435,126 +694,31 @@ function StartForm({ project, health, me, github, onStart, onAddCredits }: Start
   );
 }
 
-/** Props of {@link EpicLink}. */
-interface EpicLinkProps {
-  /** The app on the person's own license: Unreal Engine. */
+/** Props of {@link EditorNote}. */
+interface EditorNoteProps {
+  /** The app with a part on the person's own license: Unreal Engine, whose editor is. */
   app: CatalogApp;
-  /** The GitHub connection, which carries the link. */
+  /** The GitHub connection, which carries the Epic link. */
   github: GitHub;
 }
 
 /**
- * Renders whether the person's Epic account, the license Unreal Engine starts on, is linked.
+ * Renders what an Unreal engine starts with: its desktop always, and the person's own copy of the
+ * editor where the control plane reads their Epic link.
  *
- * The control plane reads the link from what the person's GitHub account can see, and this shows
- * its answer. Not linked, it lists the catalog's steps and Epic's page on them; unknown, it offers
- * GitHub to connect, first or again, after which the link is read anew.
+ * It asks nothing of the person: the engine starts either way, and the agent says how to link
+ * Epic when they ask for the editor.
  *
  * @param props The component's props.
- * @returns The block.
+ * @returns The note.
  */
-function EpicLink({ app, github }: EpicLinkProps) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const status = github.status;
-  const label = ownLicenseLabel(app);
-
-  /** Sends the person to GitHub, to connect or to connect again; the page comes back here. */
-  async function connect(): Promise<void> {
-    setBusy(true);
-    setError(null);
-    try {
-      await github.connect();
-    } catch (failure) {
-      setError(failure);
-      setBusy(false);
-    }
-  }
-
-  const connectButton = (text: string) => (
-    <button
-      type="button"
-      className="btn btn-ghost btn-sm mt-2 h-8 w-full text-xs"
-      disabled={busy}
-      onClick={() => {
-        void connect();
-      }}
-    >
-      {busy ? <span className="spinner size-3.5" aria-hidden="true" /> : <GitHubMark className="size-3.5" />}
-      {text}
-    </button>
-  );
-
-  let body;
-  if (github.availability === 'loading') {
-    body = <p className="text-xs text-faint">Checking the link to Epic…</p>;
-  } else if (!status?.configured) {
-    body = (
-      <Notice tone="warn">
-        {app.name} starts through a GitHub account linked to Epic, and this server cannot connect GitHub yet.
-      </Notice>
-    );
-  } else if (!status.connected) {
-    body = (
-      <>
-        <Notice tone="warn" title="Connect GitHub first.">
-          {app.name} runs on the Epic account your GitHub account is linked to.
-        </Notice>
-        {connectButton('Connect GitHub')}
-      </>
-    );
-  } else if (status.epic_linked === true) {
-    body = (
-      <Notice tone="info" title={`${label} is linked.`}>
-        {status.login === null ? 'Through your GitHub account.' : `Through GitHub, as ${status.login}.`}
-      </Notice>
-    );
-  } else if (status.epic_linked === false) {
-    body = (
-      <>
-        <Notice tone="warn" title={`${label} is not linked yet.`}>
-          {app.name} runs on your own Epic account, which Epic links to your GitHub account
-          {status.login === null ? '' : ` (${status.login})`}.
-        </Notice>
-        <ol className="mt-2 grid list-decimal gap-1 pl-5 text-xs leading-relaxed text-muted">
-          {(app.license?.steps ?? []).map((step) => (
-            <li key={step}>{step}</li>
-          ))}
-        </ol>
-        {app.license === undefined ? null : (
-          <a
-            className="link mt-2 inline-flex items-center gap-1 text-xs"
-            href={app.license.url}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Epic&rsquo;s page on linking GitHub
-            <ExternalLink className="size-3" aria-hidden="true" />
-          </a>
-        )}
-        {connectButton('Reconnect GitHub')}
-      </>
-    );
-  } else {
-    body = (
-      <>
-        <Notice tone="warn" title="Reconnect GitHub.">
-          It was connected before {app.name} needed it to read packages, which checking the link to Epic and
-          pulling the engine take.
-        </Notice>
-        {connectButton('Reconnect GitHub')}
-      </>
-    );
-  }
+function EditorNote({ app, github }: EditorNoteProps) {
   return (
-    <div className="mt-2.5" aria-live="polite">
-      {body}
-      {error === null ? null : (
-        <div className="mt-2">
-          <ErrorNotice error={error} />
-        </div>
-      )}
-    </div>
+    <p className="mt-1.5 px-0.5 text-xs leading-relaxed text-muted" aria-live="polite">
+      {github.status?.epic_linked === true
+        ? `With your own Unreal Editor ${app.version}, on your Epic account, beside a desktop with the GitHub client, Git LFS, Firefox, and Blender.`
+        : 'Starts with a desktop: the GitHub client, Git LFS, Firefox, and Blender. The Unreal Editor comes on your Epic account; the agent says how to link it when you open a project.'}
+    </p>
   );
 }
 
@@ -651,6 +815,13 @@ export function GitHubSection({ project, github, health, returned, onLink, onUnl
             trigger={<GitHubMark className="size-3.5" />}
             triggerClassName="icon-btn"
             items={[
+              {
+                label: 'Reconnect GitHub',
+                icon: <RefreshCw aria-hidden="true" />,
+                onSelect: () => {
+                  void run(github.connect);
+                },
+              },
               {
                 label: 'Disconnect GitHub',
                 icon: <LogOut aria-hidden="true" />,

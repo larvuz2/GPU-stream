@@ -19,10 +19,15 @@
  * after it are live, and also update what they describe: a `library` event puts its asset in the
  * library, an `engine` event re-reads the engines, and the end of a turn marks the project as
  * just changed and re-reads the balance the turn may have spent. The plan is the latest `plan`
- * event's, or the project's own before any.
+ * event's, or the project's own before any. The latest `screen` event, live or replayed, is what
+ * the agent last put on the screen ({@link ScreenRequest}), which the workspace shows until the
+ * person picks something else, and a live one is also handed to the workspace as it arrives, so it
+ * can bring the screen into view.
  *
  * Engines are re-read every three seconds while one is queued or starting, which is how an
- * engine the person started is seen coming up without the agent saying so.
+ * engine the person started is seen coming up without the agent saying so. A running engine
+ * reported without stream links (by an event, since the log carries none, or by a listing that
+ * could not mint them) keeps the ones it had, so a picture on screen never loses its frame.
  * @module
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -40,6 +45,7 @@ import {
   type Session,
   type StudioEvent,
   type TurnId,
+  type UnrealProject,
 } from '../lib/api';
 import { connected, type Availability } from './useAccount';
 
@@ -64,6 +70,16 @@ export interface PendingMessage {
   text: string;
   /** When it was sent, in milliseconds since the epoch. */
   at: number;
+}
+
+/** What the agent last put on the screen: an engine, and which of its pictures. */
+export interface ScreenRequest {
+  /** The engine. */
+  engineId: string;
+  /** The picture's name, such as `Desktop` or `Unreal`. */
+  stream: string;
+  /** The event that asked for it, which tells one request from the next. */
+  eventId: number;
 }
 
 /** What the open project's views render from, and the actions that change it. */
@@ -92,8 +108,12 @@ export interface ProjectData {
   startEngine: (request: LaunchRequest) => Promise<Session>;
   /** Stops an engine. Rejects with an `ApiError`. */
   stopEngine: (id: string) => Promise<void>;
-  /** Mints a link to a running engine's stream. Rejects with an `ApiError`. */
-  link: (id: string) => Promise<string>;
+  /** Mints a link to a running engine's desktop, or to the picture named. Rejects with an `ApiError`. */
+  link: (id: string, stream?: string) => Promise<string>;
+  /** What the agent last put on the screen, or `null` before it has. */
+  screenRequest: ScreenRequest | null;
+  /** Lists the Unreal projects in a running Unreal engine's workspace. Rejects with an `ApiError`. */
+  unrealProjects: (engineId: string) => Promise<UnrealProject[]>;
   /** The library, or `null` until it has loaded. */
   library: Library | null;
   /** How far the library has come. */
@@ -118,6 +138,8 @@ export interface ProjectCallbacks {
   onTouched: () => void;
   /** Re-reads the balance. */
   onSpent: () => void;
+  /** Follows the agent putting an engine on the screen, as it happens. */
+  onScreen: (request: ScreenRequest) => void;
 }
 
 /**
@@ -131,6 +153,21 @@ function upsert<T extends { id: string }>(list: T[], record: T): T[] {
   return list.some((other) => other.id === record.id)
     ? list.map((other) => (other.id === record.id ? record : other))
     : [record, ...list];
+}
+
+/**
+ * An engine as it was reported, with the stream links it had before where the report has none
+ * while it still runs.
+ *
+ * @param list The engines as last listed.
+ * @param engine The engine as reported.
+ * @returns The engine to keep.
+ */
+function withStreams(list: Session[], engine: Session): Session {
+  const streams = list.find((other) => other.id === engine.id)?.streams;
+  return engine.streams === undefined && streams !== undefined && engine.status === 'running'
+    ? { ...engine, streams }
+    : engine;
 }
 
 /**
@@ -152,6 +189,7 @@ export function useProject(client: ControlPlane | null, project: Project, callba
   const [enginesStatus, setEnginesStatus] = useState<Availability>(client === null ? 'offline' : 'loading');
   const [library, setLibrary] = useState<Library | null>(null);
   const [libraryStatus, setLibraryStatus] = useState<Availability>(client === null ? 'offline' : 'loading');
+  const [screenRequest, setScreenRequest] = useState<ScreenRequest | null>(null);
 
   const cursor = useRef(0);
   const pendingRef = useRef<PendingMessage | null>(null);
@@ -166,7 +204,8 @@ export function useProject(client: ControlPlane | null, project: Project, callba
       return;
     }
     try {
-      setEngines(await client.listEngines(projectId));
+      const listed = await client.listEngines(projectId);
+      setEngines((previous) => listed.map((engine) => withStreams(previous, engine)));
       setEnginesStatus('ready');
     } catch (failure) {
       setEnginesStatus(isMissing(failure) ? 'missing' : 'failed');
@@ -184,7 +223,7 @@ export function useProject(client: ControlPlane | null, project: Project, callba
             previous === null ? previous : { ...previous, assets: upsert(previous.assets, asset) },
           );
         } else if (event.kind === 'engine') {
-          setEngines((previous) => upsert(previous, event.data.engine));
+          setEngines((previous) => upsert(previous, withStreams(previous, event.data.engine)));
           reread = true;
         } else if (event.kind === 'turn_end') {
           latest.current.onTouched();
@@ -235,6 +274,14 @@ export function useProject(client: ControlPlane | null, project: Project, callba
           setEvents((previous) => [...previous, ...fresh]);
           if (!first) {
             applyLive(fresh);
+          }
+          const shown = fresh.findLast((event) => event.kind === 'screen');
+          if (shown?.kind === 'screen') {
+            const request = { engineId: shown.data.engine_id, stream: shown.data.stream, eventId: shown.id };
+            setScreenRequest(request);
+            if (!first) {
+              latest.current.onScreen(request);
+            }
           }
         }
         const waiting = pendingRef.current;
@@ -391,7 +438,7 @@ export function useProject(client: ControlPlane | null, project: Project, callba
     async (request: LaunchRequest): Promise<Session> => {
       try {
         const engine = await connected(client).startEngine(projectId, request);
-        setEngines((previous) => upsert(previous, engine));
+        setEngines((previous) => upsert(previous, withStreams(previous, engine)));
         return engine;
       } finally {
         latest.current.onSpent();
@@ -409,7 +456,15 @@ export function useProject(client: ControlPlane | null, project: Project, callba
     [client],
   );
 
-  const link = useCallback(async (id: string): Promise<string> => connected(client).sessionLink(id), [client]);
+  const link = useCallback(
+    async (id: string, stream?: string): Promise<string> => connected(client).sessionLink(id, stream),
+    [client],
+  );
+
+  const unrealProjects = useCallback(
+    async (engineId: string): Promise<UnrealProject[]> => connected(client).unrealProjects(projectId, engineId),
+    [client, projectId],
+  );
 
   const putAsset = useCallback((asset: Asset): void => {
     setLibrary((previous) =>
@@ -492,6 +547,8 @@ export function useProject(client: ControlPlane | null, project: Project, callba
     startEngine,
     stopEngine,
     link,
+    screenRequest,
+    unrealProjects,
     library,
     libraryStatus,
     sections,

@@ -41,6 +41,16 @@ files, so what this module says of an asset is what its name says:
 A name is the team's habit, not the asset's class, so every answer says that it
 is by name, and that the editor's Asset Registry gives the exact classes once
 an Unreal engine runs on the project.
+
+Once an engine runs, the `.uproject` files the developer cloned into its
+workspace are what the machine reports (`unreal_projects` in
+`addons/modal/sandbox.py`), and `found_project` puts each in the shape the
+agent and the studio read, with how the engine opens it: the version it was
+saved with against the engine's (`version_verdict`), which is the table of
+`lathe/UNREAL.md`. A project saved with the engine's version opens as it is;
+an older one, or one of a source build whose version its file does not say,
+opens on the agent's branch, where the editor upgrades what it saves; a newer
+one does not open, since Unreal does not open a project in an older editor.
 """
 
 from __future__ import annotations
@@ -258,4 +268,114 @@ def survey(files: list[str], project: str, folder: str, kind: str | None, shown:
         "counts": {name: len(found) for name, found in assets.items()},
         "assets": listed,
         "world_partition_files": external,
+    }
+
+
+def release(version: str) -> tuple[int, ...] | None:
+    """An engine version's major and minor release (`5.8.4` is `(5, 8)`), or nothing for one that is not numbers."""
+    parts = version.strip().split(".")[:2]
+    if len(parts) < 2 or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def version_verdict(association: str, engine: str) -> tuple[str, str]:
+    """How an engine of version `engine` opens a project saved with `association`, as a word and a sentence.
+
+    The word is `same`, `older`, `newer`, `source` (a source build's registration GUID, whose
+    version the file does not say), or `unknown` (no version named).
+    """
+    if association.startswith("{"):
+        return "source", (
+            "Saved with a source build of Unreal, whose version the .uproject does not name: it opens in "
+            f"Unreal Engine {engine} on the agent's branch, where the editor upgrades what it saves."
+        )
+    saved, running = release(association), release(engine)
+    if saved is None or running is None:
+        return "unknown", f"The .uproject names no engine version: it opens in Unreal Engine {engine} on the agent's branch."
+    if saved == running:
+        return "same", f"Saved with Unreal Engine {association}, this engine's version: it opens as it is."
+    if saved < running:
+        return "older", (
+            f"Saved with Unreal Engine {association}: it opens in {engine} on the agent's branch, where the editor "
+            f"upgrades what it saves; the team's branches stay on {association}."
+        )
+    return "newer", (
+        f"Saved with Unreal Engine {association}, newer than this engine's {engine}: Unreal does not open a project "
+        "in an older editor."
+    )
+
+
+def names(items: Any) -> list[str]:
+    """The `name` of each object in a list of the machine's report, in order."""
+    if not isinstance(items, list):
+        return []
+    return [item["name"] for item in items if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"]]
+
+
+def lfs_state(raw: dict[str, Any]) -> bool | str | None:
+    """Whether a found project's repository keeps files in Git LFS, and whether they are all fetched.
+
+    The machine reports it under `repository.lfs` as `{uses_lfs, files, fetched, not_fetched}`;
+    a file Git LFS keeps that was not fetched still holds LFS's pointer text, which the editor
+    cannot open, so that is said rather than a plain yes. `None` where the folder is in no
+    repository.
+    """
+    repository = raw.get("repository")
+    lfs = repository.get("lfs") if isinstance(repository, dict) else None
+    if not isinstance(lfs, dict):
+        return None
+    if not lfs.get("uses_lfs"):
+        return False
+    missing = lfs.get("not_fetched")
+    if isinstance(missing, int) and missing > 0:
+        return f"used, but {missing} of its {lfs.get('files')} files are not fetched yet"
+    return True
+
+
+def plugins_to_check(plugins: Any) -> list[str]:
+    """The enabled plugins that may not come along to this engine, by the machine's word on each.
+
+    A plugin in the repository without its source is binaries built for some other engine and
+    platform, and one from the marketplace that is not in the repository comes from the developer's
+    own engine install: neither builds here, so each is named for the agent to bring up.
+    """
+    if not isinstance(plugins, list):
+        return []
+    return [
+        plugin["name"]
+        for plugin in plugins
+        if isinstance(plugin, dict)
+        and isinstance(plugin.get("name"), str)
+        and (
+            (plugin.get("in_repository") and not plugin.get("source_in_repository"))
+            or (plugin.get("marketplace") and not plugin.get("in_repository"))
+        )
+    ]
+
+
+def found_project(raw: dict[str, Any], engine: str) -> dict[str, Any]:
+    """A `.uproject` the machine found in its workspace, as the agent and the studio read it.
+
+    `raw` is one entry of the machine's report (`addons/modal/unreal/projects.py`, through
+    `unreal_projects` in `addons/modal/sandbox.py`): `path`, `name`, `engine_association` (the
+    engine it was saved with), its C++ `modules` and enabled `plugins` as objects with a `name`,
+    its `repository` (with `lfs`), and `size_bytes`.
+    """
+    path = str(raw.get("path") or "")
+    association = raw.get("engine_association")
+    association = association if isinstance(association, str) else ""
+    verdict, opens = version_verdict(association, engine)
+    size = raw.get("size_bytes")
+    return {
+        "path": path,
+        "name": str(raw.get("name") or PurePosixPath(path).stem),
+        "engine_association": association,
+        "version": verdict,
+        "opens": opens,
+        "cpp_modules": names(raw.get("modules")),
+        "plugins": names(raw.get("plugins")),
+        "plugins_to_check": plugins_to_check(raw.get("plugins")),
+        "lfs": lfs_state(raw),
+        "size_bytes": size if isinstance(size, int) and not isinstance(size, bool) else None,
     }

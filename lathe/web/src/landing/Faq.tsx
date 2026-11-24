@@ -78,7 +78,7 @@ function questions(): Question[] {
     const steps = app.license?.steps ?? [];
     answers.push({
       question: `What do I need for ${app.name}?`,
-      answer: `${ownLicenseLabel(app)}. ${app.name} runs under its maker's license to you, not to ${brand}, so it opens once your account is linked${
+      answer: `${ownLicenseLabel(app)}, for the editor alone. ${app.name} starts as a desktop with your files, a GitHub client, and Blender; its editor runs under its maker's license to you, not to ${brand}, so it comes once your account is linked, and the agent says how when you first open a project${
         steps.length === 0 ? '.' : `: ${steps.map((step, index) => `(${index + 1}) ${step}`).join(' ')}`
       }`,
     });

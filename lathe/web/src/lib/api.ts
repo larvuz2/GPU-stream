@@ -34,16 +34,47 @@ const SESSION_STATUSES = ['queued', 'starting', 'running', 'ended', 'failed'] as
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
 /**
- * A picture an engine streams beside its desktop, such as the Unreal Editor's own stream.
+ * One picture of an engine that streams more than its desktop: an Unreal engine's `Desktop` and
+ * `Unreal` (the editor's own stream).
  *
- * The session's desktop is reached through a link minted for each load ({@link ControlPlane.sessionLink});
- * a stream like this one is served from its own address.
+ * The control plane mints each link for the listing that reports it, so it is fresh when the page
+ * loads it; a later load asks for another ({@link ControlPlane.sessionLink} with the stream's name).
  */
 export interface EngineStream {
-  /** What the stream shows, as the Screen panel names it, such as `Unreal Editor`. */
+  /** What the stream shows, as the Screen panel names it: `Desktop` or `Unreal`. */
   name: string;
-  /** The address its player is served from. */
+  /** A link that opens it, minted for the listing. */
   url: string;
+}
+
+/** The name of the picture a session's own link opens, which every engine has. */
+export const DESKTOP_STREAM = 'Desktop';
+
+/** How an engine of this version opens an Unreal project, by the version it was saved with. */
+const UNREAL_VERSIONS = ['same', 'older', 'newer', 'source', 'unknown'] as const;
+
+/** An Unreal project found in a running Unreal engine's workspace, such as a game cloned there. */
+export interface UnrealProject {
+  /** The `.uproject` file's path in the machine. */
+  path: string;
+  /** The project's name. */
+  name: string;
+  /** The engine version it was saved with (`EngineAssociation`), or empty for none named. */
+  engine_association: string;
+  /** Its version against the engine's: the same, older, newer, a source build's, or not named. */
+  version: (typeof UNREAL_VERSIONS)[number];
+  /** How the engine opens it, in a sentence. */
+  opens: string;
+  /** Its C++ modules; none for a project of Blueprints only. */
+  cpp_modules: string[];
+  /** The plugins it switches on. */
+  plugins: string[];
+  /** The ones of them that may not come along: binaries only in the repository, or from the marketplace and not in it. */
+  plugins_to_check: string[];
+  /** Whether its repository keeps files in Git LFS, the machine's word for that, or `null` when unknown. */
+  lfs: boolean | string | null;
+  /** Its size on disk, or `null` when unknown. */
+  size_bytes: number | null;
 }
 
 /** A workstation session, as the control plane reports it; a project's engine is one. */
@@ -72,7 +103,10 @@ export interface Session {
   queue_position: number | null;
   /** The project it is an engine of, absent or `null` for a session started outside one. */
   project_id?: string | null;
-  /** What the engine streams beside its desktop, absent for an engine that streams its desktop alone. */
+  /**
+   * The pictures a running engine streams, its desktop among them, absent for an engine that
+   * streams its desktop alone and in the event log, which never carries links.
+   */
   streams?: EngineStream[];
 }
 
@@ -340,6 +374,14 @@ export interface EngineData {
   engine: Session;
 }
 
+/** The agent put an engine, in one of its pictures, on the person's screen. */
+export interface ScreenData {
+  /** The engine. */
+  engine_id: string;
+  /** The picture's name, such as `Desktop` or `Unreal`. */
+  stream: string;
+}
+
 /** Something went wrong in the turn. */
 export interface ErrorData {
   /** What went wrong, for the person. */
@@ -357,6 +399,7 @@ export type StudioEvent = EventEnvelope &
     | { kind: 'plan'; data: PlanData }
     | { kind: 'library'; data: LibraryData }
     | { kind: 'engine'; data: EngineData }
+    | { kind: 'screen'; data: ScreenData }
     | { kind: 'turn_end'; data: Record<string, unknown> }
     | { kind: 'error'; data: ErrorData }
   );
@@ -414,8 +457,8 @@ export interface ControlPlane {
   health(): Promise<Health>;
   /** Reads the signed-in account. */
   me(): Promise<Me>;
-  /** Mints a fresh link that opens a running session's stream. */
-  sessionLink(id: string): Promise<string>;
+  /** Mints a fresh link that opens a running session's desktop, or the picture `stream` names. */
+  sessionLink(id: string, stream?: string): Promise<string>;
   /** Stops a session. */
   stopSession(id: string): Promise<Session>;
   /** Lists the account's API keys. */
@@ -440,6 +483,8 @@ export interface ControlPlane {
   listEngines(projectId: string): Promise<Session[]>;
   /** Starts an engine in a project; the call can take around ten seconds. */
   startEngine(projectId: string, request: LaunchRequest): Promise<Session>;
+  /** Lists the Unreal projects in a running Unreal engine's workspace. */
+  unrealProjects(projectId: string, engineId: string): Promise<UnrealProject[]>;
   /** Reads a project's events after a cursor, and whether a turn is running. */
   listEvents(projectId: string, after: number): Promise<EventPage>;
   /** Sends the person's message, which starts a turn; refused with 409 while one runs. */
@@ -573,6 +618,24 @@ const isSession: Guard<Session> = (value): value is Session =>
   isNullableNumber(value.queue_position) &&
   optional(isNullableString)(value.project_id) &&
   optional(arrayOf(isEngineStream))(value.streams);
+
+/** Checks a value into an {@link UnrealProject}. */
+const isUnrealProject: Guard<UnrealProject> = (value): value is UnrealProject =>
+  isRecord(value) &&
+  isString(value.path) &&
+  isString(value.name) &&
+  isString(value.engine_association) &&
+  oneOf(UNREAL_VERSIONS)(value.version) &&
+  isString(value.opens) &&
+  isStrings(value.cpp_modules) &&
+  isStrings(value.plugins) &&
+  isStrings(value.plugins_to_check) &&
+  (value.lfs === null || isBoolean(value.lfs) || isString(value.lfs)) &&
+  isNullableNumber(value.size_bytes);
+
+/** Checks a value into a {@link ScreenData}. */
+const isScreen: Guard<ScreenData> = (value): value is ScreenData =>
+  isRecord(value) && isString(value.engine_id) && isString(value.stream);
 
 /** Checks a value into an {@link ApiKey}. */
 const isApiKey: Guard<ApiKey> = (value): value is ApiKey =>
@@ -724,6 +787,8 @@ function parseEvent(value: unknown): StudioEvent | null {
       return isAsset(data.asset) ? { ...envelope, kind: 'library', data: { asset: data.asset } } : null;
     case 'engine':
       return isSession(data.engine) ? { ...envelope, kind: 'engine', data: { engine: data.engine } } : null;
+    case 'screen':
+      return isScreen(data) ? { ...envelope, kind: 'screen', data } : null;
     case 'turn_end':
       return { ...envelope, kind: 'turn_end', data };
     case 'error':
@@ -929,8 +994,16 @@ export function createControlPlane(baseUrl: string, accessToken: () => Promise<s
       };
     },
     me: async () => expect(await request('GET', '/v1/me'), isMe),
-    sessionLink: async (id) =>
-      field(await request('POST', `/v1/sessions/${encodeURIComponent(id)}/link`), 'url', isWebUrl),
+    sessionLink: async (id, stream) =>
+      field(
+        await request(
+          'POST',
+          `/v1/sessions/${encodeURIComponent(id)}/link`,
+          stream === undefined ? undefined : { stream },
+        ),
+        'url',
+        isWebUrl,
+      ),
     stopSession: async (id) =>
       field(await request('DELETE', `/v1/sessions/${encodeURIComponent(id)}`), 'session', isSession),
     listApiKeys: async () => field(await request('GET', '/v1/api-keys'), 'keys', arrayOf(isApiKey)),
@@ -954,6 +1027,12 @@ export function createControlPlane(baseUrl: string, accessToken: () => Promise<s
       field(await request('GET', projectPath(projectId, '/engines')), 'engines', arrayOf(isSession)),
     startEngine: async (projectId, launch) =>
       field(await request('POST', projectPath(projectId, '/engines'), launch), 'engine', isSession),
+    unrealProjects: async (projectId, engineId) =>
+      field(
+        await request('GET', projectPath(projectId, `/engines/${encodeURIComponent(engineId)}/unreal-projects`)),
+        'projects',
+        arrayOf(isUnrealProject),
+      ),
     listEvents: async (projectId, after) =>
       parseEventPage(await request('GET', projectPath(projectId, `/events?after=${after}`))),
     sendMessage: async (projectId, text) =>

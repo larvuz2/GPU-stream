@@ -25,8 +25,8 @@ export function disciplineName(id: string): string {
 
 /**
  * Whether an app can be started as an engine: an available one; a team one, which the control
- * plane admits for the team's accounts and refuses for anyone else; or one on the person's own
- * license, which it admits once that license is linked.
+ * plane admits for the team's accounts and refuses for anyone else; or one with a part on the
+ * person's own license, which starts for anyone and brings that part once the license is linked.
  *
  * @param app The catalog app.
  * @returns `true` for an app that can be asked for.

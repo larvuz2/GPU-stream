@@ -20,16 +20,32 @@
  * twenty seconds is reported as stalled, and the way to open the stream in a tab of its own is
  * always one click away, with a note under a loaded frame for the case this page cannot see.
  *
- * An engine whose session reports streams beside its desktop (`Session.streams`: the Unreal
- * Editor streams itself, apart from the desktop Blender runs on) gets a switch between "Desktop"
- * and each stream's name. The desktop is the session's own minted link; a stream is its own
- * address. Switching loads the other picture in place of the first, as switching engines does, so
- * only the picture on screen is streamed.
+ * An engine that streams more than its desktop (`Session.streams`: an Unreal engine's Desktop,
+ * where the files, the GitHub client, and Blender are, and Unreal, the editor's own stream) gets a
+ * toggle between them in the header, in the column and in focus mode alike, with Alt+1, Alt+2,
+ * and so on as its keys while this page, rather than the stream, has the keyboard. Outside focus
+ * mode the toggle takes the place of the engine's name, which only focus mode has room for. Every picture
+ * of the engine on screen is loaded at once and kept loaded, the ones not shown hidden rather than
+ * removed, so a switch is instant and the stream switched away from keeps its connection: both
+ * pictures are streamed for as long as the engine is on screen, which the switching is worth. A
+ * picture opens first at the link its listing reported, and a retry mints a fresh one; a later
+ * listing's links never reload a frame that is up. Which picture is shown is the workspace's,
+ * since the agent switches it too (a `screen` event).
  * @module
  */
 import { useCallback, useEffect, useState, type ComponentType } from 'react';
-import { ChevronDown, ExternalLink, Maximize2, Minimize2, MonitorPlay, RefreshCw } from 'lucide-react';
-import { isActive, type Session } from '../lib/api';
+import {
+  Box,
+  ChevronDown,
+  ExternalLink,
+  Maximize2,
+  Minimize2,
+  Monitor,
+  MonitorPlay,
+  RefreshCw,
+  type LucideIcon,
+} from 'lucide-react';
+import { DESKTOP_STREAM, isActive, type EngineStream, type Session } from '../lib/api';
 import { findApp, findTier, type CatalogApp } from '../lib/catalog';
 import { cx } from '../lib/cx';
 import { clock, timestamp } from '../lib/format';
@@ -40,14 +56,14 @@ import { openStreamTab } from './present';
 /** How long a frame may take to load before the stage calls it stalled. */
 const STALL_MS = 20_000;
 
+/** The keys that pick a picture, by its place in the toggle: Alt with the digit's key. */
+const PICTURE_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9'];
+
 /**
  * What stands in for the stream where there is none to show, as the demo has: drawn for the app,
- * and for the stream chosen beside its desktop (`null` for the desktop).
+ * and for the picture of it on screen (`null` for an engine that streams its desktop alone).
  */
 export type StreamStandIn = ComponentType<{ app: CatalogApp | undefined; stream: string | null }>;
-
-/** What the switch calls an engine's own desktop, beside the streams it reports. */
-const DESKTOP = 'Desktop';
 
 /** Props of {@link Stage}. */
 interface StageProps {
@@ -57,6 +73,10 @@ interface StageProps {
   engine: Session | null;
   /** Puts an engine on screen. */
   onSelect: (id: string) => void;
+  /** The picture of the engine on screen that is shown, by name, or `null` for its first. */
+  stream: string | null;
+  /** Shows another picture of the engine on screen. */
+  onStream: (name: string) => void;
   /** Whether focus mode is on. */
   focus: boolean;
   /** Turns focus mode on or off. */
@@ -65,8 +85,8 @@ interface StageProps {
   open: boolean;
   /** Folds or unfolds it. */
   onToggle: () => void;
-  /** Mints a link to a running engine's stream. */
-  link: (id: string) => Promise<string>;
+  /** Mints a link to a running engine's desktop, or to the picture named. */
+  link: (id: string, stream?: string) => Promise<string>;
   /** Goes to the Environment panel, to start an engine. */
   onStartEngine: () => void;
   /** Whether the layout is a narrow screen's tabs. */
@@ -75,6 +95,16 @@ interface StageProps {
   mobileHidden: boolean;
   /** Drawn instead of the stream, where there is none to show. */
   standIn?: StreamStandIn;
+}
+
+/**
+ * The icon of a picture in the toggle.
+ *
+ * @param name The picture's name.
+ * @returns A monitor for the desktop, a cube for the editor.
+ */
+function pictureIcon(name: string): LucideIcon {
+  return name === DESKTOP_STREAM ? Monitor : Box;
 }
 
 /**
@@ -87,6 +117,8 @@ export function Stage({
   engines,
   engine,
   onSelect,
+  stream,
+  onStream,
   focus,
   onFocus,
   open,
@@ -100,22 +132,39 @@ export function Stage({
   const [opening, setOpening] = useState(false);
   const [tabError, setTabError] = useState<string | null>(null);
   const [blockedLink, setBlockedLink] = useState<string | null>(null);
-  const [streamName, setStreamName] = useState<string | null>(null);
   const app = engine === null ? undefined : findApp(engine.app);
   const running = engine?.status === 'running';
-  const streams = engine?.streams ?? [];
-  const stream = streams.find((candidate) => candidate.name === streamName) ?? null;
+  const pictures: EngineStream[] =
+    running && engine.streams !== undefined && engine.streams.length > 1 ? engine.streams : [];
+  const shown = pictures.find((picture) => picture.name === stream) ?? pictures[0] ?? null;
   const appName = app?.name ?? engine?.app ?? 'Engine';
-  const pictureName = stream?.name ?? appName;
+  const pictureName = shown?.name ?? appName;
   const choices = engines.filter(isActive);
   const unfolded = open || focus || narrow;
-  // By its address alone: the engine list is read again every few seconds, and a new list must
-  // not count as a new picture.
-  const streamUrl = stream?.url ?? null;
-  const pictureLink = useCallback(
-    (id: string): Promise<string> => (streamUrl === null ? link(id) : Promise.resolve(streamUrl)),
-    [link, streamUrl],
-  );
+  // By the names alone: the engine list is read again with fresh links, which must not count as
+  // new pictures.
+  const names = pictures.map((picture) => picture.name).join('\n');
+
+  useEffect(() => {
+    const order = names === '' ? [] : names.split('\n');
+    if (order.length < 2) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+      const target = order[PICTURE_KEYS.indexOf(event.code)];
+      if (target !== undefined) {
+        event.preventDefault();
+        onStream(target);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [names, onStream]);
 
   /** Opens the picture on screen in a tab of its own. */
   async function openTab(): Promise<void> {
@@ -126,7 +175,7 @@ export function Stage({
     setTabError(null);
     setBlockedLink(null);
     try {
-      setBlockedLink(await openStreamTab(() => pictureLink(engine.id), pictureName));
+      setBlockedLink(await openStreamTab(() => link(engine.id, shown?.name), pictureName));
     } catch (failure) {
       setTabError(describeError(failure));
     } finally {
@@ -165,36 +214,16 @@ export function Stage({
               </option>
             ))}
           </select>
-        ) : (
+        ) : pictures.length > 0 && !focus ? null : (
           <span className="flex min-w-0 items-center gap-1.5 truncate text-xs text-muted">
             <span className={cx('dot', engineDot(engine))} aria-hidden="true" />
             <span className="truncate">{appName}</span>
           </span>
         )}
-        {running && streams.length > 0 ? (
-          <div className="flex flex-none items-center rounded-lg border border-line p-0.5" role="group" aria-label="Picture on screen">
-            {[null, ...streams.map((candidate) => candidate.name)].map((name) => {
-              const chosen = name === (stream?.name ?? null);
-              return (
-                <button
-                  key={name ?? DESKTOP}
-                  type="button"
-                  aria-pressed={chosen}
-                  className={cx(
-                    'h-6 rounded-md px-2 text-xs transition-colors',
-                    chosen ? 'bg-white/10 text-fg' : 'text-muted hover:text-fg',
-                  )}
-                  onClick={() => {
-                    setStreamName(name);
-                  }}
-                >
-                  {name ?? DESKTOP}
-                </button>
-              );
-            })}
-          </div>
+        {pictures.length > 0 && shown !== null ? (
+          <PictureToggle pictures={pictures} shown={shown.name} onStream={onStream} />
         ) : null}
-        <div className="ml-auto flex items-center gap-0.5">
+        <div className="ml-auto flex flex-none items-center gap-0.5">
           {running ? (
             <button
               type="button"
@@ -241,14 +270,17 @@ export function Stage({
           <div className="stream-box">
             {engine === null ? (
               <Empty engines={engines} onStartEngine={onStartEngine} />
-            ) : running ? (
+            ) : !running ? (
+              <Waiting engine={engine} appName={appName} />
+            ) : pictures.length === 0 ? (
               <Stream
-                key={`${engine.id} ${stream?.name ?? DESKTOP}`}
+                key={engine.id}
                 engine={engine}
-                appName={pictureName}
+                picture={null}
+                label={appName}
                 app={app}
-                stream={stream?.name ?? null}
-                link={pictureLink}
+                shown
+                link={link}
                 standIn={standIn}
                 interactive={focus || narrow}
                 onFocus={() => {
@@ -259,7 +291,25 @@ export function Stage({
                 }}
               />
             ) : (
-              <Waiting engine={engine} appName={appName} />
+              pictures.map((picture) => (
+                <Stream
+                  key={`${engine.id} ${picture.name}`}
+                  engine={engine}
+                  picture={picture}
+                  label={picture.name}
+                  app={app}
+                  shown={picture.name === shown?.name}
+                  link={link}
+                  standIn={standIn}
+                  interactive={focus || narrow}
+                  onFocus={() => {
+                    onFocus(true);
+                  }}
+                  onOpenTab={() => {
+                    void openTab();
+                  }}
+                />
+              ))
             )}
           </div>
           {running && standIn === undefined ? (
@@ -288,6 +338,50 @@ export function Stage({
         </div>
       ) : null}
     </section>
+  );
+}
+
+/** Props of {@link PictureToggle}. */
+interface PictureToggleProps {
+  /** The engine's pictures, in order. */
+  pictures: EngineStream[];
+  /** The name of the one shown. */
+  shown: string;
+  /** Shows another. */
+  onStream: (name: string) => void;
+}
+
+/**
+ * Renders the switch between an engine's pictures, each with its key in its tooltip.
+ *
+ * @param props The component's props.
+ * @returns The toggle.
+ */
+function PictureToggle({ pictures, shown, onStream }: PictureToggleProps) {
+  return (
+    <div className="segmented flex-none" role="group" aria-label="View on screen">
+      {pictures.map((picture, index) => {
+        const Icon = pictureIcon(picture.name);
+        const keys = `Alt+${index + 1}`;
+        const chosen = picture.name === shown;
+        return (
+          <button
+            key={picture.name}
+            type="button"
+            className="segment"
+            aria-pressed={chosen}
+            aria-keyshortcuts={keys}
+            title={`${picture.name} (${keys})`}
+            onClick={() => {
+              onStream(picture.name);
+            }}
+          >
+            <Icon aria-hidden="true" />
+            {picture.name}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -400,12 +494,14 @@ interface StreamProps {
   engine: Session;
   /** Its catalog app. */
   app: CatalogApp | undefined;
-  /** The name of what it shows: its app's, or the stream's beside its desktop. */
-  appName: string;
-  /** The stream beside its desktop that it shows, or `null` for the desktop. */
-  stream: string | null;
-  /** Mints a link to what it shows. */
-  link: (id: string) => Promise<string>;
+  /** The picture of it this frame loads, or `null` for an engine that streams its desktop alone. */
+  picture: EngineStream | null;
+  /** What the frame shows, as the person reads it: the picture's name, or the app's. */
+  label: string;
+  /** Whether it is the picture on screen; the others stay loaded, hidden. */
+  shown: boolean;
+  /** Mints a link to the engine's desktop, or to the picture named. */
+  link: (id: string, stream?: string) => Promise<string>;
   /** Drawn instead of the stream, where there is none to show. */
   standIn: StreamStandIn | undefined;
   /** Whether the stream takes input, rather than a click entering focus mode. */
@@ -417,33 +513,42 @@ interface StreamProps {
 }
 
 /**
- * Renders a running engine's stream, and what became of loading it.
+ * Renders one picture of a running engine, and what became of loading it.
+ *
+ * Its first load takes the link the engine's listing reported, where there is one, and a retry
+ * mints a fresh one. A hidden picture keeps its frame and connection and takes no input.
  *
  * @param props The component's props.
- * @returns The stream.
+ * @returns The picture's layer of the stream box.
  */
 function Stream({
   engine,
   app,
-  appName,
-  stream,
+  picture,
+  label,
+  shown,
   link,
   standIn: StandIn,
   interactive,
   onFocus,
   onOpenTab,
 }: StreamProps) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [phase, setPhase] = useState<'minting' | 'loading' | 'loaded' | 'stalled' | 'failed'>('minting');
+  const listed = picture?.url ?? null;
+  const [src, setSrc] = useState<string | null>(listed);
+  const [phase, setPhase] = useState<'minting' | 'loading' | 'loaded' | 'stalled' | 'failed'>(
+    listed === null ? 'minting' : 'loading',
+  );
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const name = picture?.name;
+  const mint = useCallback(() => link(engine.id, name), [link, engine.id, name]);
 
   useEffect(() => {
-    if (StandIn !== undefined) {
+    if (StandIn !== undefined || phase !== 'minting') {
       return;
     }
     let current = true;
-    link(engine.id)
+    mint()
       .then((url) => {
         if (current) {
           setSrc(url);
@@ -459,7 +564,7 @@ function Stream({
     return () => {
       current = false;
     };
-  }, [engine.id, link, attempt, StandIn]);
+  }, [mint, attempt, phase, StandIn]);
 
   useEffect(() => {
     if (phase !== 'loading') {
@@ -481,68 +586,74 @@ function Stream({
     setAttempt(attempt + 1);
   }
 
+  let content;
   if (StandIn !== undefined) {
-    return (
+    content = (
       <>
-        <StandIn app={app} stream={stream} />
-        {interactive ? null : <FocusLayer appName={appName} onFocus={onFocus} />}
+        <StandIn app={app} stream={name ?? null} />
+        {interactive ? null : <FocusLayer label={label} onFocus={onFocus} />}
+      </>
+    );
+  } else {
+    content = (
+      <>
+        {src === null ? null : (
+          <iframe
+            key={src}
+            src={src}
+            title={`${label} stream`}
+            allow="autoplay; fullscreen; clipboard-read; clipboard-write; microphone; camera; gamepad"
+            allowFullScreen
+            onLoad={() => {
+              setPhase((previous) => (previous === 'loading' || previous === 'stalled' ? 'loaded' : previous));
+            }}
+          />
+        )}
+        {phase === 'minting' || phase === 'loading' ? (
+          <div className="pointer-events-none absolute inset-0 grid place-items-center">
+            <p className="flex items-center gap-2 text-xs text-muted">
+              <span className="spinner size-3.5" aria-hidden="true" />
+              Connecting to {label}…
+            </p>
+          </div>
+        ) : null}
+        {phase === 'stalled' || phase === 'failed' ? (
+          <div className="absolute inset-0 grid place-items-center bg-ink-950/85 p-5 text-center backdrop-blur-sm">
+            <div className="max-w-xs">
+              <p className="text-sm font-medium">
+                {phase === 'failed' ? `Could not open ${label}` : `${label} is not loading here`}
+              </p>
+              <p className="mt-1.5 text-xs leading-relaxed text-muted">
+                {error ?? 'Some browsers block the stream inside another page. It opens in a tab of its own.'}
+              </p>
+              <div className="mt-3.5 flex justify-center gap-2">
+                <button type="button" className="btn btn-primary btn-sm h-8 px-3 text-xs" onClick={onOpenTab}>
+                  <ExternalLink className="size-3.5" aria-hidden="true" />
+                  Open in a new tab
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm h-8 px-3 text-xs" onClick={retry}>
+                  <RefreshCw className="size-3.5" aria-hidden="true" />
+                  Retry
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {interactive || phase !== 'loaded' ? null : <FocusLayer label={label} onFocus={onFocus} />}
       </>
     );
   }
-
   return (
-    <>
-      {src === null ? null : (
-        <iframe
-          key={src}
-          src={src}
-          title={`${appName} stream`}
-          allow="autoplay; fullscreen; clipboard-read; clipboard-write; microphone; camera; gamepad"
-          allowFullScreen
-          onLoad={() => {
-            setPhase((previous) => (previous === 'loading' || previous === 'stalled' ? 'loaded' : previous));
-          }}
-        />
-      )}
-      {phase === 'minting' || phase === 'loading' ? (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center">
-          <p className="flex items-center gap-2 text-xs text-muted">
-            <span className="spinner size-3.5" aria-hidden="true" />
-            Connecting to {appName}…
-          </p>
-        </div>
-      ) : null}
-      {phase === 'stalled' || phase === 'failed' ? (
-        <div className="absolute inset-0 grid place-items-center bg-ink-950/85 p-5 text-center backdrop-blur-sm">
-          <div className="max-w-xs">
-            <p className="text-sm font-medium">
-              {phase === 'failed' ? `Could not open ${appName}` : `${appName} is not loading here`}
-            </p>
-            <p className="mt-1.5 text-xs leading-relaxed text-muted">
-              {error ?? 'Some browsers block the stream inside another page. It opens in a tab of its own.'}
-            </p>
-            <div className="mt-3.5 flex justify-center gap-2">
-              <button type="button" className="btn btn-primary btn-sm h-8 px-3 text-xs" onClick={onOpenTab}>
-                <ExternalLink className="size-3.5" aria-hidden="true" />
-                Open in a new tab
-              </button>
-              <button type="button" className="btn btn-ghost btn-sm h-8 px-3 text-xs" onClick={retry}>
-                <RefreshCw className="size-3.5" aria-hidden="true" />
-                Retry
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {interactive || phase !== 'loaded' ? null : <FocusLayer appName={appName} onFocus={onFocus} />}
-    </>
+    <div className="stream-picture" data-shown={shown} inert={!shown} aria-hidden={!shown}>
+      {content}
+    </div>
   );
 }
 
 /** Props of {@link FocusLayer}. */
 interface FocusLayerProps {
-  /** The app's name. */
-  appName: string;
+  /** What the stream shows. */
+  label: string;
   /** Enters focus mode. */
   onFocus: () => void;
 }
@@ -553,12 +664,12 @@ interface FocusLayerProps {
  * @param props The component's props.
  * @returns The layer.
  */
-function FocusLayer({ appName, onFocus }: FocusLayerProps) {
+function FocusLayer({ label, onFocus }: FocusLayerProps) {
   return (
-    <button type="button" className="stream-focus-layer" aria-label={`Focus on ${appName}`} onClick={onFocus}>
+    <button type="button" className="stream-focus-layer" aria-label={`Focus on ${label}`} onClick={onFocus}>
       <span className="flex items-center gap-2 rounded-full border border-white/20 bg-ink-950/70 px-3.5 py-1.5 text-xs font-semibold backdrop-blur">
         <Maximize2 className="size-3.5" aria-hidden="true" />
-        Work in {appName}
+        Work in {label}
       </span>
     </button>
   );

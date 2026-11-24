@@ -19,18 +19,23 @@
  * here starts a turn whose events arrive over a few seconds, under the studio's own polling, and
  * an engine started here queues, starts, and runs. The images are the site's own artwork.
  *
- * Beside the film is a game, a world being blocked out with an Unreal engine open: the editor's
- * own stream beside the desktop Blender runs on, the two pictures the Screen panel switches
- * between. The demo's GitHub account is linked to Epic, which Unreal Engine starts on.
+ * Beside the film is a game, Ember Ridge, part way through a studio's onboarding (`lathe/UNREAL.md`):
+ * the agent started an Unreal engine and put its Desktop on the screen, the developer cloned the
+ * game there, and the agent found it and reported what it is, which the engine's card in the
+ * Environment panel lists too. Asking to open it, from the agent's question or the card, opens it
+ * in the editor and switches the screen to the Unreal view, the other of the engine's two
+ * pictures. The demo's GitHub account is linked to Epic, whose account the editor runs on.
  *
  * The scene parameter (`?demo=<scene>`) picks a state: the film by default, `offline` for a
  * server with no integrations configured, `empty` for an account with no projects, `legacy` for a
  * control plane from before the studio, which answers its routes with 404, and `no-epic` for a
- * GitHub account not linked to Epic.
+ * GitHub account not linked to Epic, where opening the game in Unreal answers with the steps that
+ * link it.
  * @module
  */
 import {
   ApiError,
+  DESKTOP_STREAM,
   type ApiKey,
   type Asset,
   type ControlPlane,
@@ -46,8 +51,9 @@ import {
   type SessionStatus,
   type StudioEvent,
   type TurnId,
+  type UnrealProject,
 } from '../lib/api';
-import { catalog } from '../lib/catalog';
+import { catalog, findApp } from '../lib/catalog';
 import { appImage } from '../lib/media';
 
 /** The address the demo's account is shown under. */
@@ -102,23 +108,65 @@ interface Simulation {
   tier: string;
   /** The states, in the order they are entered. */
   phases: Phase[];
-  /** What it streams beside its desktop, for an engine that does. */
+  /** The pictures it streams, for an engine that streams more than its desktop. */
   streams?: EngineStream[];
 }
 
+/** The name of an Unreal engine's second picture, the editor's own stream. */
+const UNREAL_STREAM = 'Unreal';
+
 /**
- * What an engine of an app streams beside its desktop in the demo: an Unreal engine, its editor.
+ * What an engine of an app streams in the demo: an Unreal engine, its Desktop and its Unreal view.
  *
- * The demo has no stream to serve, so the editor's address is the art its picture is drawn with,
- * which is what a tab opened on it shows.
+ * The demo has no stream to serve, so each picture's address is the art it is drawn with.
  *
  * @param app The catalog app.
  * @returns The streams, or `undefined` for an app that streams its desktop alone.
  */
 function demoStreams(app: string): EngineStream[] | undefined {
+  const art = (id: string): string => new URL(appImage(id), window.location.origin).href;
   return app === 'unreal'
-    ? [{ name: 'Unreal Editor', url: new URL(appImage('unreal'), window.location.origin).href }]
+    ? [
+        { name: DESKTOP_STREAM, url: art('blender') },
+        { name: UNREAL_STREAM, url: art('unreal') },
+      ]
     : undefined;
+}
+
+/** The demo game's engine. */
+const GAME_ENGINE = 'demo-engine-2';
+
+/** The Unreal project the demo game's engine finds once the developer has cloned the game. */
+const EMBER_RIDGE: UnrealProject = {
+  path: '/home/ubuntu/workspace/projects/demo-game/ember-ridge/EmberRidge.uproject',
+  name: 'EmberRidge',
+  engine_association: '5.8',
+  version: 'same',
+  opens: 'Saved with Unreal Engine 5.8, this engine’s version: it opens as it is.',
+  cpp_modules: ['EmberRidge'],
+  plugins: ['CommonUI', 'EnhancedInput', 'GameplayAbilities', 'ModelingToolsEditorMode'],
+  plugins_to_check: [],
+  lfs: true,
+  size_bytes: 3_180_000_000,
+};
+
+/**
+ * The demo game's plan, before and after the game opens in Unreal.
+ *
+ * @param opened Whether it is open.
+ * @returns The plan.
+ */
+function gamePlan(opened: boolean): PlanItem[] {
+  return [
+    { id: 'g1', title: 'Start Unreal Engine', status: 'done' },
+    { id: 'g2', title: 'Clone Ember Ridge from GitHub in the Desktop view', status: 'done' },
+    { id: 'g3', title: 'Open it in Unreal', status: opened ? 'done' : 'active' },
+    {
+      id: 'g4',
+      title: 'Block out the ridge path, with Blender beside the editor',
+      status: opened ? 'active' : 'pending',
+    },
+  ];
 }
 
 /**
@@ -466,43 +514,162 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
 }
 
 /**
- * The game's conversation: the agent opening an Unreal engine to block out the world.
+ * The game's conversation: the agent starting an Unreal engine and putting its Desktop on the
+ * screen, the developer cloning the game there, and the agent reporting what it found.
  *
- * @param start When the turn starts.
- * @param engine The Unreal engine the agent opened.
+ * @param start When the first turn starts.
+ * @param cloned When the developer says the game is cloned, which starts the second.
+ * @param engine The Unreal engine the agent started.
  * @returns The events, in order, with their times.
  */
-function gameEvents(start: number, engine: Session): Scheduled[] {
-  const turn = 'game-turn-1';
+function gameEvents(start: number, cloned: number, engine: Session): Scheduled[] {
+  const first = 'game-turn-1';
+  const second = 'game-turn-2';
   const step = (seconds: number, event: EventBody): Scheduled => ({ at: start + seconds * SECOND, event });
+  const later = (seconds: number, event: EventBody): Scheduled => ({ at: cloned + seconds * SECOND, event });
   return [
     step(0, {
-      turn_id: turn,
+      turn_id: first,
       kind: 'user_message',
-      data: { text: 'Block out Ember Ridge as a playable level: a path up the ridge to the beacon tower, at dusk.' },
+      data: { text: 'Our game, Ember Ridge, is on GitHub. Let’s work on it in Unreal.' },
+    }),
+    step(3, {
+      turn_id: first,
+      kind: 'text',
+      data: {
+        text: 'I’ll start Unreal Engine on a Pro machine, 4 credits a minute. It comes up as a desktop with the GitHub client, Git LFS, Firefox, and Blender, so the game comes in first.',
+      },
     }),
     step(4, {
-      turn_id: turn,
-      kind: 'text',
-      data: {
-        text: 'I will open Unreal Engine on your Epic account, with Blender beside it on the same machine: the rocks and the tower are quicker to shape in Blender, and the light and the path are Unreal’s.',
-      },
+      turn_id: first,
+      kind: 'tool_start',
+      data: { call_id: 'g1', tool: 'engine_start', title: 'Starting Unreal Engine' },
     }),
-    step(5, { turn_id: turn, kind: 'tool_start', data: { call_id: 'g1', tool: 'engine_start', title: 'Open Unreal Engine' } }),
-    step(70, { turn_id: turn, kind: 'engine', data: { engine } }),
-    step(72, {
-      turn_id: turn,
+    step(70, { turn_id: first, kind: 'engine', data: { engine } }),
+    step(71, {
+      turn_id: first,
       kind: 'tool_end',
-      data: { call_id: 'g1', ok: true, summary: 'Unreal Engine 5.8 on Pro, Blender on its desktop.' },
+      data: { call_id: 'g1', ok: true, summary: 'Unreal Engine is running' },
     }),
-    step(74, {
-      turn_id: turn,
+    step(72, {
+      turn_id: first,
+      kind: 'tool_start',
+      data: { call_id: 'g2', tool: 'engine_show', title: 'Showing Desktop on the screen' },
+    }),
+    step(72.2, { turn_id: first, kind: 'screen', data: { engine_id: engine.id, stream: DESKTOP_STREAM } }),
+    step(72.4, {
+      turn_id: first,
+      kind: 'tool_end',
+      data: { call_id: 'g2', ok: true, summary: 'Desktop on the screen' },
+    }),
+    step(73, {
+      turn_id: first,
       kind: 'text',
       data: {
-        text: 'The editor is on the Screen. Switch it to **Desktop** for Blender: what you send from there with **Send to Unreal** lands in the editor under `/Game/Blender`, and I will light the ridge once the tower is in.',
+        text: 'It’s up, and your screen shows its **Desktop**. Open the GitHub client there, sign in, and clone the game into the project’s folder under `projects/`, so the clone stays in your workspace. Git LFS comes along with it.',
       },
     }),
-    step(75, { turn_id: turn, kind: 'turn_end', data: {} }),
+    step(74, { turn_id: first, kind: 'turn_end', data: {} }),
+    later(0, { turn_id: second, kind: 'user_message', data: { text: 'Cloned it.' } }),
+    later(2, {
+      turn_id: second,
+      kind: 'tool_start',
+      data: { call_id: 'g3', tool: 'unreal_projects', title: 'Looking for Unreal projects in the engine' },
+    }),
+    later(3, {
+      turn_id: second,
+      kind: 'tool_end',
+      data: { call_id: 'g3', ok: true, summary: 'EmberRidge (5.8, C++)' },
+    }),
+    later(5, {
+      turn_id: second,
+      kind: 'text',
+      data: {
+        text: 'Found it: **EmberRidge**, in `projects/demo-game/ember-ridge`.\n- **Unreal Engine 5.8**, this engine’s version, so it opens as it is.\n- **C++**: one module, `EmberRidge`, which compiles for Linux before the editor opens. The first build takes the longest.\n- **4 plugins**: Common UI, Enhanced Input, Gameplay Abilities, and Modeling Tools.\n- **Git LFS** for the assets, 3.2 GB in all.',
+      },
+    }),
+    later(6, {
+      turn_id: second,
+      kind: 'ask',
+      data: { question: 'Shall I open EmberRidge in Unreal?', options: ['Open it in Unreal', 'Not yet'] },
+    }),
+    later(6.5, { turn_id: second, kind: 'turn_end', data: {} }),
+  ];
+}
+
+/**
+ * The demo agent's answer to being asked to open the game in Unreal: the editor opening and the
+ * screen switching to it, or, without the Epic link, the steps that bring the editor.
+ *
+ * @param turn The turn.
+ * @param at When each event is written, by seconds into the turn.
+ * @param epicLinked Whether the demo's GitHub account is linked to Epic.
+ * @returns The turn's events.
+ */
+function openInUnreal(turn: TurnId, at: (seconds: number) => number, epicLinked: boolean): Scheduled[] {
+  if (!epicLinked) {
+    const steps = (findApp('unreal')?.license?.steps ?? []).map((step, index) => `${index + 1}. ${step}`).join('\n');
+    return [
+      {
+        at: at(1),
+        event: {
+          turn_id: turn,
+          kind: 'tool_start',
+          data: { call_id: `${turn}-u`, tool: 'unreal_open', title: 'Opening EmberRidge in Unreal' },
+        },
+      },
+      {
+        at: at(3),
+        event: {
+          turn_id: turn,
+          kind: 'tool_end',
+          data: { call_id: `${turn}-u`, ok: false, summary: 'The Unreal Editor needs the Epic link' },
+        },
+      },
+      {
+        at: at(4),
+        event: {
+          turn_id: turn,
+          kind: 'text',
+          data: {
+            text: `The Unreal Editor runs on your own Epic account, and your GitHub account isn’t linked to one yet. One step, in three parts:\n${steps}\n\nThen stop this Unreal engine and start it again: the start brings your own copy of the editor. The Desktop and your clone stay as they are.`,
+          },
+        },
+      },
+      { at: at(4.5), event: { turn_id: turn, kind: 'turn_end', data: {} } },
+    ];
+  }
+  return [
+    { at: at(1), event: { turn_id: turn, kind: 'text', data: { text: 'Opening EmberRidge in the Unreal Editor.' } } },
+    {
+      at: at(1.5),
+      event: {
+        turn_id: turn,
+        kind: 'tool_start',
+        data: { call_id: `${turn}-u`, tool: 'unreal_open', title: 'Opening EmberRidge in Unreal' },
+      },
+    },
+    {
+      at: at(4),
+      event: {
+        turn_id: turn,
+        kind: 'tool_end',
+        data: { call_id: `${turn}-u`, ok: true, summary: 'EmberRidge is opening in Unreal' },
+      },
+    },
+    { at: at(4.2), event: { turn_id: turn, kind: 'screen', data: { engine_id: GAME_ENGINE, stream: UNREAL_STREAM } } },
+    { at: at(4.4), event: { turn_id: turn, kind: 'plan', data: { items: gamePlan(true) } } },
+    {
+      at: at(5),
+      event: {
+        turn_id: turn,
+        kind: 'text',
+        data: {
+          text: 'Your screen is on the **Unreal** view now. The C++ module compiles first, so the editor takes a few minutes this time. **Desktop** is one click away in the Screen panel, or Alt+1, for the GitHub client and Blender.',
+        },
+      },
+    },
+    { at: at(5.5), event: { turn_id: turn, kind: 'turn_end', data: {} } },
   ];
 }
 
@@ -550,16 +717,11 @@ function demoProjects(now: number): Project[] {
         id: 'demo-game',
         name: 'Ember Ridge',
         discipline: 'games',
-        format: 'World',
+        format: 'Game',
         library_sections: ['Environments', 'Props'],
-        plan: [
-          { id: 'g1', title: 'Open Unreal Engine with Blender beside it', status: 'done' },
-          { id: 'g2', title: 'Block out the ridge and the beacon tower in Blender', status: 'active' },
-          { id: 'g3', title: 'Send them to Unreal and lay the path', status: 'pending' },
-          { id: 'g4', title: 'Light the ridge at dusk', status: 'pending' },
-        ],
+        plan: gamePlan(false),
       },
-      20 * MINUTE,
+      6 * MINUTE,
     ),
     project(
       { id: 'demo-interior', name: 'Glasshouse retreat', discipline: 'architecture', format: 'Interior' },
@@ -602,10 +764,14 @@ function demoRepos(now: number): GitHubRepo[] {
  * @param text The person's message.
  * @param turn The turn it starts.
  * @param start When the turn starts.
+ * @param epicLinked Whether the demo's GitHub account is linked to Epic.
  * @returns The turn's events, with their times.
  */
-function reply(project: Project, text: string, turn: TurnId, start: number): Scheduled[] {
+function reply(project: Project, text: string, turn: TurnId, start: number, epicLinked: boolean): Scheduled[] {
   const at = (seconds: number): number => start + seconds * SECOND;
+  if (project.id === 'demo-game' && /\bopen\b.*\bunreal\b/i.test(text)) {
+    return openInUnreal(turn, at, epicLinked);
+  }
   const opening = /cold open|workshop|violet flats|title card/i.test(text) && project.id === 'demo-film';
   if (opening) {
     return [
@@ -689,8 +855,9 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     ],
   };
   const gameStart = opened - 25 * MINUTE;
+  const gameCloned = opened - 6 * MINUTE;
   const gameSimulation: Simulation = {
-    id: 'demo-engine-2',
+    id: GAME_ENGINE,
     project: 'demo-game',
     app: 'unreal',
     tier: 'l4',
@@ -703,7 +870,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   let simulations: Simulation[] = [filmSimulation, gameSimulation];
   const logs = new Map<string, Scheduled[]>([
     ['demo-film', filmEvents(opened, libraries.get('demo-film') ?? [], snapshot(filmSimulation, opened - 11 * MINUTE))],
-    ['demo-game', gameEvents(gameStart, snapshot(gameSimulation, gameStart + 70 * SECOND))],
+    ['demo-game', gameEvents(gameStart, gameCloned, snapshot(gameSimulation, gameStart + 70 * SECOND))],
   ]);
   /** The demo's GitHub account, connected; linked to Epic unless the scene says otherwise. */
   const demoGitHub: GitHubStatus = {
@@ -954,6 +1121,19 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
         simulations = [...simulations, simulation];
         return snapshot(simulation, now);
       }, 700),
+    unrealProjects: (projectId, engineId) =>
+      legacy
+        ? missing()
+        : soon(() => {
+            const simulation = simulations.find(
+              (candidate) => candidate.id === engineId && candidate.project === projectId,
+            );
+            const now = Date.now();
+            if (simulation?.app !== 'unreal' || snapshot(simulation, now).status !== 'running') {
+              throw new ApiError(409, 'That engine is not a running Unreal engine.');
+            }
+            return engineId === GAME_ENGINE && now >= gameCloned ? [EMBER_RIDGE] : [];
+          }, 300),
     listEvents: (projectId, after) => {
       if (legacy) {
         return missing();
@@ -984,7 +1164,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
         counter += 1;
         const turn = `turn-${counter}`;
         const message: Scheduled = { at: now, event: { turn_id: turn, kind: 'user_message', data: { text } } };
-        const scheduled = [message, ...reply(project, text, turn, now)];
+        const scheduled = [message, ...reply(project, text, turn, now, epicLinked)];
         entries.push(...scheduled);
         for (const entry of scheduled) {
           window.setTimeout(

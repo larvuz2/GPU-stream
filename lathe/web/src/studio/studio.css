@@ -522,6 +522,61 @@
     background: #000;
   }
 
+  /* One picture of the engine on screen; the others stay loaded beneath it, hidden. */
+  .stream-picture {
+    position: absolute;
+    inset: 0;
+  }
+
+  .stream-picture[data-shown='false'] {
+    visibility: hidden;
+  }
+
+  /*
+   * A row of options of which one is chosen: the repository picker's tabs, and the switch between
+   * an engine's pictures (Desktop and Unreal), whose chosen one carries the accent.
+   */
+  .segmented {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.15rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.6rem;
+    background: rgb(255 255 255 / 0.03);
+  }
+
+  .segment {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    height: 1.75rem;
+    padding-inline: 0.7rem;
+    border-radius: 0.45rem;
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    white-space: nowrap;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .segment > svg {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+
+  .segment:hover {
+    color: var(--color-fg);
+  }
+
+  .segment[aria-pressed='true'] {
+    background: color-mix(in oklab, var(--color-ember) 22%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-ember) 55%, transparent);
+    color: var(--color-fg);
+  }
+
   /* The layer over the small stream that turns a click into focus mode. */
   .stream-focus-layer {
     position: absolute;

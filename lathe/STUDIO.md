@@ -52,9 +52,10 @@ FilmCraft's commands.
 An engine is a catalog app (`catalog.json`, `apps`) running as a Selkies
 session on a Modal Sandbox (`addons/modal`). Status: `available` (anyone),
 `team` (only the team's accounts, for software whose license is the user's own,
-such as Nuke), `byol` (anyone, once they have linked their own license, which
-the app's `license` names with the steps that link it: Unreal Engine on the
-user's Epic account, `UNREAL.md`), `next` (being built: PhotoCraft), `soon`.
+such as Nuke), `byol` (anyone, with the part of it on the user's own license
+coming once they have linked that license, which the app's `license` names with
+the steps that link it: Unreal Engine's editor on the user's Epic account,
+`UNREAL.md`), `next` (being built: PhotoCraft), `soon`.
 
 - **FilmCraft** is built from the release the fork tracks
   (`github.com/larvuz2/filmcraft`, a fork of `storytold/filmcraft`), pinned by
@@ -83,10 +84,13 @@ freely and saves the project's documents only to a branch of its own,
 default branch's head the first time; it never writes to the default branch or
 to a branch it did not make, and each save gives the person the compare link
 from which they open a pull request. Engines that need the repository get it
-as a credential of their session. The same connection is how Unreal Engine is licensed: the app asks for
-`read:packages` beside `repo`, `epic_linked` says whether the account is linked
-to Epic, and an Unreal engine starts only while it is, pulled with that user's
-own token.
+as a credential of their session. The same connection is how Unreal Engine's
+editor is licensed: the app asks for `read:packages` beside `repo`,
+`epic_linked` says whether the account is linked to Epic, and an Unreal engine
+started while it is brings the user's own copy of the editor, pulled with their
+own token. Without the link the engine still starts, as the desktop the editor
+would stream beside, and the agent says how to link when the person asks for
+the editor.
 
 ## Contract: the control plane's API
 
@@ -105,7 +109,8 @@ PATCH  /v1/projects/{pid}                  {name?, pinned?, library_sections?} -
 DELETE /v1/projects/{pid}                  204
 GET    /v1/projects/{pid}/engines          {engines: [Session]}
 POST   /v1/projects/{pid}/engines          {app, tier, region} -> {engine: Session}
-POST   /v1/sessions/{sid}/link             {url} (existing)
+GET    /v1/projects/{pid}/engines/{sid}/unreal-projects   {projects: [UnrealProject]}; 409 unless a running Unreal engine
+POST   /v1/sessions/{sid}/link             {stream?} -> {url}: a fresh link to the desktop, or to the stream named
 DELETE /v1/sessions/{sid}                  stops an engine (existing)
 GET    /v1/projects/{pid}/events?after=N   {events: [Event], running}
 POST   /v1/projects/{pid}/messages         {text} -> 202 {turn_id}; 409 while a turn runs
@@ -129,7 +134,13 @@ Project  {id, name, discipline, format, pinned, created_at, updated_at,
           github_repo: "owner/name" | null, library_sections: [string],
           plan: [{id, title, status: "pending" | "active" | "done" | "blocked"}]}
 Session  the existing session shape, with project_id and app, and streams?: [{name, url}]
-         for an engine that streams a picture beside its desktop (the Unreal Editor)
+         for a running engine that streams more than its desktop: an Unreal engine's
+         [{name: "Desktop", url}, {name: "Unreal", url}], each link minted for that
+         listing of the engines, and never written to the event log
+UnrealProject  {path, name, engine_association, version: "same" | "older" | "newer"
+          | "source" | "unknown", opens, cpp_modules: [string], plugins: [string],
+          lfs: true | false | string | null, size_bytes: number | null}: a .uproject
+          in the engine's workspace, `opens` saying how this engine opens it
 Asset    {id, section, name, tag, description, metadata, created_at, updated_at,
           media: [{kind: "image" | "video" | "audio" | "file", url, name}], thumbnail_url}
 Event    {id, turn_id, kind, data, created_at}, kind one of
@@ -141,6 +152,8 @@ Event    {id, turn_id, kind, data, created_at}, kind one of
            plan          {items}
            library       {asset}, or {sections} when the agent set the sections
            engine        {engine: Session}
+           screen        {engine_id, stream}  the agent puts an engine, in one of its
+                                              streams ("Desktop", "Unreal"), on the Screen
            turn_end      {}
            error         {message}
 ```

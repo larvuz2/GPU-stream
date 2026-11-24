@@ -1,0 +1,11 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# The Unreal session's desktop shell defaults, installed as
+# /etc/xdg/selkies-desktop/config, under the user's own settings: the GitHub
+# client, Firefox, and Blender as quick launch buttons beside the start button
+# and as launchers on the desktop, put there once (the shell's `launchers` and
+# `desktop_launchers`).
+launchers = desktop-plus.desktop,firefox.desktop,blender.desktop
+desktop_launchers = desktop-plus.desktop,firefox.desktop,blender.desktop

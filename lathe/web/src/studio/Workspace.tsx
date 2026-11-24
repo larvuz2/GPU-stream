@@ -14,11 +14,16 @@
  * and the screen's empty state leads to the Environment panel, unfolding the panel and, on a
  * narrow screen, switching to its tab.
  *
+ * What the screen shows, the engine and which of its pictures (an Unreal engine's Desktop or
+ * Unreal), is chosen here, by whoever chose last: the person, with the screen's toggle, its keys,
+ * or an engine's card, or the agent, whose `screen` event the screen follows as it arrives and
+ * shows on opening the project until the person picks something else.
+ *
  * A project created from a link into the studio arrives with its first message, which is sent
  * once the project is open, so it shows as sent at once.
  * @module
  */
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Layers, ListChecks, PanelRightClose, PanelRightOpen, Plus, Server } from 'lucide-react';
 import { isActive, type ControlPlane, type Project, type Session } from '../lib/api';
 import { AUTO_REGION } from '../lib/catalog';
@@ -62,6 +67,14 @@ const isPanelState: Guard<PanelState> = (value): value is PanelState =>
 
 /** Every panel unfolded, as a new viewer sees them. */
 const ALL_OPEN: PanelState = { screen: true, environment: true, plan: true, library: true };
+
+/** A picture of an engine, as the person or the agent put it on screen. */
+interface Picked {
+  /** The engine. */
+  engineId: string;
+  /** The picture's name. */
+  stream: string;
+}
 
 /** Props of {@link Workspace}. */
 interface WorkspaceProps {
@@ -115,10 +128,15 @@ export function Workspace(props: WorkspaceProps) {
       projects.touch(project.id);
     },
     onSpent: account.refreshMe,
+    onScreen: (request) => {
+      setPicked({ engineId: request.engineId, stream: request.stream });
+      showEngine(request.engineId, false);
+    },
   });
   const [panels, setPanels] = usePreference<PanelState>('panels', ALL_OPEN, isPanelState);
   const [draft, setDraft] = useState('');
   const [screenId, setScreenId] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Picked | null>(null);
   const [openAssetId, setOpenAssetId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const environmentRef = useRef<HTMLDivElement>(null);
@@ -126,7 +144,19 @@ export function Workspace(props: WorkspaceProps) {
   const libraryRef = useRef<HTMLDivElement>(null);
   const firstTaken = useRef(false);
 
-  const screen = pickScreen(data.engines, screenId);
+  const agentShown = data.screenRequest;
+  const screen = pickScreen(data.engines, screenId ?? agentShown?.engineId ?? null);
+  const screenEngineId = screen?.id ?? null;
+  const shownPicture =
+    [picked, agentShown].find((choice) => choice !== null && choice.engineId === screenEngineId)?.stream ?? null;
+  const chooseStream = useCallback(
+    (name: string): void => {
+      if (screenEngineId !== null) {
+        setPicked({ engineId: screenEngineId, stream: name });
+      }
+    },
+    [screenEngineId],
+  );
   const tags = useMemo(
     () =>
       new Set(
@@ -197,8 +227,10 @@ export function Workspace(props: WorkspaceProps) {
    * Puts an engine on screen.
    *
    * @param id The engine.
+   * @param switchTab Whether a narrow screen switches to the screen's tab: the person's own
+   *   request does, while the agent's leaves them reading the conversation.
    */
-  function showEngine(id: string): void {
+  function showEngine(id: string, switchTab = true): void {
     setScreenId(id);
     if (!panels.screen) {
       setPanels({ ...panels, screen: true });
@@ -206,9 +238,20 @@ export function Workspace(props: WorkspaceProps) {
     if (props.paneCollapsed && !focus) {
       props.onPaneCollapsed(false);
     }
-    if (narrow) {
+    if (narrow && switchTab) {
       onTab('screen');
     }
+  }
+
+  /**
+   * Puts one picture of an engine on screen.
+   *
+   * @param id The engine.
+   * @param stream The picture's name.
+   */
+  function showPicture(id: string, stream: string): void {
+    setPicked({ engineId: id, stream });
+    showEngine(id);
   }
 
   const toggle = (name: keyof PanelState) => () => {
@@ -295,6 +338,8 @@ export function Workspace(props: WorkspaceProps) {
         engines={data.engines}
         engine={screen}
         onSelect={setScreenId}
+        stream={shownPicture}
+        onStream={chooseStream}
         focus={focus}
         onFocus={onFocus}
         open={panels.screen}
@@ -337,7 +382,12 @@ export function Workspace(props: WorkspaceProps) {
                 }}
                 onStop={data.stopEngine}
                 onShow={showEngine}
+                onShowPicture={showPicture}
                 onAddCredits={props.onAddCredits}
+                unrealProjects={data.unrealProjects}
+                agentRunning={data.running}
+                canAsk={blocked === null}
+                onAsk={data.send}
               />
               <GitHubSection
                 project={project}

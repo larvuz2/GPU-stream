@@ -1,0 +1,24 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Run by the Selkies window manager once it is up, as the session's
+# application, installed as /etc/xdg/openbox/autostart: the GitHub client
+# (github.sh), which is where a developer starts, as they do on their own
+# machine with GitHub Desktop.
+#
+# While the clone folder has no Unreal project yet, one line over the client
+# says what to do: sign in, then clone the game there. It waits for the
+# client's window, so that it opens over it rather than under it, and draws in
+# software (GSK_RENDERER), as the Nuke session's windows do. Once a project is
+# cloned the line is left out; the rest of the desktop (Firefox, Blender, the
+# files) is in the start menu and on the taskbar (desktop-config).
+folder="$(selkies-modal-unreal-github --clone-folder)" || exit 1
+selkies-modal-unreal-github > /dev/null 2>&1 &
+
+if [ -z "$(find "${folder}" -maxdepth 3 -name '*.uproject' -type f -print -quit 2> /dev/null)" ]; then
+  timeout 30 xdotool search --sync --onlyvisible --class desktop-plus > /dev/null 2>&1
+  GSK_RENDERER=cairo zenity --info --no-wrap --title "Get started" --ok-label "Got it" \
+    --text "<b>Sign in to GitHub, then clone your game here</b> (File › Clone repository)." > /dev/null 2>&1 &
+fi

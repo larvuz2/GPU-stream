@@ -28,7 +28,7 @@ writes after you approve it in a browser.
 | Command | What it does |
 | --- | --- |
 | `up` | Starts the session, or returns the one already running under that name, and prints its link |
-| `url` | Prints a new link to a running session |
+| `url` | Prints a new link to a running session, or with `--view unreal` to an Unreal session's Unreal view |
 | `exec -- <command>` | Runs a command in the session's environment: on its display, with its GPU |
 | `blender` | Runs the Python on standard input inside the session's Blender, the one the page shows |
 | `filmcraft` | Sends the JSON requests on standard input, one per line, to a FilmCraft session's control channel and prints each reply |
@@ -255,6 +255,130 @@ for the session's own token, and reads and writes the project folder alone. A
 connection authenticates first, `{"method": "auth", "params": {"token": ...}}`
 from inside the Sandbox, where `PHOTOCRAFT_CONTROL_TOKEN` holds it; the
 launcher has no verb for it yet.
+
+## Unreal
+
+`--app unreal` starts the desktop an Unreal engine works on, for a studio whose
+game lives in a GitHub repository. Epic hands the Linux editor only to people
+whose GitHub account is linked to Epic, so the image `up` builds is that desktop
+without the editor; the editor is in `unreal_image(registry_secret, version)`,
+which pulls it with the user's own credential ([`lathe/UNREAL.md`](../../lathe/UNREAL.md)).
+
+```bash
+addons/modal/selkies-modal up --app unreal --name ue --gpu L4 --env SELKIES_MODAL_PROJECT=projects/capyverse
+```
+
+`up` prints the Unreal view's link beside the desktop's; `url --view unreal`
+prints a new one.
+
+### The desktop
+
+A developer starts the way they do on their own machine with GitHub Desktop:
+
+1. The session opens on the GitHub client, with one line over it: sign in to
+   GitHub, then clone the game here. The line is left out once the clone folder
+   holds an Unreal project.
+2. Sign in opens GitHub in Firefox and comes back to the client by itself
+   (Firefox hands GitHub's `x-github-desktop-auth` link to it without asking).
+3. File › Clone repository offers the clone folder: the project folder
+   (`SELKIES_MODAL_PROJECT`) when the session has one, else `projects` in the
+   workspace. Git LFS is installed for every repository, so the assets arrive
+   with the clone.
+
+The sign-in, the client's settings and list of repositories, and Git's name
+and address are kept in the workspace (`SELKIES_MODAL_PERSIST`), so later
+sessions open on the repository with nobody signing in again. The sign-in is in
+GNOME's keyring, which has no login to unlock it here and is unlocked with a
+fixed password: it is as private as the workspace and no more
+(`unreal/github.sh`).
+
+The client is [Desktop Plus](https://github.com/desktop-plus/desktop-plus),
+a fork of GitHub Desktop that follows it release by release (3.6 now, the
+version a studio runs on Windows) and publishes Linux packages
+(`DESKTOP_PLUS_VERSION` and `DESKTOP_PLUS_SHA256` in `sandbox.py`). The older
+Linux fork, shiftkey/desktop, installs and opens here too, but its last release
+is 3.4.13 of February 2025, with the Electron of then holding the team's token
+and open sign-in failures on Ubuntu (`unreal/install.sh`). Its clone dialog is
+made to offer the session's folder by a change to one function of its bundled
+code, which the build checks for, so a new version that is not that shape fails
+the build rather than offering the wrong folder.
+
+Firefox, Blender, and the client are on the desktop and in the quick launch
+beside the start button. Blender is the blender app's, started in the project
+folder with the Send to Unreal add-on enabled (the sidebar's Unreal tab;
+[`unreal/send_to_unreal.py`](unreal/send_to_unreal.py)), and the launcher's
+`blender` verb runs Python in it as in a Blender session.
+
+### Finding the project
+
+`selkies-modal-unreal-projects` describes every `.uproject` in the workspace,
+wherever the developer cloned it, as JSON; from Python,
+`unreal_projects(sandbox)` returns the list for the control plane:
+
+```json
+[{
+  "path": "/home/ubuntu/workspace/projects/UEProject_Elementus/ProjectElementus.uproject",
+  "name": "ProjectElementus",
+  "engine_association": "5.4", "engine_version": "5.4",
+  "modules": [{"name": "ProjectElementus", "type": "Runtime", "loading_phase": "Default"}],
+  "plugins": [
+    {"name": "Swinging", "in_repository": true, "source_in_repository": true, "path": "Plugins/GameFeatures/CustomAbilities/Swinging/Swinging.uplugin", "marketplace": false},
+    {"name": "FSR", "in_repository": false, "source_in_repository": false, "path": null, "marketplace": false}
+  ],
+  "repository": {
+    "root": "/home/ubuntu/workspace/projects/UEProject_Elementus", "branch": "main",
+    "remote": "https://github.com/lucoiso/UEProject_Elementus.git",
+    "submodules": [{"path": "Plugins/UEElementusModules", "checked_out": false}],
+    "lfs": {"uses_lfs": true, "files": 109, "fetched": 109, "not_fetched": 0}
+  },
+  "size_bytes": 247793152, "size": "247.8 MB"
+}]
+```
+
+(Abridged: the project enables thirteen plugins.)
+
+It skips hidden folders and the ones Unreal regenerates (`Intermediate`,
+`Saved`, `DerivedDataCache`, `Binaries`); `unreal/projects.py` documents every
+field, and `pytest addons/modal/unreal` tests it.
+
+### The Unreal view
+
+The session's second page is its own port, 8090 (`UNREAL_VIEW_PORT`), behind a
+connect token of its own (`unreal_view_link(sandbox)`). Until an editor streams
+there, it is a page saying Unreal is not open yet, to clone the project on the
+Desktop and ask the agent to open it; the page reloads by itself once something
+else answers on the port. The port belongs to an s6 service of the session, so
+the Pixel Streaming player taking it over is a change of what that service
+runs, and the link stays the same: `unreal/view/view.sh` has the plan for the
+player and the TURN relay it carries the stream through.
+
+### Opening a project
+
+`selkies-modal-unreal-open PATH.uproject` opens a project in the editor, off
+screen, streaming itself with Pixel Streaming 2's editor streaming, with Unreal
+MCP and the Remote Control API on loopback, and the project's C++ built first
+where it has any. It runs as the session job `unreal-editor`. Where the image
+has no editor it opens nothing and says, with status 3, that the editor is not
+installed in this machine yet and what the user does to get it; a machine
+without a GPU (4), a project saved by a newer Unreal (5), and an editor that
+ends as it starts (1) are refused the same way. `unreal/open.sh` has the command
+line and where each flag comes from: none of it has run against an editor yet.
+
+### Measured
+
+On 2026-11-24, with the image cached unless said otherwise:
+
+| | |
+| --- | --- |
+| First build of the desktop (`build --app unreal`) | 195 s |
+| Rebuild after a change to its files | 25 s for a late file, 121 s for the Firefox policy, the earliest |
+| `up --app unreal --gpu none` until Selkies listens | 4 s |
+| `up --gpu T4` | 7 s from the container's start; Modal took 280 s more to find a T4 |
+| `down` | 6 to 8 s |
+| Clone of a UE 5.4 sample with `git`, LFS content left out | 7.4 s, 228 MB |
+| `git lfs pull` of its 109 LFS files | 3.4 s, 187 MB |
+| `unreal_projects`, two projects | 1.3 to 1.6 s; 19.5 s on a new machine, which reads the clones from the Volume for the first time |
+| `unreal_image`'s recipe with a public image in place of Epic's | 199 s; 77 s after a script change, the engine layer taken from the cache |
 
 ## The session
 

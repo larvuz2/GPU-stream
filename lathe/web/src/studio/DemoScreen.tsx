@@ -8,12 +8,13 @@
  * What the demo's Screen shows in place of a stream: a still picture of an engine at work.
  *
  * The demo has no workstation to stream, so it draws one: an editor's media bin, viewer, and
- * timeline for an editing app, and the app's own artwork for any other. An Unreal engine's desktop
- * is the Blender that runs on it, drawn with Blender's artwork, and its editor's own stream with
- * the art of Unreal Engine's card. It is sized in container units, so it reads the same in the
- * column and in focus mode. It is part of the demo's chunk and never shown over a real engine.
+ * timeline for an editing app, and the app's own artwork for any other. An Unreal engine's Desktop
+ * is the Blender that runs there, drawn with Blender's artwork, and its Unreal view the art of
+ * Unreal Engine's card. It is sized in container units, so it reads the same in the column and in
+ * focus mode. It is part of the demo's chunk and never shown over a real engine.
  * @module
  */
+import { DESKTOP_STREAM } from '../lib/api';
 import type { CatalogApp } from '../lib/catalog';
 import { engineImage } from '../lib/media';
 
@@ -51,7 +52,7 @@ const TRACKS: readonly { name: string; clips: readonly [number, number, string][
 interface DemoScreenProps {
   /** The engine's app. */
   app: CatalogApp | undefined;
-  /** The stream beside the engine's desktop on screen, or `null` for the desktop. */
+  /** The picture of the engine on screen, or `null` for an engine that streams its desktop alone. */
   stream: string | null;
 }
 
@@ -63,13 +64,17 @@ interface DemoScreenProps {
  */
 export function DemoScreen({ app, stream }: DemoScreenProps) {
   if (app?.id !== 'filmcraft') {
-    const blenderBeside = app?.id === 'unreal' && stream === null;
-    const picture = blenderBeside ? engineImage('blender') : app === undefined ? undefined : engineImage(app.id);
+    const desktop = app?.id === 'unreal' && stream === DESKTOP_STREAM;
+    const picture = desktop ? engineImage('blender') : app === undefined ? undefined : engineImage(app.id);
     return (
       <div className="art absolute inset-0" style={{ '--accent': app?.accent }}>
         <img src={picture ?? STILLS[2]} alt="" className="art-image" data-loaded="true" />
         <span className="absolute bottom-3 left-3 rounded-md bg-ink-950/70 px-2 py-1 text-xs font-semibold">
-          {blenderBeside ? 'Desktop · Blender' : (stream ?? app?.name)}
+          {desktop
+            ? 'Desktop · GitHub client, Firefox, Blender'
+            : stream === null
+              ? app?.name
+              : `${app?.name ?? ''} · ${stream}`}
         </span>
       </div>
     );

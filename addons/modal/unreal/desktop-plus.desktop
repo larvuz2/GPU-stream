@@ -1,0 +1,20 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# The GitHub client in the start menu, the quick launch, and the desktop of an
+# Unreal session. It takes the place of the package's own entry of the same
+# name (/usr/local/share comes first among the data directories) so that every
+# start goes through github.sh, which unlocks the keyring and names the clone
+# folder, and it names the URL schemes GitHub's sign-in returns through.
+[Desktop Entry]
+Type=Application
+Name=GitHub Desktop Plus
+GenericName=Git Client
+Comment=Sign in to GitHub and clone your team's repository
+Exec=selkies-modal-unreal-github %U
+Icon=gh-desktop-plus
+Terminal=false
+StartupWMClass=desktop-plus
+Categories=Development;
+MimeType=x-scheme-handler/x-github-client;x-scheme-handler/x-github-desktop-auth;x-scheme-handler/x-github-desktop-dev-auth;

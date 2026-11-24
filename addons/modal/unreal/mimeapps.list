@@ -1,0 +1,14 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# The Unreal session's default applications, installed as /etc/xdg/mimeapps.list,
+# under the user's own: the web in Firefox, where the GitHub client's sign-in
+# opens (xdg-open), and GitHub's links back to the client in the client.
+[Default Applications]
+x-scheme-handler/http=firefox.desktop
+x-scheme-handler/https=firefox.desktop
+text/html=firefox.desktop
+x-scheme-handler/x-github-client=desktop-plus.desktop
+x-scheme-handler/x-github-desktop-auth=desktop-plus.desktop
+x-scheme-handler/x-github-desktop-dev-auth=desktop-plus.desktop

@@ -8,8 +8,8 @@
  * The landing page's engines: the creative software a project's agent opens, grouped by the
  * catalog's status, and how engines hand work to one another.
  *
- * The live engines come first and largest, then the ones a person starts on a license of their own
- * once it is linked (Unreal Engine on their Epic account), badged with that license, then the ones
+ * The live engines come first and largest, then the ones with a part on a license of the person's
+ * own (Unreal Engine, whose editor runs on their Epic account), badged with that license, then the ones
  * coming next with the discipline each is first made for, then the team's (software whose license
  * is the user's own, such as Nuke), and the rest as compact chips. Every name, status, tagline, and version is the catalog's. An engine
  * is pictured by its own interface where it is open source; software that is someone else's
