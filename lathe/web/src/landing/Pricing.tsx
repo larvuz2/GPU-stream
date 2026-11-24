@@ -5,17 +5,20 @@
  */
 
 /**
- * The landing page's pricing: every tier with its hourly price, and the credit packs.
+ * The landing page's pricing: what a project spends credits on, every tier an engine runs on with
+ * its hourly price, and the credit packs.
  *
  * No figure is written here. A tier's price per hour is its credits per minute times sixty times
  * what a credit is worth; a pack's bonus is what its credits exceed its price by at that worth.
- * Both takes of the landing page show this one section, each under a heading in its own voice.
+ * What the page says is billed is what the catalog prices today, the engines' time; it promises no
+ * price for the agent's own model or for generation, which the catalog does not list yet.
  * @module
  */
-import { ArrowRight, Check, Gift } from 'lucide-react';
+import { ArrowRight, Bot, Check, Coins, Gift, MonitorPlay } from 'lucide-react';
 import {
   brand,
   catalog,
+  IDLE_SHUTDOWN_MINUTES,
   cheapestTier,
   gpuLabel,
   hourlyUsd,
@@ -26,32 +29,61 @@ import {
 } from '../lib/catalog';
 import { creditCount, minutesText, percentage, price, usd } from '../lib/format';
 import { SectionHeading } from './SectionHeading';
+import { CREATE_HASH } from './studio';
 
-/** Props of {@link Pricing}. */
-interface PricingProps {
-  /** The section's title. */
-  title?: string;
-  /** The sentence or two under the title. */
-  lede?: string;
-}
+/** What a project spends, in three parts. */
+const PARTS = [
+  {
+    icon: Bot,
+    title: 'The agent',
+    body: 'One per project. It plans with you, builds the library, and opens the engines the work needs, asking before each decision that is yours.',
+  },
+  {
+    icon: MonitorPlay,
+    title: 'The engines',
+    body: `Each runs on the tier you choose and spends credits by the minute while it runs. After ${IDLE_SHUTDOWN_MINUTES} idle minutes it shuts itself off.`,
+  },
+  {
+    icon: Coins,
+    title: 'Credits',
+    body: `One balance for all of it, with no subscription. One credit is ${usd(catalog.credit_usd)}, and packs carry a bonus.`,
+  },
+] as const;
 
 /**
- * Renders the pricing section. The figures are the catalog's whoever frames them; the heading is
- * the part a take of the landing page words its own way.
+ * Renders the pricing section.
  *
- * @param props The component's props.
  * @returns The section.
  */
-export function Pricing({
-  title = 'Pay by the minute. Stop whenever.',
-  lede = `No subscription. 1 credit is ${usd(catalog.credit_usd)}, and a session spends credits by the minute on the tier you pick.`,
-}: PricingProps) {
+export function Pricing() {
   return (
     <section id="pricing" className="section" aria-labelledby="pricing-title">
       <div className="shell">
-        <SectionHeading id="pricing-title" eyebrow="Pricing" title={title} lede={lede} />
+        <SectionHeading
+          id="pricing-title"
+          eyebrow="Pricing"
+          title="Pay for the engine time you use"
+          lede="An agent, the engines it opens, and one balance of credits. No subscription, and engines stop themselves when you step away."
+        />
 
-        <ul className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <ul className="mt-12 grid gap-4 md:grid-cols-3">
+          {PARTS.map(({ icon: Icon, title, body }) => (
+            <li key={title} className="flex gap-4 rounded-2xl border border-line bg-white/[0.02] p-5">
+              <span className="icon-tile">
+                <Icon className="size-5" aria-hidden="true" />
+              </span>
+              <span>
+                <span className="block font-semibold tracking-tight">{title}</span>
+                <span className="lede mt-1 block text-sm">{body}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+
+        <h3 className="mt-14 text-center text-sm font-semibold tracking-[0.16em] text-faint uppercase">
+          Engine tiers
+        </h3>
+        <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {catalog.tiers.map((tier) => (
             <li key={tier.id} className="flex">
               <TierCard tier={tier} />
@@ -76,10 +108,10 @@ export function Pricing({
                 Every new {brand} account starts with them
                 {cheapestTier === undefined
                   ? '.'
-                  : `: ${minutesText(minutesFor(catalog.signup_credits, cheapestTier))} on ${cheapestTier.name} to try a real session before you spend anything.`}
+                  : `: ${minutesText(minutesFor(catalog.signup_credits, cheapestTier))} of engine time on ${cheapestTier.name} to try a real project before you spend anything.`}
               </p>
-              <a href="#signup" className="btn btn-primary mt-6">
-                Start free
+              <a href={CREATE_HASH} className="btn btn-primary mt-6">
+                Start creating
                 <ArrowRight className="size-4" aria-hidden="true" />
               </a>
             </div>
@@ -88,7 +120,7 @@ export function Pricing({
           <div className="glass p-7">
             <h3 className="text-lg font-semibold tracking-tight">Credit packs</h3>
             <p className="mt-1 text-sm text-muted">
-              Top up when you need more. Bigger packs carry a bonus, and each shows the session time it buys.
+              Top up when you need more. Bigger packs carry a bonus, and each shows the engine time it buys.
             </p>
             <ul className="mt-5 grid gap-3 sm:grid-cols-3">
               {catalog.credit_packs.map((pack) => (

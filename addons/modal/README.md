@@ -31,6 +31,7 @@ writes after you approve it in a browser.
 | `url` | Prints a new link to a running session |
 | `exec -- <command>` | Runs a command in the session's environment: on its display, with its GPU |
 | `blender` | Runs the Python on standard input inside the session's Blender, the one the page shows |
+| `filmcraft` | Sends the JSON requests on standard input, one per line, to a FilmCraft session's control channel and prints each reply |
 | `ls` | Lists the running sessions |
 | `down` | Stops a session, with the scene Blender has open kept for the next one |
 | `drive-login` | Opens Google's sign-in on a Nuke session's screen and keeps the Drive access it grants as a Modal Secret, which `up --secret` hands to a session as rclone's `gdrive:` |
@@ -144,14 +145,127 @@ commands).
 `--workspace` keeps a session's files in one directory of the Volume, so a
 team's Nuke and its scripts are apart from everything else there.
 
+## FilmCraft
+
+`--app filmcraft` starts a session for
+[FilmCraft](https://github.com/storytold/filmcraft), the open-source video
+editor, which an agent can drive through its command channel while a person
+works in the same window:
+
+```bash
+addons/modal/selkies-modal up --app filmcraft --name film --gpu none --env SELKIES_MODAL_PROJECT=projects/trailer
+```
+
+The image installs the Debian package of FilmCraft's GitHub release, checked
+against the hash the release's `SHA256SUMS.txt` lists (`FILMCRAFT_VERSION` and
+`FILMCRAFT_SHA256` in `sandbox.py`; updating is a bump of both). FilmCraft
+opens maximized, on a project of the session's project folder:
+
+- The folder is `SELKIES_MODAL_PROJECT`, a path relative to the workspace,
+  else `projects/default`. FilmCraft opens the newest `.fcproj` there, and in
+  a folder with none creates `project.fcproj`, so Save, auto-save, and the
+  agent's `file.save` all write where the next session looks. Media and
+  exports go in the same folder, where every engine of the project reads them.
+- Unsaved changes outlive the session. FilmCraft journals them within about a
+  second of each edit into `.filmcraft` in the project folder (its data folder:
+  preferences, logs, recovery), and the next session's FilmCraft restores them,
+  still unsaved. The folder is the project's own, so one project's changes are
+  never restored into another.
+
+### Its command channel
+
+Every menu item, button, and drag in FilmCraft is one of its 700-odd commands,
+which its control channel runs exactly as the window does
+([FilmCraft's protocol](https://github.com/storytold/filmcraft/blob/main/docs/control-protocol.md)).
+The channel listens on the Sandbox's loopback only (port 9876), and FilmCraft
+refuses any request without the session's own token, which `up` makes with the
+session's other two and nothing outside the Sandbox holds. Requests therefore
+go from inside the Sandbox: `filmcraft` sends JSON requests, one per line, and
+prints each reply.
+
+```bash
+addons/modal/selkies-modal filmcraft --name film <<'EOF'
+{"method": "engine.execute", "params": {"command": "file.import", "params": {"paths": ["/home/ubuntu/workspace/projects/trailer/media/shot01.mp4"]}}}
+{"method": "engine.execute", "params": {"command": "file.newSequenceFromClip", "params": {"items": [1]}}}
+{"method": "engine.execute", "params": {"command": "file.exportMedia", "params": {"path": "/home/ubuntu/workspace/projects/trailer/exports/cut1.mp4", "format": "h264", "hardwareEncoding": "auto"}}}
+{"method": "engine.execute", "params": {"command": "jobs.list"}}
+EOF
+```
+
+```text
+{"id":null,"ok":true,"result":{"errors":[],"items":[1]}}
+{"id":null,"ok":true,"result":{"clips":[6,7],"sequence":4}}
+{"id":null,"ok":true,"result":{"cancel":"jobs.cancel","job":1,"path":"...","poll":"jobs.list","warnings":[]}}
+...
+```
+
+A refused request comes back as `{"ok": false, "error": "..."}` with
+FilmCraft's reason, and the status is then 1. The first request waits for
+FilmCraft to be ready (`--wait`, 60 s unless given). From Python, the control
+plane's way in, `filmcraft_call(sandbox, method, params, timeout)` sends one
+request and returns its result, raising `RuntimeError` with FilmCraft's
+message. FilmCraft answers a request within 60 s or gives up on it, so an
+export is started without `wait` and followed with `jobs.list` until its job
+is `finished`; `engine.commands` lists every command with its parameters.
+
+### Graphics and speed
+
+A Sandbox has no `/dev/dri`, so nothing presents into the session's display
+through a GPU: the window draws through Mesa's Vulkan in software (lavapipe)
+on every machine (`WGPU_BACKEND=vulkan`), and FilmCraft composites the
+monitors on the CPU. NVIDIA's Vulkan cannot present into the display (wgpu
+reports an error asking it and moves on to lavapipe; `vulkaninfo` crashes on
+the NVIDIA driver Modal mounts), and OpenGL is Mesa's software rasterizer on
+both. What a GPU machine adds is NVDEC to decode, NVENC to export H.264 when
+the export asks for `hardwareEncoding: "auto"` (`perf.stats` counts the frames
+it encoded under `export.hardware`), and the export renderer, which reaches the GPU
+through Vulkan without a display; with a blur on every clip it loaded the T4
+but was no faster than the CPU, the encoder being the slow part. Measured on
+16 s and 64 s of 1080p30 H.264 media, from inside the Sandbox:
+
+| | `--gpu none` | `--gpu T4` |
+| --- | --- | --- |
+| `up` until Selkies listens | 4 to 6 s | 10 to 13 s |
+| A request that needs a UI frame (`ui.inspect`) | 20 ms | 28 ms |
+| Seek to the new picture in the Program monitor, median (slowest of 10) | 68 ms (259 ms) | 107 ms (233 ms) |
+| 6 s of playback at the monitor's 1/2 resolution | 181 frames, none dropped | 170 frames, none dropped |
+| Export of 64 s to H.264 MP4 | 22.9 s, FilmCraft's software encoder | 16.9 s with NVENC; 34.6 s with the software encoder |
+
+Editing is as responsive without a GPU as with one, so `--gpu none` serves
+cutting, and a T4 pays for itself on long exports.
+
+## PhotoCraft
+
+`--app photocraft` starts a session for
+[PhotoCraft](https://github.com/storytold/photocraft), the same team's photo
+editor, installed the same way from its release (`PHOTOCRAFT_VERSION`,
+`PHOTOCRAFT_SHA256`) and opened in the same project folder, so it reads and
+writes the files a FilmCraft session of that project does:
+
+```bash
+addons/modal/selkies-modal up --app photocraft --name poster --gpu none --env SELKIES_MODAL_PROJECT=projects/trailer
+```
+
+Its settings and the recovery copies of unsaved documents are in `.photocraft`
+in the project folder. A project's first PhotoCraft session settles its
+rendering on the CPU (PhotoCraft's CPU compatibility mode): the window has no
+hardware adapter in a Sandbox, and PhotoCraft otherwise says so in a notice at
+every start. Its control channel listens on the Sandbox's loopback (port 7878)
+for the session's own token, and reads and writes the project folder alone. A
+connection authenticates first, `{"method": "auth", "params": {"token": ...}}`
+from inside the Sandbox, where `PHOTOCRAFT_CONTROL_TOKEN` holds it; the
+launcher has no verb for it yet.
+
 ## The session
 
 The image is the base container by digest with three additions: Blender's
 release archive from blender.org, checked against the hash blender.org
 publishes, `xprintidle` to read the display's idle counter, and this
 directory's scripts. `BASE_IMAGE`, `BLENDER_VERSION`, and `BLENDER_SHA256` at
-the top of `sandbox.py` choose what it is built from, and a change to any of
-them builds a new image on the next `up` or `build`.
+the top of `sandbox.py` choose what it is built from, as `FILMCRAFT_VERSION`,
+`FILMCRAFT_SHA256`, `PHOTOCRAFT_VERSION`, and `PHOTOCRAFT_SHA256` do for
+FilmCraft's and PhotoCraft's images, and a change to any of them builds a new
+image on the next `up` or `build`.
 
 The Selkies window manager runs Blender as the session's application,
 maximized, and starts it again if it is quit. Every other

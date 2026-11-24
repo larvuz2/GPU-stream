@@ -5,17 +5,13 @@
  */
 
 /**
- * The landing page: its sections in the order a visitor is convinced in, and the sign-up dialog
- * they all lead to.
+ * The landing page: its sections in the order a visitor is convinced in, and the sign-in dialog.
  *
- * The page comes in two takes that differ only in those sections: the first, written out here,
- * explains how the product works, and the second (`creative/CreativeLanding.tsx`) leads with what
- * people make with it. A bar above the navigation switches between them (`CompareBar.tsx`,
- * `option.ts`), and everything around the sections is one and the same.
- *
- * The dialog is opened by the URL fragment (`lib/hash.ts`): every call to action is a link to
- * `#signup` or `#signin`, so no section needs a callback, and the dashboard sends a signed-out
- * visitor to `/#signin`. A visitor who is already signed in is taken to the dashboard instead of
+ * Every way into the product leads to the hero's prompt box (`#create`) or straight to a new
+ * project in the app (`studio.ts`, `newProjectUrl`), which has a signed-out visitor sign up there.
+ * The dialog is for those who come back: it is opened by the URL fragment (`lib/hash.ts`), so the
+ * navigation's sign-in is a link to `#signin` and the app sends a signed-out visitor to `/#signin`;
+ * `#signup` opens its other form. A visitor who is already signed in is taken to the app instead of
  * being shown a form.
  * @module
  */
@@ -24,17 +20,17 @@ import { AuthDialog, type AuthMode } from '../components/AuthDialog';
 import { replaceHash, useHash } from '../lib/hash';
 import { DASHBOARD_PATH } from '../lib/supabase';
 import { useAuth } from '../lib/useAuth';
-import { AgentSection } from './AgentSection';
-import { Apps } from './Apps';
-import { CompareBar } from './CompareBar';
-import { CreativeLanding } from './creative/CreativeLanding';
+import { Disciplines } from './Disciplines';
+import { Engines } from './Engines';
+import { Examples } from './Examples';
 import { Faq } from './Faq';
-import { Features, HowItWorks, TrustStrip } from './Features';
 import { FinalCta, Footer } from './Footer';
+import { GitHub } from './GitHub';
 import { Hero } from './Hero';
+import { HowItWorks } from './HowItWorks';
 import { Nav } from './Nav';
-import { chooseLandingOption, useLandingOption } from './option';
 import { Pricing } from './Pricing';
+import { Workspace } from './Workspace';
 
 /** The fragment that opens the dialog on each of its forms. */
 const AUTH_HASHES: Readonly<Record<AuthMode, string>> = { 'sign-up': '#signup', 'sign-in': '#signin' };
@@ -59,7 +55,6 @@ function authModeOf(hash: string): AuthMode | null {
  */
 export function Landing() {
   const requested = authModeOf(useHash());
-  const option = useLandingOption();
   const auth = useAuth();
   const signedIn = auth.status === 'signed-in';
 
@@ -78,24 +73,18 @@ export function Landing() {
       >
         Skip to content
       </a>
-      <CompareBar option={option} onChoose={chooseLandingOption} />
       <Nav signedIn={signedIn} />
       <main id="main">
-        {option === 2 ? (
-          <CreativeLanding />
-        ) : (
-          <>
-            <Hero />
-            <TrustStrip />
-            <Apps />
-            <HowItWorks />
-            <AgentSection />
-            <Features />
-            <Pricing />
-            <Faq />
-            <FinalCta />
-          </>
-        )}
+        <Hero />
+        <Disciplines />
+        <HowItWorks />
+        <Workspace />
+        <Engines />
+        <GitHub />
+        <Examples />
+        <Pricing />
+        <Faq />
+        <FinalCta />
       </main>
       <Footer />
       <AuthDialog

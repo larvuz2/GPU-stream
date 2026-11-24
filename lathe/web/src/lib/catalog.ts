@@ -24,12 +24,51 @@ export interface CatalogApp {
   name: string;
   /** The version offered, or an empty string while none is. */
   version: string;
-  /** `available` for an app that can be launched; anything else is announced but not offered. */
+  /**
+   * `available` for an app anyone can launch, `team` for one only the team's accounts can (an app whose
+   * license is the user's own, such as Nuke), `next` for the one being built now, `soon` for the rest.
+   */
   status: string;
   /** One sentence on what the app is for. */
   tagline: string;
   /** The CSS color the app's card is tinted with. */
   accent: string;
+  /** The disciplines the app serves, by {@link Discipline} identifier. */
+  disciplines: string[];
+  /** Where the app comes from: its open-source repository or its maker's page. */
+  source: string;
+}
+
+/**
+ * A top-level creative discipline: what a person makes, independent of the software that makes it.
+ *
+ * A project belongs to one, and its engines are the apps an agent reaches for there.
+ */
+export interface Discipline {
+  /** The identifier a project carries. */
+  id: string;
+  /** The display name. */
+  name: string;
+  /** The kinds of work it covers, shown small under the name and offered when a project starts. */
+  formats: string[];
+  /** One sentence on what is made there. */
+  blurb: string;
+  /** The apps it uses, by {@link CatalogApp} identifier, the first the main one. */
+  engines: string[];
+}
+
+/** One of the finer creative categories, each under a {@link Discipline}. */
+export interface Category {
+  /** The identifier. */
+  id: string;
+  /** The display name. */
+  name: string;
+  /** The discipline it belongs to. */
+  discipline: string;
+  /** What is made there, as a phrase. */
+  creations: string;
+  /** The apps it uses, by {@link CatalogApp} identifier. */
+  engines: string[];
 }
 
 /** A size of workstation. */
@@ -78,6 +117,10 @@ export interface Catalog {
   credit_usd: number;
   /** Credits a new account starts with. */
   signup_credits: number;
+  /** The twelve top-level disciplines, in the order they are shown. */
+  disciplines: Discipline[];
+  /** The finer categories, each under a discipline. */
+  categories: Category[];
   /** Every app, offered or announced. */
   apps: CatalogApp[];
   /** Every tier, cheapest first. */
@@ -169,6 +212,16 @@ export function packBonus(pack: CreditPack): number {
  */
 export function findApp(id: string): CatalogApp | undefined {
   return catalog.apps.find((app) => app.id === id);
+}
+
+/**
+ * Looks a discipline up by the identifier a project carries.
+ *
+ * @param id The discipline identifier.
+ * @returns The discipline, or `undefined` for one the catalog no longer lists.
+ */
+export function findDiscipline(id: string): Discipline | undefined {
+  return catalog.disciplines.find((discipline) => discipline.id === id);
 }
 
 /**

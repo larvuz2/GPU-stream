@@ -2,22 +2,678 @@
   "brand": "Lathe",
   "credit_usd": 0.01,
   "signup_credits": 60,
+  "disciplines": [
+    {
+      "id": "media",
+      "name": "Media",
+      "formats": [
+        "Movie",
+        "Commercial",
+        "Episode",
+        "Vertical drama"
+      ],
+      "blurb": "Films, series, ads, and social video, from script to final cut.",
+      "engines": [
+        "filmcraft",
+        "photocraft",
+        "nuke",
+        "effectcraft"
+      ]
+    },
+    {
+      "id": "music",
+      "name": "Music",
+      "formats": [
+        "Song",
+        "Album",
+        "Score",
+        "Podcast"
+      ],
+      "blurb": "Songs, soundtracks, podcasts, and soundscapes.",
+      "engines": [
+        "soundcraft"
+      ]
+    },
+    {
+      "id": "art",
+      "name": "Art",
+      "formats": [
+        "Illustration",
+        "Concept art",
+        "Painting"
+      ],
+      "blurb": "Illustration, concept art, and generative pieces.",
+      "engines": [
+        "photocraft",
+        "comfyui",
+        "blender"
+      ]
+    },
+    {
+      "id": "design",
+      "name": "Design",
+      "formats": [
+        "Poster",
+        "Logo",
+        "Packaging",
+        "Brand system"
+      ],
+      "blurb": "Posters, identities, covers, and packaging.",
+      "engines": [
+        "photocraft",
+        "vectorcraft",
+        "designcraft"
+      ]
+    },
+    {
+      "id": "photography",
+      "name": "Photography",
+      "formats": [
+        "Portrait",
+        "Editorial",
+        "Product shot"
+      ],
+      "blurb": "Portraits, editorials, and product photography.",
+      "engines": [
+        "photocraft",
+        "lightcraft"
+      ]
+    },
+    {
+      "id": "animation",
+      "name": "Animation",
+      "formats": [
+        "Short",
+        "Series",
+        "Motion graphics"
+      ],
+      "blurb": "Cartoons, animated films, and motion design.",
+      "engines": [
+        "blender",
+        "anicraft",
+        "effectcraft",
+        "filmcraft"
+      ]
+    },
+    {
+      "id": "games",
+      "name": "Games",
+      "formats": [
+        "Game",
+        "World",
+        "Game assets"
+      ],
+      "blurb": "Games, interactive worlds, and the assets they need.",
+      "engines": [
+        "blender",
+        "unreal",
+        "godot",
+        "texturecraft",
+        "materialcraft"
+      ]
+    },
+    {
+      "id": "architecture",
+      "name": "Architecture",
+      "formats": [
+        "Building",
+        "Interior",
+        "Product"
+      ],
+      "blurb": "Buildings, interiors, and industrial design.",
+      "engines": [
+        "blender",
+        "cadcraft",
+        "unreal",
+        "materialcraft"
+      ]
+    },
+    {
+      "id": "fashion",
+      "name": "Fashion",
+      "formats": [
+        "Collection",
+        "Textile",
+        "Accessory"
+      ],
+      "blurb": "Collections, textile patterns, and accessories.",
+      "engines": [
+        "vectorcraft",
+        "texturecraft"
+      ]
+    },
+    {
+      "id": "writing",
+      "name": "Writing",
+      "formats": [
+        "Screenplay",
+        "Novel",
+        "Comic",
+        "Deck"
+      ],
+      "blurb": "Screenplays, novels, comics, and pitch decks.",
+      "engines": [
+        "wordcraft",
+        "designcraft",
+        "deckcraft"
+      ]
+    },
+    {
+      "id": "technology",
+      "name": "Technology",
+      "formats": [
+        "Website",
+        "App",
+        "Dashboard"
+      ],
+      "blurb": "Websites, apps, and visual reports.",
+      "engines": [
+        "figcraft",
+        "gridcraft",
+        "craft-anything"
+      ]
+    },
+    {
+      "id": "experiences",
+      "name": "Experiences",
+      "formats": [
+        "Installation",
+        "Interactive",
+        "Immersive"
+      ],
+      "blurb": "Installations, interactive art, and immersive worlds.",
+      "engines": [
+        "unreal",
+        "craft-anything",
+        "comfyui"
+      ]
+    }
+  ],
+  "categories": [
+    {
+      "id": "film-television",
+      "name": "Film & Television",
+      "discipline": "media",
+      "creations": "Movies, series, vertical dramas, documentaries",
+      "engines": [
+        "filmcraft",
+        "effectcraft"
+      ]
+    },
+    {
+      "id": "animation",
+      "name": "Animation",
+      "discipline": "animation",
+      "creations": "Cartoons, animated films, animated series",
+      "engines": [
+        "anicraft",
+        "blender"
+      ]
+    },
+    {
+      "id": "music",
+      "name": "Music",
+      "discipline": "music",
+      "creations": "Songs, albums, compositions, soundtracks",
+      "engines": [
+        "soundcraft"
+      ]
+    },
+    {
+      "id": "audio",
+      "name": "Audio",
+      "discipline": "music",
+      "creations": "Podcasts, audiobooks, soundscapes, sound effects",
+      "engines": [
+        "soundcraft"
+      ]
+    },
+    {
+      "id": "photography",
+      "name": "Photography",
+      "discipline": "photography",
+      "creations": "Portraits, fashion editorials, photo collections",
+      "engines": [
+        "lightcraft",
+        "photocraft"
+      ]
+    },
+    {
+      "id": "digital-art",
+      "name": "Digital Art",
+      "discipline": "art",
+      "creations": "Illustrations, concept art, digital paintings",
+      "engines": [
+        "photocraft",
+        "comfyui"
+      ]
+    },
+    {
+      "id": "branding",
+      "name": "Branding",
+      "discipline": "design",
+      "creations": "Visual identities, logos, brand systems",
+      "engines": [
+        "vectorcraft"
+      ]
+    },
+    {
+      "id": "advertising",
+      "name": "Advertising",
+      "discipline": "media",
+      "creations": "Commercials, campaigns, promotional content",
+      "engines": [
+        "filmcraft",
+        "photocraft"
+      ]
+    },
+    {
+      "id": "social-media",
+      "name": "Social Media",
+      "discipline": "media",
+      "creations": "Reels, memes, carousels, creator content",
+      "engines": [
+        "filmcraft",
+        "photocraft"
+      ]
+    },
+    {
+      "id": "graphic-design",
+      "name": "Graphic Design",
+      "discipline": "design",
+      "creations": "Posters, covers, packaging, merchandise",
+      "engines": [
+        "vectorcraft",
+        "photocraft"
+      ]
+    },
+    {
+      "id": "motion-design",
+      "name": "Motion Design",
+      "discipline": "animation",
+      "creations": "Animated graphics, title sequences, visualizers",
+      "engines": [
+        "effectcraft",
+        "anicraft"
+      ]
+    },
+    {
+      "id": "visual-effects",
+      "name": "Visual Effects",
+      "discipline": "media",
+      "creations": "Cinematic effects, digital environments, compositions",
+      "engines": [
+        "nuke",
+        "effectcraft",
+        "blender"
+      ]
+    },
+    {
+      "id": "game-development",
+      "name": "Game Development",
+      "discipline": "games",
+      "creations": "Video games, interactive worlds, game assets",
+      "engines": [
+        "unreal",
+        "blender",
+        "godot",
+        "texturecraft",
+        "materialcraft"
+      ]
+    },
+    {
+      "id": "architecture",
+      "name": "Architecture",
+      "discipline": "architecture",
+      "creations": "Buildings, interiors, architectural concepts",
+      "engines": [
+        "cadcraft",
+        "blender"
+      ]
+    },
+    {
+      "id": "industrial-design",
+      "name": "Industrial Design",
+      "discipline": "architecture",
+      "creations": "Physical products, furniture, consumer electronics",
+      "engines": [
+        "cadcraft",
+        "materialcraft",
+        "blender"
+      ]
+    },
+    {
+      "id": "fashion",
+      "name": "Fashion",
+      "discipline": "fashion",
+      "creations": "Clothing collections, textile patterns, accessories",
+      "engines": [
+        "vectorcraft",
+        "texturecraft"
+      ]
+    },
+    {
+      "id": "web-apps",
+      "name": "Web & Apps",
+      "discipline": "technology",
+      "creations": "Websites, mobile apps, digital products",
+      "engines": [
+        "figcraft",
+        "craft-anything"
+      ]
+    },
+    {
+      "id": "interactive",
+      "name": "Interactive Experiences",
+      "discipline": "experiences",
+      "creations": "Digital installations, interactive art, immersive experiences",
+      "engines": [
+        "craft-anything",
+        "unreal"
+      ]
+    },
+    {
+      "id": "writing",
+      "name": "Writing & Storytelling",
+      "discipline": "writing",
+      "creations": "Novels, screenplays, poetry, short stories",
+      "engines": [
+        "wordcraft"
+      ]
+    },
+    {
+      "id": "publishing",
+      "name": "Publishing",
+      "discipline": "writing",
+      "creations": "Books, magazines, comics, editorial publications",
+      "engines": [
+        "designcraft"
+      ]
+    },
+    {
+      "id": "education",
+      "name": "Education",
+      "discipline": "technology",
+      "creations": "Courses, tutorials, educational experiences",
+      "engines": [
+        "deckcraft",
+        "filmcraft"
+      ]
+    },
+    {
+      "id": "presentations",
+      "name": "Presentations",
+      "discipline": "writing",
+      "creations": "Pitch decks, portfolios, creative proposals",
+      "engines": [
+        "deckcraft"
+      ]
+    },
+    {
+      "id": "data",
+      "name": "Data & Information",
+      "discipline": "technology",
+      "creations": "Infographics, dashboards, visual reports",
+      "engines": [
+        "gridcraft",
+        "vectorcraft"
+      ]
+    },
+    {
+      "id": "generative-art",
+      "name": "Generative & Experimental Art",
+      "discipline": "experiences",
+      "creations": "Procedural artwork, AI creations, audiovisual experiments",
+      "engines": [
+        "comfyui",
+        "craft-anything"
+      ]
+    }
+  ],
   "apps": [
+    {
+      "id": "filmcraft",
+      "name": "FilmCraft",
+      "version": "0.20",
+      "status": "available",
+      "tagline": "Cut, color, and mix films and commercials in a full non-linear editor your agent drives with you.",
+      "accent": "#8b5cf6",
+      "disciplines": [
+        "media",
+        "animation"
+      ],
+      "source": "https://github.com/storytold/filmcraft"
+    },
     {
       "id": "blender",
       "name": "Blender",
       "version": "5.2 LTS",
       "status": "available",
       "tagline": "Model, sculpt, animate, and render on a cloud GPU, with nothing to install.",
-      "accent": "#ff7a1a"
+      "accent": "#ff7a1a",
+      "disciplines": [
+        "animation",
+        "games",
+        "architecture",
+        "art"
+      ],
+      "source": "https://www.blender.org"
+    },
+    {
+      "id": "photocraft",
+      "name": "PhotoCraft",
+      "version": "",
+      "status": "next",
+      "tagline": "Layers, masks, and retouching for posters, key art, and stills.",
+      "accent": "#22c3e6",
+      "disciplines": [
+        "design",
+        "art",
+        "photography"
+      ],
+      "source": "https://github.com/storytold/photocraft"
     },
     {
       "id": "unreal",
       "name": "Unreal Engine",
       "version": "",
+      "status": "next",
+      "tagline": "Build, light, and play real-time worlds from any laptop.",
+      "accent": "#5b8cff",
+      "disciplines": [
+        "games",
+        "experiences",
+        "architecture"
+      ],
+      "source": "https://www.unrealengine.com"
+    },
+    {
+      "id": "nuke",
+      "name": "Nuke",
+      "version": "17.1",
+      "status": "team",
+      "tagline": "Node-based compositing for VFX shots, with your own Foundry license.",
+      "accent": "#f2c14e",
+      "disciplines": [
+        "media"
+      ],
+      "source": "https://www.foundry.com/products/nuke-family/nuke"
+    },
+    {
+      "id": "effectcraft",
+      "name": "EffectCraft",
+      "version": "",
       "status": "soon",
-      "tagline": "Build and light real-time worlds from any laptop.",
-      "accent": "#5b8cff"
+      "tagline": "Motion graphics, compositing, and title sequences.",
+      "accent": "#ff5fa2",
+      "disciplines": [
+        "media",
+        "animation",
+        "design"
+      ],
+      "source": "https://github.com/storytold/effectcraft"
+    },
+    {
+      "id": "soundcraft",
+      "name": "SoundCraft",
+      "version": "",
+      "status": "soon",
+      "tagline": "A digital audio workstation for songs, scores, and podcasts.",
+      "accent": "#2fd08a",
+      "disciplines": [
+        "music"
+      ],
+      "source": "https://github.com/storytold/soundcraft"
+    },
+    {
+      "id": "anicraft",
+      "name": "AniCraft",
+      "version": "",
+      "status": "soon",
+      "tagline": "Frame-by-frame and rigged 2D animation.",
+      "accent": "#ffb547",
+      "disciplines": [
+        "animation"
+      ],
+      "source": "https://github.com/storytold/anicraft"
+    },
+    {
+      "id": "lightcraft",
+      "name": "LightCraft",
+      "version": "",
+      "status": "soon",
+      "tagline": "Non-destructive photo development and grading.",
+      "accent": "#ffd166",
+      "disciplines": [
+        "photography"
+      ],
+      "source": "https://github.com/storytold/lightcraft"
+    },
+    {
+      "id": "vectorcraft",
+      "name": "VectorCraft",
+      "version": "",
+      "status": "soon",
+      "tagline": "Vector art for logos, identities, and patterns.",
+      "accent": "#ff7aa8",
+      "disciplines": [
+        "design",
+        "fashion"
+      ],
+      "source": "https://github.com/storytold/vectorcraft"
+    },
+    {
+      "id": "texturecraft",
+      "name": "TextureCraft",
+      "version": "",
+      "status": "soon",
+      "tagline": "Paint textures straight onto 3D models.",
+      "accent": "#c084fc",
+      "disciplines": [
+        "games",
+        "fashion"
+      ],
+      "source": "https://github.com/storytold/texturecraft"
+    },
+    {
+      "id": "materialcraft",
+      "name": "MaterialCraft",
+      "version": "",
+      "status": "soon",
+      "tagline": "Node-based materials for games and products.",
+      "accent": "#a3e635",
+      "disciplines": [
+        "games",
+        "architecture"
+      ],
+      "source": "https://github.com/storytold/materialcraft"
+    },
+    {
+      "id": "cadcraft",
+      "name": "CADCraft",
+      "version": "",
+      "status": "soon",
+      "tagline": "Drafting and CAD for buildings and products.",
+      "accent": "#ff6b4a",
+      "disciplines": [
+        "architecture"
+      ],
+      "source": "https://github.com/storytold/cadcraft"
+    },
+    {
+      "id": "figcraft",
+      "name": "FigCraft",
+      "version": "",
+      "status": "soon",
+      "tagline": "Interface design and prototyping for websites and apps.",
+      "accent": "#7c9cff",
+      "disciplines": [
+        "technology"
+      ],
+      "source": "https://github.com/storytold/figcraft"
+    },
+    {
+      "id": "wordcraft",
+      "name": "WordCraft",
+      "version": "",
+      "status": "soon",
+      "tagline": "A writing room for scripts, novels, and stories.",
+      "accent": "#e2e8f0",
+      "disciplines": [
+        "writing"
+      ],
+      "source": "https://github.com/storytold/wordcraft"
+    },
+    {
+      "id": "designcraft",
+      "name": "DesignCraft",
+      "version": "",
+      "status": "soon",
+      "tagline": "Page layout for books, magazines, and comics.",
+      "accent": "#f472b6",
+      "disciplines": [
+        "writing",
+        "design"
+      ],
+      "source": "https://github.com/storytold/designcraft"
+    },
+    {
+      "id": "deckcraft",
+      "name": "DeckCraft",
+      "version": "",
+      "status": "soon",
+      "tagline": "Pitch decks, portfolios, and presentations.",
+      "accent": "#60a5fa",
+      "disciplines": [
+        "writing",
+        "technology"
+      ],
+      "source": "https://github.com/storytold/deckcraft"
+    },
+    {
+      "id": "gridcraft",
+      "name": "GridCraft",
+      "version": "",
+      "status": "soon",
+      "tagline": "Spreadsheets for infographics and visual reports.",
+      "accent": "#34d399",
+      "disciplines": [
+        "technology"
+      ],
+      "source": "https://github.com/storytold/gridcraft"
+    },
+    {
+      "id": "craft-anything",
+      "name": "Craft Anything",
+      "version": "",
+      "status": "soon",
+      "tagline": "Websites, installations, and experiments built from any software.",
+      "accent": "#fbbf24",
+      "disciplines": [
+        "technology",
+        "experiences"
+      ],
+      "source": "https://github.com/storytold/craft-anything"
     },
     {
       "id": "comfyui",
@@ -25,7 +681,12 @@
       "version": "",
       "status": "soon",
       "tagline": "Node-based image and video generation with the VRAM it wants.",
-      "accent": "#b06bff"
+      "accent": "#b06bff",
+      "disciplines": [
+        "art",
+        "experiences"
+      ],
+      "source": "https://github.com/comfyanonymous/ComfyUI"
     },
     {
       "id": "godot",
@@ -33,23 +694,11 @@
       "version": "",
       "status": "soon",
       "tagline": "Ship 2D and 3D games from an editor that opens in a tab.",
-      "accent": "#3fc1ff"
-    },
-    {
-      "id": "krita",
-      "name": "Krita",
-      "version": "",
-      "status": "soon",
-      "tagline": "Paint at full resolution with pressure-sensitive input.",
-      "accent": "#ff5fa2"
-    },
-    {
-      "id": "freecad",
-      "name": "FreeCAD",
-      "version": "",
-      "status": "soon",
-      "tagline": "Parametric CAD for parts and assemblies, streamed.",
-      "accent": "#ff4d4d"
+      "accent": "#3fc1ff",
+      "disciplines": [
+        "games"
+      ],
+      "source": "https://godotengine.org"
     }
   ],
   "tiers": [
@@ -95,14 +744,38 @@
     }
   ],
   "regions": [
-    { "id": "auto", "name": "Automatic" },
-    { "id": "us", "name": "North America" },
-    { "id": "eu", "name": "Europe" },
-    { "id": "ap", "name": "Asia Pacific" }
+    {
+      "id": "auto",
+      "name": "Automatic"
+    },
+    {
+      "id": "us",
+      "name": "North America"
+    },
+    {
+      "id": "eu",
+      "name": "Europe"
+    },
+    {
+      "id": "ap",
+      "name": "Asia Pacific"
+    }
   ],
   "credit_packs": [
-    { "id": "pack-10", "credits": 1000, "usd": 10 },
-    { "id": "pack-25", "credits": 2750, "usd": 25 },
-    { "id": "pack-60", "credits": 7200, "usd": 60 }
+    {
+      "id": "pack-10",
+      "credits": 1000,
+      "usd": 10
+    },
+    {
+      "id": "pack-25",
+      "credits": 2750,
+      "usd": 25
+    },
+    {
+      "id": "pack-60",
+      "credits": 7200,
+      "usd": 60
+    }
   ]
 }

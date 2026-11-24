@@ -5,9 +5,9 @@
  */
 
 /**
- * Vite configuration of the site: a two-page app whose landing page (`index.html`) and dashboard
+ * Vite configuration of the site: a two-page app whose landing page (`index.html`) and studio
  * (`app/index.html`) are separate entries, so a visitor to the landing page downloads none of the
- * dashboard.
+ * studio.
  *
  * The catalog beside this package (`../catalog.json`) names the product, so the static HTML of both
  * pages carries `%BRAND%` and `%LIVE_APPS%` tokens that {@link catalogHtml} fills from it at build
@@ -90,7 +90,7 @@ export default defineConfig({
     rolldownOptions: {
       input: {
         landing: path.resolve(root, 'index.html'),
-        dashboard: path.resolve(root, 'app/index.html'),
+        studio: path.resolve(root, 'app/index.html'),
       },
       output: {
         // The libraries change far less often than the pages, so each gets a chunk whose hashed

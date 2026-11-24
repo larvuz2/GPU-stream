@@ -24,6 +24,13 @@ unused (`session.sh`), the Sandbox's lifetime ends it regardless, and `up` for
 a session that is running returns that one rather than starting a second. Work
 saved under `WORKSPACE` is on a Modal Volume and outlives every Sandbox.
 
+An application's own interface is reached from inside the Sandbox, the one
+place it listens: Blender runs the Python it finds in a spool directory
+(`blender_python`), and FilmCraft answers JSON requests on a control channel
+bound to the Sandbox's loopback, for the session's own token only
+(`filmcraft_call`). Neither is exposed beyond the Sandbox, so driving one takes
+the Modal credentials that started it, as a link does.
+
 This is Python because Modal's Python SDK is the interface the image
 definition, the Sandbox, and the connect token are reached through.
 """
@@ -38,6 +45,7 @@ import secrets
 import sys
 import time
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 import modal
 from modal.stream_type import StreamType
@@ -55,6 +63,16 @@ BASE_IMAGE = (
 )
 BLENDER_VERSION = "5.2.4"
 BLENDER_SHA256 = "2fd14c50987426897ba60237ee996edf2b4151f4b1a72a460ca20be58c1d2d86"
+# FilmCraft's and PhotoCraft's Debian packages from their GitHub releases, and the hash each
+# release's SHA256SUMS.txt lists for it
+FILMCRAFT_VERSION = "0.20.1"
+FILMCRAFT_SHA256 = "5667c7505c91d2ad9de3c4acb15cb02fc9f138fae74dce9c7c5f08bc29edb3a8"
+PHOTOCRAFT_VERSION = "0.23.1"
+PHOTOCRAFT_SHA256 = "baabdcdbe46df2f72ccf6ecc2e98be00fbc33dbd4c1cd9426362a89a4b95f673"
+CRAFT_RELEASES = {
+    "filmcraft": (FILMCRAFT_VERSION, FILMCRAFT_SHA256),
+    "photocraft": (PHOTOCRAFT_VERSION, PHOTOCRAFT_SHA256),
+}
 
 PORT = 8080
 WORKSPACE = "/home/ubuntu/workspace"
@@ -63,6 +81,9 @@ ACTIVITY_FILE = "/tmp/selkies-modal/activity"
 PID_FILE = "/tmp/selkies-modal/pid"
 BLENDER_SPOOL = "/tmp/selkies-modal/blender"
 SHARE = "/usr/local/share/selkies-modal"
+# FilmCraft's and PhotoCraft's control channels, which each binds on the Sandbox's loopback only
+FILMCRAFT_CONTROL_PORT = 9876
+PHOTOCRAFT_CONTROL_PORT = 7878
 
 # What the session is, whoever starts it. Modal terminates TLS and its connect
 # token guards the address, so Selkies serves plain HTTP with no login of its
@@ -103,6 +124,21 @@ APP_ENV = {
         # The desktop, whose taskbar keeps Nuke, Firefox, and the setup's windows in reach
         "SELKIES_DESKTOP": "true",
     },
+    "filmcraft": {
+        "SELKIES_MODAL_APP": "filmcraft",
+        # The control channel; its token is the session's own (start_session)
+        "FILMCRAFT_CONTROL_PORT": str(FILMCRAFT_CONTROL_PORT),
+        # The window draws through Mesa's Vulkan in software (lavapipe) on every machine: a
+        # Sandbox has no render node, so NVIDIA's Vulkan cannot present into the display and
+        # OpenGL is Mesa's software rasterizer too. Vulkan is still what reaches the GPU where
+        # there is one, for the export renderer, beside NVDEC and NVENC; OpenGL is left out.
+        "WGPU_BACKEND": "vulkan",
+    },
+    "photocraft": {
+        "SELKIES_MODAL_APP": "photocraft",
+        # The control channel; its token is the session's own (start_session)
+        "PHOTOCRAFT_CONTROL_PORT": str(PHOTOCRAFT_CONTROL_PORT),
+    },
 }
 APPS = tuple(APP_ENV)
 
@@ -126,8 +162,23 @@ def session_image(app: str = "blender") -> modal.Image:
     it out behind a login and a license its user accepts, so the session
     installs it into the workspace once that user has (`nuke/setup.sh`); the
     image carries what that takes, Firefox among it (`nuke/install-deps.sh`).
+    FilmCraft and PhotoCraft are the Debian packages of their GitHub releases,
+    each checked against the hash its release publishes (`craft/install.sh`),
+    with what finds the session's project folder (`craft/project.sh`); FilmCraft
+    adds the client of its control channel (`filmcraft/control.sh`).
     """
-    if app == "nuke":
+    if app in CRAFT_RELEASES:
+        version, sha256 = CRAFT_RELEASES[app]
+        image = (
+            modal.Image.from_registry(BASE_IMAGE)
+            .add_local_file(HERE / "craft" / "install.sh", f"{SHARE}/craft/install.sh", copy=True)
+            .dockerfile_commands(f"RUN selkies-privileged-files run sh {SHARE}/craft/install.sh {app} {version} {sha256}")
+            .add_local_file(HERE / "craft" / "project.sh", "/usr/local/bin/selkies-modal-project", copy=True)
+            .add_local_file(HERE / app / "autostart", "/etc/xdg/openbox/autostart", copy=True)
+        )
+        if app == "filmcraft":
+            image = image.add_local_file(HERE / "filmcraft" / "control.sh", "/usr/local/bin/selkies-modal-filmcraft", copy=True)
+    elif app == "nuke":
         image = (
             modal.Image.from_registry(BASE_IMAGE)
             # Not under /tmp: a file copied there leaves the directory root's alone
@@ -242,10 +293,16 @@ def start_session(
 ) -> modal.Sandbox:
     """Start a session's Sandbox and return it at once, before Selkies listens.
 
-    The session's two tokens are made here and reach the Sandbox as a Modal
-    Secret; nothing else holds them. `workspace` mounts one directory of the
-    Volume in place of all of it, which is what keeps one user's files out of
-    another's session where a service starts sessions for many. `cpu` takes a
+    The session's tokens are made here and reach the Sandbox as a Modal Secret;
+    nothing else holds them. Beside Selkies' two are the tokens of FilmCraft's
+    and PhotoCraft's control channels, which each takes as 64 hex characters
+    and every request on FilmCraft's carries (`filmcraft_call`). They are made
+    for every session, since a caller holding a built image does not say which
+    application it is, and a session of another application leaves them unread.
+
+    `workspace` mounts one directory of the Volume in place of all of it, which
+    is what keeps one user's files out of another's session where a service
+    starts sessions for many. `cpu` takes a
     request, or a request and a limit, as Modal bills whichever of the request
     and the use is higher. `image` is the session image where the caller holds
     one already built, which a service does so that no request waits on a build;
@@ -263,6 +320,8 @@ def start_session(
         {
             "SELKIES_MASTER_TOKEN": secrets.token_urlsafe(32),
             "SELKIES_MODAL_SESSION_TOKEN": secrets.token_urlsafe(32),
+            "FILMCRAFT_CONTROL_TOKEN": secrets.token_hex(32),
+            "PHOTOCRAFT_CONTROL_TOKEN": secrets.token_hex(32),
         }
     )
     return modal.Sandbox.create(
@@ -315,6 +374,56 @@ def blender_python(sandbox: modal.Sandbox, code: str, wait_seconds: int = 120) -
     output = process.stdout.read()
     status = process.wait()
     return status, output + process.stderr.read()
+
+
+def filmcraft_requests(sandbox: modal.Sandbox, requests: str, wait_seconds: int) -> modal.container_process.ContainerProcess:
+    """Hand JSON requests, one per line, to the session's FilmCraft and return the process printing its replies.
+
+    The requests go from inside the Sandbox, the only place the control
+    channel listens and its token is: `filmcraft/control.sh` adds the token to
+    each and prints each reply on a line of its own, and runs as a command of
+    the session, so it counts as use while it waits.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-filmcraft", str(wait_seconds), bufsize=1)
+    try:
+        process.stdin.write(requests)
+        process.stdin.write_eof()
+        process.stdin.drain()
+    except modal.exception.Error:
+        # The command ended before it read anything; its status and output say why
+        pass
+    return process
+
+
+def filmcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
+    """Send one request on the session's FilmCraft control channel and return its result.
+
+    `method` and `params` are those of FilmCraft's control protocol:
+    `engine.execute` with `{"command", "params"}` runs any of its commands, and
+    the `ui.*` methods read and drive its window. `timeout` is how many seconds
+    to wait for FilmCraft to be ready, which it is a few seconds after its
+    window opens, and then for the reply. FilmCraft gives up on a reply itself
+    after 60 s, so a long export is started without `wait` and followed with
+    the `jobs.list` command.
+
+    The result is the reply's `result`, an object for most methods; a result
+    that is not one, such as the list `jobs.list` returns, comes back as
+    `{"result": ...}`.
+
+    Raises:
+        RuntimeError: FilmCraft refused the request, with its message, or did not answer within `timeout`.
+    """
+    request = json.dumps({"id": 1, "method": method, "params": params or {}})
+    process = filmcraft_requests(sandbox, request + "\n", timeout)
+    output = process.stdout.read()
+    status = process.wait()
+    if not output.strip():
+        raise RuntimeError(f"FilmCraft did not answer: {process.stderr.read().strip() or f'status {status}'}")
+    reply = json.loads(output.splitlines()[-1])
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("error") or output.strip())
+    result = reply.get("result")
+    return result if isinstance(result, dict) else {"result": result}
 
 
 def screenshot(sandbox: modal.Sandbox) -> bytes:
@@ -485,6 +594,20 @@ def blender(args: argparse.Namespace) -> int:
     return status
 
 
+def filmcraft(args: argparse.Namespace) -> int:
+    """Send the JSON requests on standard input, one per line, to the session's FilmCraft and print each reply."""
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    process = filmcraft_requests(sandbox, sys.stdin.read(), args.wait)
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    status = process.wait()
+    sys.stderr.write(process.stderr.read())
+    return status
+
+
 def down(args: argparse.Namespace) -> int:
     """Stop a session, which ends its billing; its workspace stays."""
     sandbox = find_session(args.name)
@@ -580,7 +703,8 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument(
         "--workspace",
         type=workspace_directory,
-        default="",
+        # Not "": argparse runs a string default through `type`, which refuses it
+        default=None,
         help="the directory of the workspace Volume the session keeps its files in (default: all of it)",
     )
     start.add_argument(
@@ -618,6 +742,12 @@ def parser() -> argparse.ArgumentParser:
     execute.add_argument("arguments", nargs=argparse.REMAINDER, metavar="-- command", help="the command and its arguments")
     script = named(command("blender", blender, "Run the Python on standard input inside a session's Blender."))
     script.add_argument("--wait", type=int, default=120, help="seconds to wait for Blender to answer (default: %(default)s)")
+    control = named(
+        command("filmcraft", filmcraft, "Send the JSON requests on standard input, one per line, to a session's FilmCraft.")
+    )
+    control.add_argument(
+        "--wait", type=int, default=60, help="seconds to wait for FilmCraft to be ready and for each reply (default: %(default)s)"
+    )
     named(command("down", down, "Stop a session."))
     drive = named(
         command("drive-login", drive_login, "Connect Google Drive by a sign-in in a session's Firefox, kept as a Modal Secret.")

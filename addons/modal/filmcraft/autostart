@@ -1,0 +1,39 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Run by the Selkies window manager once it is up, as the session's
+# application, installed as /etc/xdg/openbox/autostart, which both backends
+# read: FilmCraft, on the project of the session's project folder
+# (`craft/project.sh`).
+#
+# FilmCraft starts in that folder, so its dialogs and relative paths land
+# beside the project, and opens the newest project file there; a folder with
+# none gets a new `project.fcproj`, written by FilmCraft's own command-line tool
+# before the window opens, so the project has a path from the start and Save,
+# auto-save, and the control channel's `file.save` write where the next session
+# looks.
+#
+# FilmCraft's data folder, which holds its preferences, logs, and the recovery
+# journal of unsaved changes, is `.filmcraft` in the project folder rather than
+# one for the whole workspace: `--recover` restores the newest unsaved changes
+# the folder holds without asking, and a folder shared by every project would
+# hand one project's changes to another. A session that ended with changes
+# unsaved, by the idle timeout or `down`, so reopens with them, unsaved, as
+# FilmCraft's own crash recovery does.
+#
+# The control channel listens on the Sandbox's loopback only, on
+# FILMCRAFT_CONTROL_PORT, for requests carrying FILMCRAFT_CONTROL_TOKEN, which
+# the launcher makes for each session (sandbox.py).
+folder="$(selkies-modal-project)" || exit 1
+mkdir -p "${folder}/.filmcraft"
+cd "${folder}" || exit 1
+
+file="$(find . -maxdepth 1 -name '*.fcproj' -type f -printf '%T@ %p\n' 2> /dev/null | sort -rn | head -n 1 | cut -d ' ' -f 2-)"
+if [ -z "${file}" ]; then
+  file="./project.fcproj"
+  # A command that changes the project: the tool saves only a project that changed
+  filmcraft-cli --data-dir "${folder}/.filmcraft" --save-as "${file}" exec file.newProject name=project > /dev/null
+fi
+exec filmcraft --data-dir "${folder}/.filmcraft" --recover "${folder}/${file#./}"
