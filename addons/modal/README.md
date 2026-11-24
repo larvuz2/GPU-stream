@@ -278,4 +278,79 @@ addons/modal/selkies-modal up --gpu L4 --env SELKIES_DESKTOP=true --env SELKIES_
 
 `SELKIES_DESKTOP=true` starts the session on the desktop shell, with Blender in
 a window of it. The transport is WebSockets, the one Modal's proxy carries;
-WebRTC needs a UDP path that proxy does not offer, so it is not offered here.
+WebRTC needs a UDP path that proxy does not offer, so Selkies' own WebRTC is
+not offered here. A WebRTC stream an application sends, such as the Unreal
+Editor's ([`lathe/UNREAL.md`](../../lathe/UNREAL.md)), leaves through a TURN
+relay instead.
+
+## A WebRTC stream
+
+Modal's HTTPS proxy carries HTTP and WebSockets, not the UDP that WebRTC media
+travels on, but a Sandbox can also expose raw TCP ports to the internet. A
+session's WebRTC stream takes one of them to a TURN relay inside the Sandbox:
+the browser is told to use that relay alone, over TCP, and the relay hands the
+media on over UDP to the sender's host candidates, which are the Sandbox's own
+addresses.
+
+```text
+browser --TCP--> r123.modal.host:41234 --(Modal)--> coturn, TCP 3478 --UDP--> the sender, in the same Sandbox
+```
+
+From Python, the launcher's interface for a service:
+
+```python
+image = with_turn(session_image("blender")).build(app)
+sandbox = start_session(app, "unreal", ..., image=image, tcp_ports=(TURN_PORT,))
+host, port = tcp_address(sandbox, TURN_PORT)
+```
+
+- `start_session(tcp_ports=...)` has Modal expose those ports as raw TCP
+  (`unencrypted_ports`), and `tcp_address` returns the public host and port
+  Modal gave one of them, which exist only once the Sandbox has started. From
+  the command line, `up --tcp-port 3478` does the same and prints the address.
+  Such a port takes connections from any address, with no connect token and no
+  TLS, so what listens on it authenticates by itself.
+- `with_turn(image)` adds the relay's configuration and two commands to a
+  session image; coturn itself is the base image's. Nothing starts the relay on
+  its own: the application whose stream needs it runs
+  `selkies-modal-turnserver`, which listens on TCP port 3478
+  (`SELKIES_MODAL_TURN_PORT`) and relays on UDP ports 49152 to 49183.
+- `selkies-modal-turn-credentials HOST:PORT [--ttl SECONDS]`, run in the
+  Sandbox, prints the entry of `RTCConfiguration.iceServers` a page uses:
+  `turn:HOST:PORT?transport=tcp`, with a user name and password of the TURN
+  REST scheme, minted from the session's secret (`SELKIES_MODAL_TURN_SECRET`,
+  which `start_session` makes for every session and nothing outside the
+  Sandbox keeps). The credential is valid for a day unless `--ttl` says
+  otherwise, and has to outlast the page's connection, since the relay checks
+  it again on every refresh.
+
+The page sets `iceTransportPolicy: "relay"`; the sender needs no ICE server at
+all. The relay is not open to other hosts: it takes no UDP and no TLS, relays
+to the Sandbox's own IPv4 addresses and to nothing else (a peer outside is
+refused with 403), and allows 8 allocations to a user name and 32 in all
+(`webrtc/turnserver.conf`, `webrtc/turnserver.sh`).
+
+Measured on 2026-11-24: a WebRTC sender in a CPU Sandbox (aiortc, a moving
+1280x720 test pattern in VP8 at 30 fps, signalled over a connect token) beside
+the relay, and headless Chromium 136 and Firefox 137 in a second Sandbox,
+relay-only over the relay's TCP port. Every run connected on a relay candidate
+over TCP paired with the sender's host candidate.
+
+| | Browser in the Sandbox's region (us-east) | Browser across the continent (us-west) |
+| --- | --- | --- |
+| ICE connected, from the offer | 0.18 to 0.24 s | 0.49 to 0.54 s |
+| First frame shown, from the offer | 0.33 to 0.39 s (Firefox 0.73 s) | 1.2 to 1.4 s |
+| Frames received and decoded | 30.0 of 30 a second, none dropped | 30.0 of 30 a second, none dropped |
+| Round trip of the candidate pair (Chromium), median | 15 to 17 ms | 66 to 97 ms |
+| A frame's creation to the browser's frame callback, median | 61 to 72 ms (Firefox 44 ms) | 87 to 122 ms, ±38 ms of clock offset |
+| Rates carried | 2.9, 6.0, and 12.0 Mbps | the same |
+
+Nothing was lost up to 6 Mbps; at 12 Mbps 0.3 to 0.5% of packets were lost,
+recovered by retransmission and in one run by a single key frame, with no frame
+dropped. The loss is not at the
+sender's sockets, whose UDP counters show no drop; where it happens between the
+relay and the browser is not yet known. A browser that itself runs in a Sandbox,
+as a test's does, needs Modal's VM runtime (`runtime="vm"`) for Chromium:
+under gVisor, Chromium's list of network interfaces comes out empty (a netlink
+socket bound to address-change groups fails with `EOPNOTSUPP`), so it gathers
+no candidate at all, while Firefox works there.
