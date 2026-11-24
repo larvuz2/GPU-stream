@@ -6,7 +6,7 @@
 
 /**
  * The studio's account-wide data: the account and its balance, what the control plane can do, the
- * projects, and the GitHub connection.
+ * projects, the GitHub connection, and the Epic connection.
  *
  * Each is read once when the studio opens. The balance is re-read when something spends it (an
  * engine changes state, a turn ends), so the sidebar follows the meter without a poll of its own.
@@ -20,6 +20,7 @@ import {
   ApiError,
   isMissing,
   type ControlPlane,
+  type EpicStatus,
   type GitHubRepo,
   type GitHubStatus,
   type Health,
@@ -229,22 +230,48 @@ export interface GitHub {
   status: GitHubStatus | null;
   /** How far it has come. */
   availability: Availability;
-  /** Sends the browser to GitHub to connect, returning here. Rejects with an `ApiError`. */
-  connect: () => Promise<void>;
+  /**
+   * Sends the browser to GitHub to connect, returning to `back` or to the address it left from.
+   * Rejects with an `ApiError`.
+   */
+  connect: (back?: URL) => Promise<void>;
+  /**
+   * Sends the browser to the GitHub App's installation page, for a repository it is not on yet,
+   * returning to `back` or to the address it left from. Rejects with an `ApiError`.
+   */
+  install: (back?: URL) => Promise<void>;
   /** Disconnects. Rejects with an `ApiError`. */
   disconnect: () => Promise<void>;
-  /** Lists the person's repositories. Rejects with an `ApiError`. */
+  /** Lists the repositories of the GitHub App's installations the person reaches. Rejects with an `ApiError`. */
   repos: () => Promise<GitHubRepo[]>;
 }
 
 /** The query parameter GitHub's callback reports the outcome in, which the studio reads once. */
 export const GITHUB_RESULT_PARAMETER = 'github';
 
+/** The query parameter the Epic connection's callback reports its outcome in, read once the same way. */
+export const EPIC_RESULT_PARAMETER = 'epic';
+
+/**
+ * The address to come back to from GitHub: the one given, or this page's, without the outcome
+ * parameters of an earlier attempt.
+ *
+ * @param back The address to come back to, where not this page's.
+ * @returns The address.
+ */
+function returnAddress(back?: URL): string {
+  const address = new URL(back ?? window.location.href);
+  address.searchParams.delete(GITHUB_RESULT_PARAMETER);
+  address.searchParams.delete(EPIC_RESULT_PARAMETER);
+  return address.href;
+}
+
 /**
  * Loads the GitHub connection.
  *
  * Connecting leaves the page for GitHub and comes back to the address it left from, without the
- * outcome parameter of an earlier attempt, so the same project is open on return.
+ * outcome parameter of an earlier attempt, so the same project is open on return. Installing the
+ * GitHub App goes the same way, through its installation page.
  *
  * @param client The control plane, or `null` when none is connected.
  * @returns The connection.
@@ -276,20 +303,96 @@ export function useGitHub(client: ControlPlane | null): GitHub {
     };
   }, [client]);
 
-  const connect = useCallback(async (): Promise<void> => {
-    const back = new URL(window.location.href);
-    back.searchParams.delete(GITHUB_RESULT_PARAMETER);
-    window.location.assign(await connected(client).connectGitHub(back.href));
-  }, [client]);
+  const connect = useCallback(
+    async (back?: URL): Promise<void> => {
+      window.location.assign(await connected(client).connectGitHub(returnAddress(back)));
+    },
+    [client],
+  );
+
+  const install = useCallback(
+    async (back?: URL): Promise<void> => {
+      window.location.assign(await connected(client).installGitHub(returnAddress(back)));
+    },
+    [client],
+  );
 
   const disconnect = useCallback(async (): Promise<void> => {
     await connected(client).disconnectGitHub();
-    setStatus((previous) =>
-      previous === null ? null : { ...previous, connected: false, login: null, avatar_url: null, epic_linked: null },
-    );
+    setStatus((previous) => (previous === null ? null : { ...previous, connected: false, login: null, avatar_url: null }));
   }, [client]);
 
   const repos = useCallback(async (): Promise<GitHubRepo[]> => connected(client).githubRepos(), [client]);
 
-  return { status, availability, connect, disconnect, repos };
+  return { status, availability, connect, install, disconnect, repos };
+}
+
+/** The person's Epic connection and the actions over it. */
+export interface Epic {
+  /** The connection, or `null` until it has loaded. */
+  status: EpicStatus | null;
+  /** How far it has come. */
+  availability: Availability;
+  /** Sends the browser to GitHub to connect the account linked to Epic, returning here. Rejects with an `ApiError`. */
+  connect: () => Promise<void>;
+  /** Asks again whether Epic's registry lets the account pull the editor, as after linking it on Epic's site. */
+  refresh: () => void;
+  /** Disconnects. Rejects with an `ApiError`. */
+  disconnect: () => Promise<void>;
+}
+
+/**
+ * Loads the Epic connection.
+ *
+ * It is read once when the studio opens and again when the person asks, never on a timer: each
+ * read asks Epic's registry, and the link it reports changes only when the person links their
+ * accounts on Epic's site.
+ *
+ * @param client The control plane, or `null` when none is connected.
+ * @returns The connection.
+ */
+export function useEpic(client: ControlPlane | null): Epic {
+  const [status, setStatus] = useState<EpicStatus | null>(null);
+  const [availability, setAvailability] = useState<Availability>(client === null ? 'offline' : 'loading');
+  const [reading, setReading] = useState(0);
+
+  useEffect(() => {
+    if (client === null) {
+      return;
+    }
+    let current = true;
+    client
+      .epic()
+      .then((next) => {
+        if (current) {
+          setStatus(next);
+          setAvailability('ready');
+        }
+      })
+      .catch((failure: unknown) => {
+        if (current) {
+          setAvailability(isMissing(failure) ? 'missing' : 'failed');
+        }
+      });
+    return () => {
+      current = false;
+    };
+  }, [client, reading]);
+
+  const connect = useCallback(async (): Promise<void> => {
+    window.location.assign(await connected(client).connectEpic(returnAddress()));
+  }, [client]);
+
+  const refresh = useCallback((): void => {
+    setReading((previous) => previous + 1);
+  }, []);
+
+  const disconnect = useCallback(async (): Promise<void> => {
+    await connected(client).disconnectEpic();
+    setStatus((previous) =>
+      previous === null ? null : { ...previous, connected: false, login: null, linked: null, detail: null },
+    );
+  }, [client]);
+
+  return { status, availability, connect, refresh, disconnect };
 }

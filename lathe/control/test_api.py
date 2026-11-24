@@ -6,20 +6,22 @@
 `FakeStore` answers the calls the service makes to Supabase, its Data API and
 its Storage, with the least that keeps them true to the database's functions,
 whose own behavior is what the migrations' checks hold; `FakeLauncher` records
-what would have reached Modal, `FakeGitHub` what would have reached GitHub,
+what would have reached Modal, `FakeGitHub` what would have reached GitHub and its registry,
 `FakeFal` what would have reached fal, and `ScriptedModel` answers the agent
 the way a scripted conversation says, recording every request it was sent.
 What is tested here is this side: who a credential names, what each route and
 tool returns and refuses, that one user's sessions, projects, libraries, and
 engines are invisible to another, that the agent's conversation only ever
-grows, that GitHub's callback takes nothing it did not sign, that the agent
-writes to no branch of a repository but its own, that it reads an Unreal
-project's assets from the repository alone, that Unreal Engine starts for
-anyone and brings the editor only to an account linked to Epic, pulled with
-that user's own token, that its two pictures are linked for the listing page
-alone, and that the agent brings up a project cloned into the engine, opens it
-(an older one on its own branch), and switches the person's screen to it. Run
-with `pytest lathe/control`.
+grows, that GitHub's callbacks take nothing they did not sign, that the GitHub
+App's token is refreshed before it expires and its repositories are its
+installations', that the agent writes to no branch of a repository but its
+own, that it reads an Unreal project's assets from the repository alone, that
+Unreal Engine starts for anyone and brings the editor only to an Epic
+connection the registry lets pull it, with that user's own token, that an
+engine of a linked project clones it with a token no row keeps, that its two
+pictures are linked for the listing page alone, and that the agent brings up a
+project cloned into the engine, opens it (an older one on its own branch), and
+switches the person's screen to it. Run with `pytest lathe/control`.
 """
 
 from __future__ import annotations
@@ -59,9 +61,9 @@ from agent import (
 )
 from api import create_app
 from generation import IMAGE_MODELS, VIDEO_MODELS, Fal, GenerationStopped, video_kilotokens
-from github_client import GitHub, GitHubError, Grant, read_state, reads_packages, seal, sign_state, unseal
+from github_client import EPIC_FLOW, GitHub, GitHubError, Grant, read_state, seal, sign_state, unseal
 from launcher import ModalLauncher, origin
-from service import OPEN, Catalog, Config, OwnCopy, Refused, Sessions, Store, User, hash_key
+from service import OPEN, Catalog, Clone, Config, OwnCopy, Refused, Sessions, Store, User, hash_key
 import unreal
 
 CATALOG = Catalog(Path(__file__).resolve().parent.parent / "catalog.json")
@@ -70,16 +72,26 @@ BOB = User(id="00000000-0000-0000-0000-00000000000b", email="bob@example.test")
 TOKENS = {"alice-token": ALICE, "bob-token": BOB}
 SECRET = "test-secret-key"
 SITE = "https://site.example.test"
+# The GitHub App's client and the Epic OAuth App's, with their secrets, and the GitHub App's name in its pages' address
+APP_CLIENT, EPIC_CLIENT = "gh-app-client", "epic-client"
+SECRETS = {APP_CLIENT: "gh-app-secret", EPIC_CLIENT: "epic-secret", "": ""}
+SLUG = "lathe-studio"
 SERIAL_TABLES = ("project_events", "agent_messages")
+# The tables keyed by their user, one row each
+CONNECTIONS = ("github_connections", "epic_connections")
 DEFAULTS: dict[str, dict[str, Any]] = {
     "projects": {
-        "format": "", "pinned": False, "library_sections": [], "plan": [], "github_repo": None,
+        "format": "", "pinned": False, "library_sections": [], "plan": [], "github_repo": None, "github_branch": None,
         "turn_id": None, "turn_seen_at": None, "stop_requested": False,
     },
     "assets": {"tag": None, "description": "", "metadata": {}, "media": []},
     "project_events": {"data": {}, "turn_id": None},
     "agent_messages": {"turn_id": None},
-    "github_connections": {"avatar_url": "", "scope": ""},
+    "github_connections": {
+        "avatar_url": "", "scope": "", "github_id": None, "name": "", "refresh_token_encrypted": None,
+        "token_expires_at": None, "refresh_expires_at": None,
+    },
+    "epic_connections": {"scope": ""},
 }
 
 
@@ -104,7 +116,10 @@ class FakeStore:
         self.ledger: list[tuple[str, int, str | None]] = []
         self.tables: dict[str, dict[Any, dict[str, Any]]] = {
             "sessions": self.sessions, "api_keys": self.keys,
-            **{table: {} for table in ("projects", "assets", "project_events", "agent_messages", "github_connections")},
+            **{
+                table: {}
+                for table in ("projects", "assets", "project_events", "agent_messages", "github_connections", "epic_connections")
+            },
         }
         self.files: dict[str, tuple[bytes, str]] = {}
         self.serial = itertools.count(1)
@@ -274,7 +289,7 @@ class FakeStore:
         row.setdefault("id", next(self.serial) if table in SERIAL_TABLES else str(uuid.uuid4()))
         if table == "assets":
             self.check_unique(row)
-        self.tables[table][row["user_id"] if table == "github_connections" else row["id"]] = row
+        self.tables[table][row["user_id"] if table in CONNECTIONS else row["id"]] = row
         return copy.deepcopy(row)
 
     def update(self, table: str, changes: dict[str, Any], **query: str) -> list[dict[str, Any]]:
@@ -326,6 +341,9 @@ class FakeLauncher:
     def __init__(self) -> None:
         self.started: list[tuple[dict[str, Any], dict[str, Any], str | None]] = []
         self.own_copies: list[OwnCopy | None] = []
+        self.clones: list[Clone | None] = []
+        # What each Sandbox reports of the clone it made as it started
+        self.clone_states: dict[str, dict[str, Any]] = {}
         self.credentials: dict[str, dict[str, str]] = {}
         self.stopped: list[str] = []
         self.exits: dict[str, int] = {}
@@ -339,12 +357,19 @@ class FakeLauncher:
         # What a command containing each text answers, where it is not the default success
         self.answers: list[tuple[str, tuple[int, str]]] = []
 
-    def start(self, session: dict[str, Any], tier: dict[str, Any], region: str | None, own_copy: OwnCopy | None = None) -> str:
+    def start(
+        self, session: dict[str, Any], tier: dict[str, Any], region: str | None, own_copy: OwnCopy | None = None,
+        clone: Clone | None = None,
+    ) -> str:
         if self.fail_start:
             raise RuntimeError("Please add a payment method to use T4 GPU sandboxes.")
         self.started.append((session, tier, region))
         self.own_copies.append(own_copy)
+        self.clones.append(clone)
         return f"sb-{len(self.started)}"
+
+    def clone_status(self, sandbox_id: str) -> dict[str, Any] | None:
+        return copy.deepcopy(self.clone_states.get(sandbox_id))
 
     def keep_registry_credential(self, user_id: str, username: str, token: str, create: bool = True) -> None:
         if create or user_id in self.credentials:
@@ -408,11 +433,18 @@ class InlineJobs:
 
 
 class FakeGitHub:
-    """GitHub, as far as Lathe reaches it: one account, the codes it grants, its repositories, their branches and files.
+    """GitHub, as far as Lathe reaches it: its two apps' grants, the GitHub App's installations, the container
+    registry's answer, and the repositories with their branches and files.
 
-    `repo-only-code` is a grant from before Lathe asked for `read:packages`. `linked_to_epic` holds
-    the tokens whose account sees Epic's repository and images, and `epic_refusal` is what GitHub
-    answers the check with instead, when set.
+    A code is good for one app (`codes`): a GitHub App code grants an expiring user token and the
+    refresh token that renews it, an Epic code a token that reads packages. A token works while it
+    is `live`; a refresh retires the refresh token and the token it renewed and grants a new pair,
+    as GitHub's does, and `racer`, when set, runs inside the next refresh first, which is how a
+    test has another refresh win a race for the same refresh token. Each token is some account's
+    (`ACCOUNTS`), whose installations of the GitHub App (`installed`) hold the repositories its
+    token reaches; a public repository the app is not installed on is still readable. The registry
+    grants Epic's pull to the tokens in `pullers`, and answers with `registry_refusal` instead,
+    when set.
 
     A branch points at a commit, and a commit is a snapshot of every file of its repository
     (`commits`), so a test can hold a branch's files before and after. A tree is listed from a
@@ -422,18 +454,36 @@ class FakeGitHub:
     """
 
     authorize_url = staticmethod(GitHub.authorize_url)
+    install_url = staticmethod(GitHub.install_url)
     files = GitHub.files
+    ACCOUNTS = {
+        "alice": {"login": "alice-gh", "id": 1001, "name": "Alice Example", "avatar_url": "https://avatars.example.test/alice"},
+        "bob": {"login": "bob-gh", "id": 1002, "name": None, "avatar_url": "https://avatars.example.test/bob"},
+    }
 
     def __init__(self) -> None:
         self.codes = {
-            "good-code": Grant("gho_alice_token", "read:packages,repo"),
-            "repo-only-code": Grant("gho_alice_old", "repo"),
-            "next-code": Grant("gho_alice_next", "read:packages,repo"),
+            "good-code": (APP_CLIENT, "alice"),
+            "next-code": (APP_CLIENT, "alice"),
+            "bob-code": (APP_CLIENT, "bob"),
+            "epic-code": (EPIC_CLIENT, "alice"),
+            "epic-next-code": (EPIC_CLIENT, "alice"),
+            "epic-bob-code": (EPIC_CLIENT, "bob"),
         }
-        self.linked_to_epic: set[str] = set()
-        self.epic_refusal: GitHubError | None = None
-        self.epic_checks: list[str] = []
+        self.owners: dict[str, str] = {}
+        self.live: set[str] = set()
+        self.refresh_tokens: dict[str, str] = {}
+        self.refreshes: list[str] = []
+        self.racer: Callable[[], None] | None = None
+        self.minted = itertools.count(1)
+        self.pullers: set[str] = set()
+        self.registry_refusal: GitHubError | None = None
+        self.registry_checks: list[tuple[str, str]] = []
         self.repositories: dict[str, dict[str, Any]] = {}
+        self.installed: dict[int, dict[str, Any]] = {
+            1: {"account": "alice-gh", "members": {"alice-gh"}, "repositories": []},
+            2: {"account": "bob-gh", "members": {"bob-gh"}, "repositories": []},
+        }
         self.commits: dict[str, dict[str, str]] = {}
         self.refs: dict[tuple[str, str], str] = {}
         self.made_branches: list[tuple[str, str, str]] = []
@@ -442,17 +492,48 @@ class FakeGitHub:
         self.redirects: list[str] = []
         self.tokens: list[str] = []
         self.add_repository("alice-gh/film", push=True, updated="2026-11-20T00:00:00Z")
-        self.add_repository("someone/theirs", push=False, updated="2026-11-19T00:00:00Z", private=False)
+        self.add_repository("someone/theirs", push=False, updated="2026-11-19T00:00:00Z", private=False, installation=None)
+
+    def mint(self, who: str, client: str) -> Grant:
+        """A grant of one app for an account, its token live from now."""
+        number = next(self.minted)
+        if client == EPIC_CLIENT:
+            token = f"gho_{who}_epic_{number}"
+            self.owners[token] = who
+            self.live.add(token)
+            return Grant(token, "read:packages")
+        token, refresh = f"ghu_{who}_{number}", f"ghr_{who}_{number}"
+        self.owners[token] = who
+        self.live.add(token)
+        self.refresh_tokens[refresh] = token
+        return Grant(token, "", 28800, refresh, 15897600)
+
+    def login(self, token: str) -> str:
+        """The login a live token is for; GitHub's 401 for any other."""
+        if token not in self.live:
+            raise GitHubError(401, "Bad credentials")
+        return self.ACCOUNTS[self.owners[token]]["login"]
+
+    def reaches(self, login: str, full_name: str) -> bool:
+        """Whether one of the app's installations the account is in holds the repository."""
+        return any(login in found["members"] and full_name in found["repositories"] for found in self.installed.values())
+
+    def install(self, full_name: str, number: int, account: str, members: set[str]) -> None:
+        """Install the app on a repository, in a new or existing installation of an account."""
+        found = self.installed.setdefault(number, {"account": account, "members": set(members), "repositories": []})
+        found["repositories"].append(full_name)
 
     def add_repository(
         self, full_name: str, push: bool, updated: str = "2026-11-24T00:00:00Z", private: bool = True,
-        files: dict[str, str] | None = None, pull: bool = True,
+        files: dict[str, str] | None = None, pull: bool = True, installation: int | None = 1,
     ) -> dict[str, Any]:
-        """A repository with one commit on `main`, its default branch."""
+        """A repository with one commit on `main`, its default branch, in one of the app's installations unless none."""
         self.repositories[full_name] = {
             "full_name": full_name, "private": private, "html_url": f"https://github.com/{full_name}",
             "updated_at": updated, "default_branch": "main", "permissions": {"push": push, "pull": pull},
         }
+        if installation is not None:
+            self.installed[installation]["repositories"].append(full_name)
         self.commit(full_name, "main", files or {"README.md": f"# {full_name}\n"})
         return self.repositories[full_name]
 
@@ -478,48 +559,79 @@ class FakeGitHub:
 
     def exchange(self, client_id: str, client_secret: str, code: str, redirect_uri: str) -> Grant:
         self.redirects.append(redirect_uri)
-        if code not in self.codes:
+        client, who = self.codes.get(code, ("", ""))
+        if client != client_id or client_secret != SECRETS[client]:
             raise GitHubError(401, "bad_verification_code")
-        return self.codes[code]
+        return self.mint(who, client)
 
-    def epic_access(self, token: str) -> bool:
-        self.epic_checks.append(token)
-        if self.epic_refusal is not None:
-            raise self.epic_refusal
-        return token in self.linked_to_epic
+    def refresh(self, client_id: str, client_secret: str, refresh_token: str) -> Grant:
+        if self.racer is not None:
+            racer, self.racer = self.racer, None
+            racer()
+        self.refreshes.append(refresh_token)
+        if client_id != APP_CLIENT or client_secret != SECRETS[APP_CLIENT] or refresh_token not in self.refresh_tokens:
+            raise GitHubError(401, "bad_refresh_token")
+        renewed = self.refresh_tokens.pop(refresh_token)
+        self.live.discard(renewed)
+        return self.mint(self.owners[renewed], APP_CLIENT)
+
+    def registry_pull(self, login: str, token: str) -> bool:
+        self.registry_checks.append((login, token))
+        if self.registry_refusal is not None:
+            raise self.registry_refusal
+        return token in self.pullers and token in self.live and self.login(token) == login
 
     def user(self, token: str) -> dict[str, Any]:
         self.tokens.append(token)
-        return {"login": "alice-gh", "avatar_url": "https://avatars.example.test/alice"}
+        self.login(token)
+        return dict(self.ACCOUNTS[self.owners[token]])
 
-    def repos(self, token: str) -> list[dict[str, Any]]:
-        self.tokens.append(token)
-        return list(self.repositories.values())
+    def installations(self, token: str) -> list[dict[str, Any]]:
+        login = self.login(token)
+        return [
+            {"id": number, "account": {"login": found["account"]}}
+            for number, found in self.installed.items()
+            if login in found["members"]
+        ]
+
+    def installation_repositories(self, token: str, installation_id: int, limit: int) -> list[dict[str, Any]]:
+        login = self.login(token)
+        found = self.installed.get(installation_id)
+        if found is None or login not in found["members"]:
+            raise GitHubError(404, "Not Found")
+        return [self.repositories[name] for name in found["repositories"]][:limit]
 
     def repo(self, token: str, full_name: str) -> dict[str, Any]:
-        if full_name not in self.repositories:
+        login = self.login(token)
+        found = self.repositories.get(full_name)
+        if found is None or (found["private"] and not self.reaches(login, full_name)):
             raise GitHubError(404, "Not Found")
-        return self.repositories[full_name]
+        if not self.reaches(login, full_name):
+            return {**found, "permissions": {"push": False, "pull": True}}
+        return found
 
-    def create_repo(self, token: str, name: str, private: bool) -> dict[str, Any]:
-        full_name = f"alice-gh/{name}"
-        if full_name in self.repositories:
-            raise GitHubError(422, "name already exists on this account")
-        return self.add_repository(full_name, push=True, private=private)
+    def writable(self, token: str, full_name: str) -> None:
+        """GitHub's refusal of a write the app may not make for this token's account."""
+        if not self.reaches(self.login(token), full_name):
+            raise GitHubError(403, "Resource not accessible by integration")
 
     def head(self, token: str, full_name: str, branch: str) -> str | None:
+        self.repo(token, full_name)
         return self.refs.get((full_name, branch))
 
     def branches_under(self, token: str, full_name: str, prefix: str) -> list[str]:
+        self.repo(token, full_name)
         return sorted(branch for repo, branch in self.refs if repo == full_name and branch.startswith(prefix))
 
     def create_branch(self, token: str, full_name: str, branch: str, sha: str) -> None:
+        self.writable(token, full_name)
         if (full_name, branch) in self.refs:
             raise GitHubError(422, "Reference already exists")
         self.refs[(full_name, branch)] = sha
         self.made_branches.append((full_name, branch, sha))
 
     def tree(self, token: str, full_name: str, sha: str, recursive: bool) -> dict[str, Any]:
+        self.repo(token, full_name)
         self.tree_calls.append((sha, recursive))
         commit, _, folder = sha.partition(":")
         prefix = f"{folder}/" if folder else ""
@@ -537,6 +649,7 @@ class FakeGitHub:
         return {"sha": sha, "tree": listing[: self.tree_limit] if truncated else listing, "truncated": truncated}
 
     def read(self, token: str, full_name: str, path: str, ref: str | None = None) -> dict[str, Any]:
+        self.repo(token, full_name)
         files = self.at(full_name, ref)
         prefix = f"{path}/" if path else ""
         if path in files:
@@ -550,6 +663,7 @@ class FakeGitHub:
         self, token: str, full_name: str, path: str, content: str, message: str, branch: str | None = None
     ) -> dict[str, Any]:
         self.tokens.append(token)
+        self.writable(token, full_name)
         # As GitHub's contents API does, a write that names no branch commits to the default branch
         branch = branch or self.repositories[full_name]["default_branch"]
         if (full_name, branch) not in self.refs:
@@ -651,8 +765,9 @@ def studio(tmp_path: Path) -> SimpleNamespace:
         (tmp_path / name).mkdir()
         (tmp_path / name / "SKILL.md").write_text(body)
     store, launcher, jobs, github, fal, model = FakeStore(), FakeLauncher(), InlineJobs(), FakeGitHub(), FakeFal(), ScriptedModel()
-    settings = config(anthropic_key="sk-ant-test", fal_key="fal-test", github_client_id="gh-client",
-                      github_client_secret="gh-secret", secret_key=SECRET)
+    settings = config(anthropic_key="sk-ant-test", fal_key="fal-test", github_app_client_id=APP_CLIENT,
+                      github_app_client_secret=SECRETS[APP_CLIENT], github_app_slug=SLUG, epic_client_id=EPIC_CLIENT,
+                      epic_client_secret=SECRETS[EPIC_CLIENT], secret_key=SECRET)
     sessions = Sessions(settings, CATALOG, store, launcher, jobs, github)
     jobs.sessions = sessions
     agent = Agent(sessions, model, fal, read_skills(tmp_path))
@@ -693,8 +808,8 @@ def tool_results(request: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def test_health_is_open_and_says_what_is_configured(world):
     client = world[0]
     assert client.get("/v1/health").json() == {
-        "ok": True, "agent": False, "github": False, "generation": False, "supabase": True, "billing": False,
-        "tiers": ["cpu", "t4"],
+        "ok": True, "agent": False, "github": False, "epic": False, "generation": False, "supabase": True,
+        "billing": False, "tiers": ["cpu", "t4"],
     }
 
 
@@ -909,11 +1024,11 @@ def test_an_agent_cannot_reach_another_users_session(world):
 
 def test_health_says_which_integrations_are_configured(studio, world):
     assert studio.client.get("/v1/health").json() == {
-        "ok": True, "agent": True, "github": True, "generation": True, "supabase": True, "billing": False,
+        "ok": True, "agent": True, "github": True, "epic": True, "generation": True, "supabase": True, "billing": False,
         "tiers": ["cpu", "t4"],
     }
     bare = world[0].get("/v1/health").json()
-    assert (bare["agent"], bare["github"], bare["generation"]) == (False, False, False)
+    assert (bare["agent"], bare["github"], bare["epic"], bare["generation"]) == (False, False, False, False)
 
 
 def test_a_project_is_made_listed_read_changed_and_deleted(studio):
@@ -1382,7 +1497,7 @@ def test_the_agent_saves_only_to_a_branch_of_its_own_made_from_the_default_head(
     assert github.branch_files(repo, branch) == {**main_files, "script.fountain": "FADE IN:", "shotlist.md": "| 1 | wide |"}
     assert github.refs[(repo, "main")] == main_head and github.branch_files(repo, "main") == main_files, "the default branch never changed"
     assert github.refs[(repo, "lathe/mara-0000beef")] == theirs, "nor did the teammate's branch"
-    assert github.tokens[-1] == "gho_alice_token"
+    assert github.tokens[-1] == "ghu_alice_1", "with her GitHub App token"
     log = events(client, film["id"])["events"]
     ends = [e["data"]["summary"] for e in log if e["kind"] == "tool_end"]
     assert f"Committed script.fountain to {branch}, a new branch" in ends and f"Committed shotlist.md to {branch}" in ends
@@ -1601,53 +1716,165 @@ def test_the_unreal_skill_is_read_for_the_disciplines_that_use_unreal():
     assert all(name in text for name in ("unreal_assets", "github_save", "unreal_projects", "unreal_open", "engine_show"))
 
 
+def connect(
+    studio: SimpleNamespace, flow: str = "github", code: str = "good-code", token: str = "alice-token",
+    return_to: str = f"{SITE}/app/",
+) -> Any:
+    """Connect an account through one flow's authorization page and callback, as a browser would."""
+    url = studio.client.post(f"/v1/{flow}/connect", headers=auth(token), json={"return_to": return_to}).json()["url"]
+    state = parse_qs(urlsplit(url).query)["state"][0]
+    return studio.client.get(f"/v1/{flow}/callback", params={"code": code, "state": state}, follow_redirects=False)
+
+
 def connect_alice(studio: SimpleNamespace, return_to: str = f"{SITE}/app/", code: str = "good-code") -> Any:
-    state = parse_qs(urlsplit(studio.client.post("/v1/github/connect", headers=auth("alice-token"), json={"return_to": return_to}).json()["url"]).query)["state"][0]
-    return studio.client.get("/v1/github/callback", params={"code": code, "state": state}, follow_redirects=False)
+    return connect(studio, "github", code, "alice-token", return_to)
 
 
-def test_github_connects_through_a_signed_state_and_links_projects(studio):
+def connect_epic(studio: SimpleNamespace, code: str = "epic-code", token: str = "alice-token") -> Any:
+    return connect(studio, "epic", code, token)
+
+
+def expire(store: FakeStore, user: User, seconds_left: float) -> None:
+    """Move a GitHub connection's token to expire that many seconds from now."""
+    store.tables["github_connections"][user.id]["token_expires_at"] = (moment() + timedelta(seconds=seconds_left)).isoformat()
+
+
+def plain_tokens(github: FakeGitHub) -> set[str]:
+    """Every token and refresh token GitHub granted, as they would read in the clear."""
+    return set(github.owners) | {f"ghr_{who}_{number}" for who in ("alice", "bob") for number in range(1, 30)}
+
+
+def test_github_connects_as_the_apps_user_authorization_and_links_projects(studio):
     client, store, github = studio.client, studio.store, studio.github
-    assert client.get("/v1/github", headers=auth("alice-token")).json() == {"configured": True, "connected": False, "epic_linked": None}
+    assert client.get("/v1/github", headers=auth("alice-token")).json() == {"configured": True, "connected": False}
     assert client.get("/v1/github/repos", headers=auth("alice-token")).status_code == 409
     url = client.post("/v1/github/connect", headers=auth("alice-token"), json={"return_to": f"{SITE}/app/?p=1#top"}).json()["url"]
     parts = urlsplit(url)
     query = parse_qs(parts.query)
     assert f"{parts.scheme}://{parts.netloc}{parts.path}" == "https://github.com/login/oauth/authorize"
-    assert query["client_id"] == ["gh-client"] and query["scope"] == ["repo read:packages"]
+    assert query["client_id"] == [APP_CLIENT] and "scope" not in query, "a GitHub App asks for its permissions, not scopes"
     assert query["redirect_uri"] == ["http://testserver/v1/github/callback"]
     assert read_state(SECRET, query["state"][0])["u"] == ALICE.id
+    assert read_state(SECRET, query["state"][0], flow=EPIC_FLOW) is None, "a GitHub state is no Epic state"
 
     back = client.get("/v1/github/callback", params={"code": "good-code", "state": query["state"][0]}, follow_redirects=False)
     assert back.status_code == 303 and back.headers["location"] == f"{SITE}/app/?p=1&github=connected#top"
     assert github.redirects == ["http://testserver/v1/github/callback"]
     (row,) = store.tables["github_connections"].values()
-    assert "gho_alice_token" not in json.dumps(row) and unseal(SECRET, row["token_encrypted"]) == "gho_alice_token"
-    assert row["scope"] == "read:packages,repo", "the scopes GitHub granted, kept beside the token"
+    assert not plain_tokens(github) & set(json.dumps(row).replace('"', " ").split()), "no token in the clear"
+    assert unseal(SECRET, row["token_encrypted"]) == "ghu_alice_1" and unseal(SECRET, row["refresh_token_encrypted"]) == "ghr_alice_1"
+    hours = (datetime.fromisoformat(row["token_expires_at"]) - moment()).total_seconds() / 3600
+    months = (datetime.fromisoformat(row["refresh_expires_at"]) - moment()).days / 30
+    assert 7.9 < hours <= 8 and 6 <= months < 6.2, "eight hours for the token, six months for its refresh"
+    assert (row["github_id"], row["name"]) == (1001, "Alice Example")
     assert client.get("/v1/github", headers=auth("alice-token")).json() == {
-        "configured": True, "connected": True, "login": "alice-gh", "avatar_url": "https://avatars.example.test/alice",
-        "epic_linked": False}
+        "configured": True, "connected": True, "login": "alice-gh", "avatar_url": "https://avatars.example.test/alice"}
     assert client.get("/v1/github", headers=auth("bob-token")).json()["connected"] is False
     repos = client.get("/v1/github/repos", headers=auth("alice-token")).json()["repos"]
-    assert repos[0] == {"full_name": "alice-gh/film", "private": True, "html_url": "https://github.com/alice-gh/film",
-                        "updated_at": "2026-11-20T00:00:00Z"}
+    assert repos == [{"full_name": "alice-gh/film", "private": True, "html_url": "https://github.com/alice-gh/film",
+                      "updated_at": "2026-11-20T00:00:00Z"}], "the app's installations only: not a public repository it is not on"
 
     film = new_project(client)
     link = lambda body: client.post(f"/v1/projects/{film['id']}/github", headers=auth("alice-token"), json=body)
-    assert link({"repo": "alice-gh/film"}).json()["project"]["github_repo"] == "alice-gh/film"
-    studio.github.add_repository("someone/sealed", push=False, pull=False)
+    linked = link({"repo": "alice-gh/film"}).json()["project"]
+    assert (linked["github_repo"], linked["github_branch"]) == ("alice-gh/film", None)
+    github.add_repository("someone/sealed", push=False, pull=False)
     assert link({"repo": "someone/sealed"}).status_code == 403, "a repository the account cannot read"
     read_only = link({"repo": "someone/theirs"})
     assert read_only.json()["project"]["github_repo"] == "someone/theirs", "reading is enough to link and ask about it"
     assert link({"repo": "someone/missing"}).status_code == 404
     assert link({"repo": "not a repo"}).status_code == 400
     assert link({}).status_code == 400
-    assert link({"create": {"name": "mara-film"}}).json()["project"]["github_repo"] == "alice-gh/mara-film"
-    assert link({"create": {"name": "mara-film"}}).status_code == 409
+    made = link({"create": {"name": "mara-film"}})
+    assert made.status_code == 400 and "create it on GitHub" in made.json()["detail"], "the app makes no repository"
+    github.commit("alice-gh/film", "release", {"README.md": "release"})
+    assert link({"repo": "alice-gh/film", "branch": "release"}).json()["project"]["github_branch"] == "release"
+    assert link({"repo": "alice-gh/film", "branch": "nope"}).status_code == 404
+    assert link({"repo": "alice-gh/film", "branch": "a b"}).status_code == 400
     assert client.post(f"/v1/projects/{film['id']}/github", headers=auth("bob-token"), json={"repo": "alice-gh/film"}).status_code == 404
-    assert client.delete(f"/v1/projects/{film['id']}/github", headers=auth("alice-token")).json()["project"]["github_repo"] is None
-    assert client.delete("/v1/github", headers=auth("alice-token")).json() == {"configured": True, "connected": False, "epic_linked": None}
+    unlinked = client.delete(f"/v1/projects/{film['id']}/github", headers=auth("alice-token")).json()["project"]
+    assert (unlinked["github_repo"], unlinked["github_branch"]) == (None, None)
+    assert client.delete("/v1/github", headers=auth("alice-token")).json() == {"configured": True, "connected": False}
     assert store.tables["github_connections"] == {}
+
+
+def test_an_expiring_token_is_refreshed_before_use_and_a_refused_refresh_asks_to_connect_again(studio):
+    client, store, github, sessions = studio.client, studio.store, studio.github, studio.sessions
+    connect_alice(studio)
+    listed = lambda: client.get("/v1/github/repos", headers=auth("alice-token"))
+    assert listed().status_code == 200 and github.refreshes == [], "a token with hours left is used as it is"
+
+    expire(store, ALICE, 120)
+    assert listed().status_code == 200
+    assert github.refreshes == ["ghr_alice_1"], "refreshed once, minutes before it would expire"
+    row = store.tables["github_connections"][ALICE.id]
+    renewed = unseal(SECRET, row["token_encrypted"])
+    assert renewed != "ghu_alice_1" and renewed in github.live and "ghu_alice_1" not in github.live
+    assert unseal(SECRET, row["refresh_token_encrypted"]) != "ghr_alice_1", "the new refresh token is the one kept"
+    assert datetime.fromisoformat(row["token_expires_at"]) > moment() + timedelta(hours=7)
+    assert listed().status_code == 200 and len(github.refreshes) == 1
+
+    # Another refresh uses the same refresh token first, as two engines starting at once would
+    expire(store, ALICE, -60)
+    used = unseal(SECRET, store.tables["github_connections"][ALICE.id]["refresh_token_encrypted"])
+
+    def race() -> None:
+        winner = github.refresh(APP_CLIENT, SECRETS[APP_CLIENT], used)
+        store.update("github_connections", Sessions.sealed_grant(SECRET, winner), user_id=f"eq.{ALICE.id}")
+
+    github.racer = race
+    token = sessions.github_token(ALICE.id)
+    assert token == unseal(SECRET, store.tables["github_connections"][ALICE.id]["token_encrypted"]) and token in github.live, (
+        "the loser of the race takes the pair the winner stored"
+    )
+
+    expire(store, ALICE, -60)
+    github.refresh_tokens.clear()
+    refused = listed()
+    assert refused.status_code == 409 and "Connect GitHub again" in refused.json()["detail"]
+
+
+def test_the_repositories_offered_are_the_apps_installations_and_a_missing_one_has_an_install_link(studio):
+    client, store, github = studio.client, studio.store, studio.github
+    github.add_repository("studio/multiverse-br", push=True, updated="2026-11-23T00:00:00Z", installation=None)
+    github.install("studio/multiverse-br", 3, "studio", {"alice-gh", "bob-gh"})
+    github.add_repository("bob-gh/drafts", push=True, installation=2)
+    github.add_repository("other-org/game", push=True, updated="2026-11-24T00:00:00Z", installation=None)
+    connect_alice(studio)
+    names = lambda: [repo["full_name"] for repo in client.get("/v1/github/repos", headers=auth("alice-token")).json()["repos"]]
+    assert names() == ["studio/multiverse-br", "alice-gh/film"], "her account's and her organization's, newest first"
+
+    page = f"{SITE}/app/?project=p1"
+    url = client.post("/v1/github/install", headers=auth("alice-token"), json={"return_to": page}).json()["url"]
+    parts = urlsplit(url)
+    assert f"{parts.scheme}://{parts.netloc}{parts.path}" == f"https://github.com/apps/{SLUG}/installations/new"
+    state = parse_qs(parts.query)["state"][0]
+    assert (read_state(SECRET, state)["u"], read_state(SECRET, state)["r"]) == (ALICE.id, page)
+    assert client.post("/v1/github/install", headers=auth("alice-token"), json={"return_to": "https://evil.example/"}).status_code == 400
+    game = new_project(client, discipline="games", format="Game")
+    missing = client.post(f"/v1/projects/{game['id']}/github", headers=auth("alice-token"), json={"repo": "other-org/game"})
+    assert missing.status_code == 404 and "not installed" in missing.json()["detail"]
+
+    # The owner installs the app there; GitHub brings the state back with the authorization it asks for
+    github.install("other-org/game", 4, "other-org", {"alice-gh"})
+    back = client.get("/v1/github/callback", params={"code": "next-code", "state": state, "setup_action": "install",
+                                                     "installation_id": "4"}, follow_redirects=False)
+    assert back.headers["location"] == f"{page}&github=installed"
+    assert names() == ["other-org/game", "studio/multiverse-br", "alice-gh/film"]
+    exchanged = len(github.redirects)
+    before = copy.deepcopy(store.tables["github_connections"])
+    for arrival in ({"code": "c", "setup_action": "install", "installation_id": "5"},
+                    {"setup_action": "request"},
+                    {"code": "good-code", "state": sign_state("not-our-secret", BOB.id, SITE), "setup_action": "update"}):
+        landed = client.get("/v1/github/callback", params=arrival, follow_redirects=False)
+        outcome = "requested" if arrival["setup_action"] == "request" else "installed"
+        assert landed.status_code == 303 and landed.headers["location"] == f"{SITE}/app/?github={outcome}", arrival
+    assert len(github.redirects) == exchanged and store.tables["github_connections"] == before, (
+        "an installation that comes back without Lathe's state connects nobody and exchanges nothing"
+    )
+    asked = client.get("/v1/github/callback", params={"state": sign_state(SECRET, ALICE.id, page), "setup_action": "request"},
+                       follow_redirects=False)
+    assert asked.headers["location"] == f"{page}&github=requested", "a member's request, waiting for the owner"
 
 
 def test_a_github_callback_whose_state_was_not_signed_here_is_refused(studio):
@@ -1661,6 +1888,7 @@ def test_a_github_callback_whose_state_was_not_signed_here_is_refused(studio):
         "another secret": sign_state("not-our-secret", ALICE.id, page),
         "a payload changed under its signature": f"{swapped}.{mac}",
         "an expired state": sign_state(SECRET, ALICE.id, page, now=time.time() - 3600),
+        "another flow's state": sign_state(SECRET, ALICE.id, page, flow=EPIC_FLOW),
         "no signature": body,
         "nothing": "",
         "garbage": "x.y",
@@ -1668,16 +1896,20 @@ def test_a_github_callback_whose_state_was_not_signed_here_is_refused(studio):
     for name, state in forgeries.items():
         refused = client.get("/v1/github/callback", params={"code": "good-code", "state": state}, follow_redirects=False)
         assert refused.status_code == 400 and "location" not in refused.headers, name
+        refused = client.get("/v1/epic/callback", params={"code": "epic-code", "state": state if name != "another flow's state"
+                                                          else genuine}, follow_redirects=False)
+        assert refused.status_code == 400 and "location" not in refused.headers, f"Epic: {name}"
     assert github.redirects == [], "no code was exchanged"
-    assert store.tables["github_connections"] == {}
+    assert store.tables["github_connections"] == {} and store.tables["epic_connections"] == {}
 
 
 def test_github_never_sends_anyone_off_the_site(studio):
     client, store = studio.client, studio.store
     for elsewhere in ("https://evil.example/", "https://site.example.test.evil.example/app/", "https://site.example.test@evil.example/",
                       "//evil.example/", "javascript:alert(1)", f"{SITE}\\@evil.example", "http://site.example.test/app/"):
-        refused = client.post("/v1/github/connect", headers=auth("alice-token"), json={"return_to": elsewhere})
-        assert refused.status_code == 400, elsewhere
+        for route in ("/v1/github/connect", "/v1/github/install", "/v1/epic/connect"):
+            refused = client.post(route, headers=auth("alice-token"), json={"return_to": elsewhere})
+            assert refused.status_code == 400, (route, elsewhere)
     # A state this deployment signed can still not name a page off the site
     signed_elsewhere = sign_state(SECRET, ALICE.id, "https://evil.example/")
     refused = client.get("/v1/github/callback", params={"code": "good-code", "state": signed_elsewhere}, follow_redirects=False)
@@ -1690,15 +1922,64 @@ def test_github_never_sends_anyone_off_the_site(studio):
     assert bad_code.headers["location"] == f"{SITE}/app/?github=failed" and store.tables["github_connections"] == {}
 
 
-def test_github_waits_for_its_oauth_app(world):
+def test_github_and_epic_wait_for_their_apps(world):
     client = world[0]
-    assert client.get("/v1/github", headers=auth("alice-token")).json() == {"configured": False, "connected": False, "epic_linked": None}
-    assert client.post("/v1/github/connect", headers=auth("alice-token"), json={"return_to": f"{SITE}/app/"}).status_code == 503
-    refused = client.get("/v1/github/callback", params={"code": "c", "state": sign_state("", ALICE.id, SITE)}, follow_redirects=False)
+    assert client.get("/v1/github", headers=auth("alice-token")).json() == {"configured": False, "connected": False}
+    assert client.get("/v1/epic", headers=auth("alice-token")).json() == {"configured": False, "connected": False, "linked": None}
+    for route in ("/v1/github/connect", "/v1/github/install", "/v1/epic/connect"):
+        assert client.post(route, headers=auth("alice-token"), json={"return_to": f"{SITE}/app/"}).status_code == 503, route
+    refused = client.get("/v1/github/callback", params={"code": "c", "state": sign_state("", ALICE.id, SITE), "setup_action": "install"},
+                         follow_redirects=False)
+    assert refused.status_code == 400
+    refused = client.get("/v1/epic/callback", params={"code": "c", "state": sign_state("", ALICE.id, SITE, flow=EPIC_FLOW)},
+                         follow_redirects=False)
     assert refused.status_code == 400
 
 
-def test_unreal_starts_for_anyone_and_brings_the_editor_only_for_an_account_linked_to_epic(studio):
+def test_epic_is_a_connection_of_its_own_that_reads_packages_and_nothing_else(studio):
+    client, store, github, launcher = studio.client, studio.store, studio.github, studio.launcher
+    status = lambda token="alice-token": client.get("/v1/epic", headers=auth(token)).json()
+    assert status() == {"configured": True, "connected": False, "linked": None}
+    url = client.post("/v1/epic/connect", headers=auth("alice-token"), json={"return_to": f"{SITE}/app/"}).json()["url"]
+    query = parse_qs(urlsplit(url).query)
+    assert query["client_id"] == [EPIC_CLIENT] and query["scope"] == ["read:packages"]
+    assert query["redirect_uri"] == ["http://testserver/v1/epic/callback"]
+    assert read_state(SECRET, query["state"][0], flow=EPIC_FLOW)["u"] == ALICE.id and read_state(SECRET, query["state"][0]) is None
+
+    wrong_app = client.get("/v1/epic/callback", params={"code": "good-code", "state": query["state"][0]}, follow_redirects=False)
+    assert wrong_app.headers["location"] == f"{SITE}/app/?epic=failed", "a GitHub App code is not the Epic app's"
+    assert connect_epic(studio).headers["location"] == f"{SITE}/app/?epic=connected"
+    (row,) = store.tables["epic_connections"].values()
+    epic_token = unseal(SECRET, row["token_encrypted"])
+    assert epic_token.startswith("gho_alice_epic") and epic_token not in json.dumps(row) and row["scope"] == "read:packages"
+    assert store.tables["github_connections"] == {}, "Epic connects no repositories"
+    assert client.get("/v1/github", headers=auth("alice-token")).json()["connected"] is False
+
+    assert status() == {"configured": True, "connected": True, "login": "alice-gh", "linked": False}
+    assert github.registry_checks[-1] == ("alice-gh", epic_token), "asked with her login and token"
+    github.pullers.add(epic_token)
+    assert status()["linked"] is True
+    github.registry_refusal = GitHubError(502, "ghcr.io answered 502")
+    unknown = status()
+    assert unknown["linked"] is None and "502" in unknown["detail"]
+    github.registry_refusal = None
+    github.live.discard(epic_token)
+    revoked = status()
+    assert revoked["linked"] is None and "Connect Epic again" in revoked["detail"], "a refusal of a dead token is no answer"
+    assert status("bob-token") == {"configured": True, "connected": False, "linked": None}
+
+    launcher.credentials[ALICE.id] = {"REGISTRY_USERNAME": "alice-gh", "REGISTRY_PASSWORD": epic_token}
+    connect_epic(studio, "epic-next-code")
+    renewed = unseal(SECRET, store.tables["epic_connections"][ALICE.id]["token_encrypted"])
+    assert launcher.credentials[ALICE.id]["REGISTRY_PASSWORD"] == renewed != epic_token, "connecting again refreshes the pull"
+    connect_alice(studio)
+    client.delete("/v1/github", headers=auth("alice-token"))
+    assert ALICE.id in launcher.credentials, "disconnecting GitHub leaves the Epic connection as it is"
+    assert client.delete("/v1/epic", headers=auth("alice-token")).json() == {"configured": True, "connected": False, "linked": None}
+    assert launcher.credentials == {} and store.tables["epic_connections"] == {}
+
+
+def test_unreal_starts_for_anyone_and_brings_the_editor_only_for_an_epic_connection_the_registry_lets_pull(studio):
     client, github, launcher, store = studio.client, studio.github, studio.launcher, studio.store
     game = new_project(client, discipline="games", format="World")
 
@@ -1716,48 +1997,46 @@ def test_unreal_starts_for_anyone_and_brings_the_editor_only_for_an_account_link
     assert no_gpu.status_code == 400 and "needs a GPU" in no_gpu.json()["detail"], "the editor renders only on a GPU"
 
     stop(start())
-    connect_alice(studio, code="repo-only-code")
-    stop(start())
-    assert github.epic_checks == [], "GitHub is not asked what the grant cannot show"
     connect_alice(studio)
     stop(start())
-    github.epic_refusal = GitHubError(502, "Server Error")
+    assert github.registry_checks == [], "a GitHub App connection is not asked about Epic"
+    connect_epic(studio)
     stop(start())
-    github.epic_refusal = None
+    github.registry_refusal = GitHubError(502, "ghcr.io answered 502")
+    stop(start())
+    github.registry_refusal = None
     assert launcher.own_copies == [None] * 4, (
-        "without GitHub, with an old grant, unlinked, and while GitHub fails, the engine starts without the editor"
+        "without Epic, with GitHub alone, unlinked, and while the registry fails, the engine starts without the editor"
     )
     assert launcher.credentials == {}, "a start without the editor keeps no credential for a pull"
 
-    github.linked_to_epic.add("gho_alice_token")
+    epic_token = unseal(SECRET, store.tables["epic_connections"][ALICE.id]["token_encrypted"])
+    github.pullers.add(epic_token)
     engine = start()
     assert launcher.own_copies[-1] == OwnCopy("5.8")
-    assert launcher.credentials == {ALICE.id: {"REGISTRY_USERNAME": "alice-gh", "REGISTRY_PASSWORD": "gho_alice_token"}}, (
-        "pulled with her own login and token, kept for her before the start"
+    assert launcher.credentials == {ALICE.id: {"REGISTRY_USERNAME": "alice-gh", "REGISTRY_PASSWORD": epic_token}}, (
+        "pulled with her own Epic connection's login and token, kept for her before the start"
     )
-    assert "gho_alice_token" not in json.dumps(store.sessions) + json.dumps(engine), "the token is kept nowhere with the session"
-
-    connect_alice(studio, code="next-code")
-    assert launcher.credentials[ALICE.id]["REGISTRY_PASSWORD"] == "gho_alice_next", "connecting again refreshes it"
+    assert epic_token not in json.dumps(store.sessions) + json.dumps(engine), "the token is kept nowhere with the session"
     theirs = new_project(client, "bob-token", discipline="games", format="World")
     stop(start("bob-token", theirs), "bob-token")
     assert launcher.own_copies[-1] is None and BOB.id not in launcher.credentials, "another user's link is not Bob's"
     stop(engine)
     client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "blender", "tier": "t4"})
     assert launcher.own_copies[-1] is None, "an app on Lathe's own license gets no credential"
-    client.delete("/v1/github", headers=auth("alice-token"))
-    assert launcher.credentials == {}, "disconnecting GitHub deletes it"
+    client.delete("/v1/epic", headers=auth("alice-token"))
+    assert launcher.credentials == {}, "disconnecting Epic deletes it"
 
 
 def test_a_queued_unreal_start_reads_the_epic_link_it_has_when_it_starts(studio):
     client, sessions, store, github = studio.client, studio.sessions, studio.store, studio.github
-    connect_alice(studio)
-    github.linked_to_epic.add("gho_alice_token")
+    connect_epic(studio)
+    github.pullers.add(unseal(SECRET, store.tables["epic_connections"][ALICE.id]["token_encrypted"]))
     object.__setattr__(sessions.config, "capacity", 0)
     game = new_project(client, discipline="games", format="World")
     queued = client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "unreal", "tier": "t4"})
     assert queued.json()["engine"]["status"] == "queued"
-    client.delete("/v1/github", headers=auth("alice-token"))
+    client.delete("/v1/epic", headers=auth("alice-token"))
     object.__setattr__(sessions.config, "capacity", 10)
     sessions.reconcile()
     (session,) = store.sessions.values()
@@ -1765,12 +2044,125 @@ def test_a_queued_unreal_start_reads_the_epic_link_it_has_when_it_starts(studio)
     assert studio.launcher.own_copies == [None] and studio.launcher.credentials == {}
 
 
+MULTIVERSE = "studio/multiverse-br"
+
+
+def test_an_unreal_start_of_a_linked_project_clones_with_a_fresh_token_no_row_keeps(studio):
+    client, store, github, launcher, model = studio.client, studio.store, studio.github, studio.launcher, studio.model
+    github.add_repository(MULTIVERSE, push=True, installation=None)
+    github.install(MULTIVERSE, 3, "studio", {"alice-gh"})
+    store.lathe_ensure_profile(ALICE.id, ALICE.email, 60)["max_sessions"] = 2
+    connect_alice(studio)
+    imported = client.post("/v1/projects", headers=auth("alice-token"),
+                           json={"name": "MultiverseBR", "discipline": "games", "format": "Game", "github_repo": MULTIVERSE})
+    game = imported.json()["project"]
+    assert (game["github_repo"], game["github_branch"]) == (MULTIVERSE, None), "imported from GitHub, it starts linked"
+    refused = client.post("/v1/projects", headers=auth("alice-token"),
+                          json={"name": "x", "discipline": "games", "github_repo": "other-org/missing"})
+    assert refused.status_code == 404 and len(store.tables["projects"]) == 1, "nothing is made for a repository it cannot reach"
+
+    expire(store, ALICE, 3600)
+    response = client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "unreal", "tier": "t4"})
+    engine = response.json()["engine"]
+    clone = launcher.clones[-1]
+    token = unseal(SECRET, store.tables["github_connections"][ALICE.id]["token_encrypted"])
+    assert github.refreshes == ["ghr_alice_1"] and token != "ghu_alice_1", "an hour left is not fresh enough to clone with"
+    assert clone == Clone(repo=MULTIVERSE, branch="main", name="Alice Example", email="1001+alice-gh@users.noreply.github.com",
+                          token=token)
+    assert clone.environment() == {"LATHE_GIT_TOKEN": token, "LATHE_GIT_REPO": MULTIVERSE, "LATHE_GIT_BRANCH": "main",
+                                   "LATHE_GIT_NAME": "Alice Example", "LATHE_GIT_EMAIL": "1001+alice-gh@users.noreply.github.com"}
+    assert token not in repr(clone)
+
+    sandbox = store.sessions[engine["id"]]["sandbox_id"]
+    path = f"/home/ubuntu/workspace/projects/{game['id']}/multiverse-br"
+    listing = lambda: next(e for e in client.get(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token")).json()["engines"]
+                           if e["id"] == engine["id"])
+    assert "clone" not in listing(), "a machine that reports no clone shows none"
+    launcher.clone_states[sandbox] = {"state": "cloning", "path": path, "detail": "Git LFS: 812 of 4,210 files"}
+    assert listing()["clone"] == {"state": "cloning", "path": path, "detail": "Git LFS: 812 of 4,210 files"}
+    model.script(reply(say("It is still cloning.")))
+    message(client, game["id"], "Is my game there?")
+    assert f"still cloning {MULTIVERSE}" in turn_state(model.requests[-1])
+    launcher.clone_states[sandbox] = {"state": "failed", "path": path, "detail": "fatal: Authentication failed"}
+    model.script(reply(say("It did not clone.")))
+    message(client, game["id"], "And now?")
+    assert "could not clone" in turn_state(model.requests[-1]) and "Authentication failed" in turn_state(model.requests[-1])
+    launcher.clone_states[sandbox] = {"state": "done", "path": path, "detail": ""}
+    model.script(reply(say("Here it is.")))
+    message(client, game["id"], "And now?")
+    assert listing()["clone"]["state"] == "done" and "clon" not in turn_state(model.requests[-1])
+    launcher.clone_states[sandbox] = {"state": "lost", "path": 3}
+    assert "clone" not in listing(), "an answer outside the machine's contract is not shown"
+
+    granted = plain_tokens(github)
+    kept = json.dumps({table: rows for table, rows in store.tables.items()}, default=str) + json.dumps(listing())
+    assert not {word for word in granted if word in kept}, "no token in any row, event, message, or listing"
+
+    client.delete(f"/v1/sessions/{engine['id']}", headers=auth("alice-token"))
+    github.commit(MULTIVERSE, "release", {"README.md": "release"})
+    client.post(f"/v1/projects/{game['id']}/github", headers=auth("alice-token"), json={"repo": MULTIVERSE, "branch": "release"})
+    client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "unreal", "tier": "t4"})
+    assert launcher.clones[-1].branch == "release", "the branch the project chose"
+    assert len(github.refreshes) == 1, "a token with most of its hours left is not refreshed again"
+    client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "blender", "tier": "t4"})
+    assert launcher.clones[-1] is None, "only Unreal clones"
+    for engine_row in list(store.sessions.values()):
+        client.delete(f"/v1/sessions/{engine_row['id']}", headers=auth("alice-token"))
+
+    unlinked = new_project(client, discipline="games", format="Game")
+    client.post(f"/v1/projects/{unlinked['id']}/engines", headers=auth("alice-token"), json={"app": "unreal", "tier": "t4"})
+    assert launcher.clones[-1] is None, "a project with no repository clones nothing"
+    for engine_row in list(store.sessions.values()):
+        client.delete(f"/v1/sessions/{engine_row['id']}", headers=auth("alice-token"))
+    expire(store, ALICE, -60)
+    github.refresh_tokens.clear()
+    started = client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "unreal", "tier": "t4"})
+    assert store.sessions[started.json()["engine"]["id"]]["status"] == "running" and launcher.clones[-1] is None, (
+        "where GitHub will not renew the token, the engine starts without the clone rather than not at all"
+    )
+
+
+def test_one_users_github_and_epic_connections_never_reach_another(studio):
+    client, store, github, launcher = studio.client, studio.store, studio.github, studio.launcher
+    github.add_repository(MULTIVERSE, push=True, installation=None)
+    github.install(MULTIVERSE, 3, "studio", {"alice-gh"})
+    github.add_repository("bob-gh/drafts", push=True, installation=2, updated="2026-11-22T00:00:00Z")
+    connect_alice(studio)
+    connect_epic(studio)
+    assert connect(studio, "github", "bob-code", "bob-token").headers["location"].endswith("github=connected")
+    assert set(store.tables["github_connections"]) == {ALICE.id, BOB.id} and set(store.tables["epic_connections"]) == {ALICE.id}
+
+    bobs = lambda path, **kwargs: client.request(kwargs.pop("method", "GET"), path, headers=auth("bob-token"), **kwargs)
+    assert [repo["full_name"] for repo in bobs("/v1/github/repos").json()["repos"]] == ["bob-gh/drafts"]
+    assert bobs("/v1/github").json()["login"] == "bob-gh" and bobs("/v1/epic").json()["connected"] is False
+    project = bobs("/v1/projects", method="POST", json={"name": "Mine", "discipline": "games", "format": "Game"}).json()["project"]
+    stolen = bobs(f"/v1/projects/{project['id']}/github", method="POST", json={"repo": MULTIVERSE})
+    assert stolen.status_code == 404, "Alice's organization's repository is not Bob's to link"
+    bobs(f"/v1/projects/{project['id']}/github", method="POST", json={"repo": "bob-gh/drafts"})
+    bobs(f"/v1/projects/{project['id']}/engines", method="POST", json={"app": "unreal", "tier": "t4"})
+    clone = launcher.clones[-1]
+    bob_token = unseal(SECRET, store.tables["github_connections"][BOB.id]["token_encrypted"])
+    assert (clone.repo, clone.token, clone.name, clone.email) == ("bob-gh/drafts", bob_token, "bob-gh", "1002+bob-gh@users.noreply.github.com")
+    assert launcher.own_copies[-1] is None and BOB.id not in launcher.credentials, "Alice's Epic link is not Bob's"
+
+    # Alice's callback state cannot connect Bob, nor Bob's Alice
+    state = parse_qs(urlsplit(client.post("/v1/github/connect", headers=auth("alice-token"),
+                                          json={"return_to": f"{SITE}/app/"}).json()["url"]).query)["state"][0]
+    client.get("/v1/github/callback", params={"code": "next-code", "state": state}, follow_redirects=False)
+    assert unseal(SECRET, store.tables["github_connections"][BOB.id]["token_encrypted"]) == bob_token
+    client.delete("/v1/github", headers=auth("alice-token"))
+    client.delete("/v1/epic", headers=auth("alice-token"))
+    assert set(store.tables["github_connections"]) == {BOB.id}, "a disconnect is the user's own"
+    assert bobs("/v1/github/repos").status_code == 200
+
+
 def running_unreal(studio: SimpleNamespace, linked: bool = True, sessions: int = 1) -> tuple[dict[str, Any], dict[str, Any], str]:
-    """A Games project with a running Unreal engine, its account linked to Epic or not: the project, the engine, its Sandbox."""
+    """A Games project with a running Unreal engine, its Epic connection linked or not: the project, the engine, its Sandbox."""
     studio.store.lathe_ensure_profile(ALICE.id, ALICE.email, 60)["max_sessions"] = sessions
     connect_alice(studio)
+    connect_epic(studio)
     if linked:
-        studio.github.linked_to_epic.add("gho_alice_token")
+        studio.github.pullers.add(unseal(SECRET, studio.store.tables["epic_connections"][ALICE.id]["token_encrypted"]))
     game = new_project(studio.client, name="Ember Ridge", discipline="games", format="Game")
     engine = studio.client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "unreal", "tier": "t4"}).json()["engine"]
     return game, engine, studio.store.sessions[engine["id"]]["sandbox_id"]
@@ -1920,7 +2312,7 @@ def test_unreal_open_says_the_one_step_that_brings_the_editor_where_it_is_missin
     assert unlinked["is_error"] and "not installed" in unlinked["content"]
     assert "Apps and Accounts" in unlinked["content"] and "start it again" in unlinked["content"]
 
-    github.linked_to_epic.add("gho_alice_token")
+    github.pullers.add(unseal(SECRET, studio.store.tables["epic_connections"][ALICE.id]["token_encrypted"]))
     opening = use("unreal_open", engine_id=engine["id"], path=path)
     model.script(reply(opening), reply(say("Restart the engine.")))
     message(client, game["id"], "I linked it")
@@ -2134,6 +2526,11 @@ class FakeModal:
             def from_name(name: str) -> Secret:
                 return Secret(name)
 
+            @staticmethod
+            def from_dict(values: dict[str, str]) -> SimpleNamespace:
+                # An ephemeral Secret: it has no name, and lives only as long as the Sandbox it is given to
+                return SimpleNamespace(ephemeral=dict(values))
+
             def hydrate(self) -> Secret:
                 if self.name not in fake.secrets:
                     raise NotFoundError(self.name)
@@ -2206,36 +2603,107 @@ def test_the_launcher_pulls_unreal_with_each_users_own_named_secret(monkeypatch)
     assert list(modal.secrets) == [bob], "forgetting deletes the user's Secret, and a missing one is no error"
 
 
-def test_github_reads_an_epic_link_from_what_the_token_can_see():
-    """The real `GitHub` over a recorded GitHub: which calls the check makes, and what each answer means."""
+def test_the_launcher_hands_a_clone_to_its_start_alone_in_an_ephemeral_secret(monkeypatch):
+    modal = FakeModal()
+    monkeypatch.setitem(sys.modules, "modal", modal.module)
+    module = FakeSandboxModule()
+    launcher = ModalLauncher(module, app="modal-app")
+    tier = {"gpu": "L4", "cpu": 8, "memory_gb": 32}
+    project = str(uuid.uuid4())
+    session = {"id": str(uuid.uuid4()), "user_id": ALICE.id, "app": "unreal", "project_id": project}
+    clone = Clone(repo=MULTIVERSE, branch="main", name="Alice Example", email="1001+alice-gh@users.noreply.github.com",
+                  token="ghu_alice_secret")
+    launcher.start(session, tier, None, clone=clone)
+    launcher.start({**session, "id": str(uuid.uuid4())}, tier, None)
+    (_, cloning), (_, plain) = module.started
+    (secret,) = cloning["secrets"]
+    assert secret.ephemeral == clone.environment(), "the clone's variables, in a Secret of this start's own"
+    assert "secrets" not in plain, "a start with nothing to clone is handed nothing"
+    rest = json.dumps({key: value for key, value in cloning.items() if key != "secrets"}, default=str)
+    assert "ghu_alice_secret" not in rest and modal.secrets == {}, "not in its environment, its tags, or a named Secret"
+
+    launcher.sandbox = lambda sandbox_id: f"sandbox:{sandbox_id}"
+    assert launcher.clone_status("sb-1") is None, "a launcher module that cannot say reports no clone"
+    module.clone_status = lambda sandbox: {"state": "cloning", "path": f"/home/ubuntu/workspace/{sandbox}", "detail": ""}
+    assert launcher.clone_status("sb-1") == {"state": "cloning", "path": "/home/ubuntu/workspace/sandbox:sb-1", "detail": ""}
+
+
+def test_the_epic_link_is_the_registrys_own_answer_to_a_pull_of_epics_image():
+    """The real `GitHub` against a stand-in for ghcr.io's token service: what it asks, and what each answer means."""
     seen: list[httpx.Request] = []
-    status: dict[str, int] = {}
+    linked = "Basic " + base64.b64encode(b"alice-gh:gho_linked").decode()
 
     def answer(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        if request.url.path == "/login/oauth/access_token":
-            return httpx.Response(200, json={"access_token": "gho_new", "scope": "repo,read:packages", "token_type": "bearer"})
-        code = status.get(request.url.path, 200)
-        return httpx.Response(code, json={"message": "Not Found"} if code == 404 else {})
+        if (request.url.host, request.url.path) != ("ghcr.io", "/token"):
+            return httpx.Response(404, json={"message": "Not Found"})
+        given = request.headers.get("authorization")
+        if given is None:
+            return httpx.Response(401, json={"errors": [{"code": "UNAUTHORIZED", "message": "authentication required"}]})
+        if given == linked:
+            return httpx.Response(200, json={"token": "djE6ZXBpY2dhbWVzL3VucmVhbC1lbmdpbmU6MQ=="})
+        if "broken" in base64.b64decode(given.split()[1]).decode():
+            return httpx.Response(503, text="unavailable")
+        return httpx.Response(403, json={"errors": [{"code": "DENIED", "message": "denied"}]})
 
     github = GitHub()
     github.http = httpx.Client(headers=github.http.headers, transport=httpx.MockTransport(answer))
-    repo, package = "/repos/EpicGames/UnrealEngine", "/orgs/EpicGames/packages/container/unreal-engine"
-    assert github.epic_access("gho_t") is True
-    assert [(request.method, request.url.path) for request in seen] == [("GET", repo), ("GET", package)]
-    assert {request.headers["authorization"] for request in seen} == {"Bearer gho_t"}
+    assert github.registry_pull("alice-gh", "gho_linked") is True
+    asked = seen[0]
+    assert asked.method == "GET" and parse_qs(asked.url.query.decode()) == {
+        "scope": ["repository:epicgames/unreal-engine:pull"], "service": ["ghcr.io"]}
+    assert asked.headers["authorization"] == linked, "basic auth with the login and the token"
+    assert github.registry_pull("alice-gh", "gho_not_linked") is False, "the registry's DENIED"
+    with pytest.raises(GitHubError) as failure:
+        github.registry_pull("alice-gh", "gho_broken")
+    assert failure.value.status == 503, "anything else is no answer"
+
+
+def test_the_github_client_speaks_the_apps_token_and_installation_endpoints():
+    """The real `GitHub` over a recorded GitHub: the grant, its refresh, and the installations a user token lists."""
+    seen: list[httpx.Request] = []
+    pages = {1: [{"id": n} for n in range(100)], 2: [{"id": 100}]}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        path = request.url.path
+        if path == "/login/oauth/access_token":
+            form = parse_qs(request.content.decode())
+            if form.get("refresh_token") == ["ghr_dead"]:
+                return httpx.Response(200, json={"error": "bad_refresh_token", "error_description": "The refresh token passed is incorrect or expired."})
+            return httpx.Response(200, json={"access_token": "ghu_new", "expires_in": 28800, "refresh_token": "ghr_new",
+                                             "refresh_token_expires_in": 15897600, "scope": "", "token_type": "bearer"})
+        if path == "/user/installations":
+            page = int(request.url.params["page"])
+            return httpx.Response(200, json={"total_count": 101, "installations": pages[page]})
+        if path == "/user/installations/7/repositories":
+            return httpx.Response(200, json={"total_count": 1, "repositories": [{"full_name": "o/r"}]})
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    github = GitHub()
+    github.http = httpx.Client(headers=github.http.headers, transport=httpx.MockTransport(answer))
+    grant = Grant("ghu_new", "", 28800, "ghr_new", 15897600)
+    assert github.exchange("Iv1.app", "secret", "code", "https://api.example.test/v1/github/callback") == grant
+    assert parse_qs(seen[-1].content.decode()) == {"client_id": ["Iv1.app"], "client_secret": ["secret"], "code": ["code"],
+                                                   "redirect_uri": ["https://api.example.test/v1/github/callback"]}
+    assert github.refresh("Iv1.app", "secret", "ghr_old") == grant
+    assert parse_qs(seen[-1].content.decode()) == {"client_id": ["Iv1.app"], "client_secret": ["secret"],
+                                                   "grant_type": ["refresh_token"], "refresh_token": ["ghr_old"]}
+    with pytest.raises(GitHubError) as refused:
+        github.refresh("Iv1.app", "secret", "ghr_dead")
+    assert refused.value.status == 401 and "incorrect or expired" in refused.value.message, "GitHub refuses in a 200's body"
 
     seen.clear()
-    status[repo] = 404
-    assert github.epic_access("gho_t") is False and len(seen) == 1, "not in Epic's organization: the images are not asked"
-    status.update({repo: 200, package: 404})
-    assert github.epic_access("gho_t") is False, "the repository without the images is not a link the engine can be pulled with"
-    status[repo] = 500
-    with pytest.raises(GitHubError):
-        github.epic_access("gho_t")
+    assert [found["id"] for found in github.installations("ghu_new")] == list(range(101))
+    assert [request.url.params["page"] for request in seen] == ["1", "2"], "every page, until a short one"
+    assert {request.headers["authorization"] for request in seen} == {"Bearer ghu_new"}
+    assert github.installation_repositories("ghu_new", 7, 50) == [{"full_name": "o/r"}]
 
-    assert github.exchange("id", "secret", "code", "https://api.example.test/cb") == Grant("gho_new", "repo,read:packages")
-    assert [reads_packages(scope) for scope in ("repo,read:packages", "write:packages", "repo", "")] == [True, True, False, False]
+    authorize = urlsplit(GitHub.authorize_url("Iv1.app", "https://api.example.test/v1/github/callback", "s"))
+    assert "scope" not in parse_qs(authorize.query)
+    epic = parse_qs(urlsplit(GitHub.authorize_url("Ov23.epic", "https://api.example.test/v1/epic/callback", "s", "read:packages")).query)
+    assert epic["scope"] == ["read:packages"]
+    assert GitHub.install_url("lathe-studio", "a.b") == "https://github.com/apps/lathe-studio/installations/new?state=a.b"
 
 
 def test_skills_are_chosen_by_discipline_with_their_references(tmp_path):

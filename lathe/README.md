@@ -54,6 +54,22 @@ log as it goes; the page polls the log. The mechanism is in the docblocks of
 
 ## Setting it up
 
+**What to configure.** Each part below says how; this is the whole list.
+
+1. A Supabase project with the three migrations run, and its Site URL and
+   redirect URL.
+2. The Modal Secret `lathe`: at least `SUPABASE_URL`, `SUPABASE_SECRET_KEY`,
+   `LATHE_SITE_URL`, and `LATHE_SECRET_KEY`, then whichever integrations are
+   wanted (the table).
+3. A GitHub App, for "Connect GitHub": `GITHUB_APP_CLIENT_ID`,
+   `GITHUB_APP_CLIENT_SECRET`, and `GITHUB_APP_SLUG`.
+4. A GitHub OAuth App, for "Connect Epic": `EPIC_GITHUB_CLIENT_ID` and
+   `EPIC_GITHUB_CLIENT_SECRET`.
+5. The deploy, whose address is both apps' callback (`<api>/v1/github/callback`,
+   `<api>/v1/epic/callback`) and `LATHE_API_URL`.
+6. Netlify: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and
+   `VITE_LATHE_API_URL`.
+
 The order matters only in that the site needs the control plane's address and
 both need the Supabase project.
 
@@ -62,8 +78,12 @@ both need the Supabase project.
 [`20261121000000_lathe.sql`](supabase/migrations/20261121000000_lathe.sql), then
 [`20261124000000_studio.sql`](supabase/migrations/20261124000000_studio.sql),
 which adds the Studio's tables and the private Storage bucket `library` its
-media is kept in. A project that already ran the first runs only the second.
-Under Authentication, set the Site URL to the site's address and add
+media is kept in, then
+[`20261125000000_github_app.sql`](supabase/migrations/20261125000000_github_app.sql),
+which keeps the GitHub App's expiring tokens and adds the Epic connection. A
+project that already ran the earlier ones runs only those it has not; the last
+deletes the GitHub connections an OAuth App made before, whose users connect
+again. Under Authentication, set the Site URL to the site's address and add
 `<site>/app/` to the redirect URLs; turn on the Google and GitHub providers if
 the sign-in buttons for them should work.
 
@@ -82,25 +102,78 @@ and set:
 | `ANTHROPIC_API_KEY` | The Anthropic API key the Studio's agent runs on; without it a message to the agent is refused with 503. Its default model, Claude Fable 5.2, needs the key's organization to keep 30-day data retention (not zero data retention) |
 | `LATHE_AGENT_MODEL` | The agent's model, `claude-fable-5-2` unless set; another must take adaptive thinking, mid-conversation system messages, and the betas `control/agent.py` names |
 | `FAL_KEY` | fal.ai's key, for the agent's image and video generation; without it those tools say generation is not configured |
-| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | The GitHub OAuth App users connect their accounts through (below) |
-| `LATHE_SECRET_KEY` | A long random string (`python -c 'import secrets; print(secrets.token_urlsafe(48))'`) that signs GitHub's `state` and encrypts the tokens GitHub grants. Changing it disconnects every GitHub account, which their users connect again |
+| `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | The client ID and a client secret of the GitHub App users connect their accounts through (below) |
+| `GITHUB_APP_SLUG` | That app's name in its address, `https://github.com/apps/<slug>`, where "Don't see your repository?" sends a user to install it |
+| `EPIC_GITHUB_CLIENT_ID`, `EPIC_GITHUB_CLIENT_SECRET` | The client ID and a client secret of the OAuth App that reads packages, through which a user's own copy of Unreal Engine is pulled (below) |
+| `LATHE_SECRET_KEY` | A long random string (`python -c 'import secrets; print(secrets.token_urlsafe(48))'`) that signs GitHub's `state` and encrypts the tokens GitHub grants. Changing it disconnects every GitHub and Epic connection, which their users connect again |
 | `LATHE_TEAM_EMAILS` | The accounts, by email and comma-separated, that may start apps of status `team` (Nuke) |
 | `LATHE_NUKE_SEATS` | Nuke sessions that may be open at once across all users, `2` unless set: the seats its license has |
-| `LATHE_API_URL` | The API's own address, where GitHub's callback should not be built from the address a request arrives at |
+| `LATHE_API_URL` | The API's own address, where GitHub's callbacks should not be built from the address a request arrives at |
 
-**GitHub.** On GitHub, open Settings, Developer settings, OAuth Apps, and make a
-new OAuth App (under the organization that should own it, or a user). Its
-homepage URL is the site's address; its authorization callback URL is
-`<api>/v1/github/callback`, with the API's address the deploy below prints.
-Copy its client ID to `GITHUB_CLIENT_ID`, generate a client secret and copy it
-to `GITHUB_CLIENT_SECRET`, and set `LATHE_SECRET_KEY`. Users then connect their
-own accounts from a project's Environment panel; the app asks for the `repo`
-and `read:packages` scopes, and its token leaves the control plane only for
-GitHub and as the user's own credential for pulling Unreal Engine (below).
+**GitHub.** "Connect GitHub" is a GitHub App's user authorization, and the
+repositories a user can pick are those the app is installed on that they can
+reach. On GitHub, open Settings (of the organization that should own the app,
+or of a user), Developer settings, GitHub Apps, New GitHub App, and fill in:
 
-**Unreal Engine.** The catalog offers it as `byol`: anyone may start it once
-their own Epic account is linked, and the control plane checks that link
-through their GitHub account. What each user needs:
+| Field | Value |
+| --- | --- |
+| GitHub App name | The name users see when they authorize and install it, such as `Lathe Studio` (34 characters at most, unique on GitHub). Its address, `https://github.com/apps/<slug>`, names the slug |
+| Homepage URL | The site's address |
+| Callback URL | `<api>/v1/github/callback`, with the API's address the deploy below prints |
+| Expire user authorization tokens | On (the default): a token lasts eight hours and is renewed with a refresh token that lasts six months |
+| Request user authorization (OAuth) during installation | On: whoever installs it is connected too. GitHub then sends them to the callback URL and lets no Setup URL be set |
+| Enable Device Flow | Off |
+| Setup URL, Redirect on update | Empty, off |
+| Webhook, Active | Off: Lathe reads installations when a user lists them |
+| Repository permissions | Contents: Read and write. Metadata: Read-only (GitHub selects it). Everything else: No access |
+| Organization and account permissions | No access |
+| Where can this GitHub App be installed? | Any account, so every user and organization can install it on their own repositories |
+
+Create it, then copy its Client ID to `GITHUB_APP_CLIENT_ID`, generate a client
+secret and copy it to `GITHUB_APP_CLIENT_SECRET`, put the slug in
+`GITHUB_APP_SLUG`, and set `LATHE_SECRET_KEY`. No private key is needed: the
+control plane only acts as users, with their own tokens. A user connects from a
+project's Environment panel; a repository the list lacks is one the app is not
+installed on, and "Don't see your repository?" opens the app's installation
+page, where the user installs it on their account or an organization, picking
+its repositories. A member of an organization who may not install apps there
+sends a request from the same page, which emails the organization's owners; an
+owner approves once, and the repositories appear for everyone in it who can
+reach them. The app makes no repositories (it asks for no Administration
+permission): the studio sends a user to GitHub's own page for a new one.
+
+The agent saves only to a branch of its own (`lathe/...`), and an Unreal engine
+of a project linked to a repository clones it as it starts: the control plane
+refreshes the user's token where it has less than seven hours left and hands
+it, with the repository, its branch, and the user's name and noreply address,
+to that engine's Sandbox in an ephemeral Secret of its start alone. The token
+is in no row, event, or log.
+
+**Epic.** Pulling a user's own copy of Unreal Engine from
+`ghcr.io/epicgames/unreal-engine` takes a token that reads packages across
+GitHub, which a GitHub App's token cannot (the app is not installed on
+EpicGames), so "Connect Epic" is a small OAuth App of its own that asks for
+`read:packages` and nothing else. Open Settings, Developer settings, OAuth Apps,
+New OAuth App, and fill in:
+
+| Field | Value |
+| --- | --- |
+| Application name | The name users see when they authorize it, such as `Lathe Studio: Unreal Engine` |
+| Homepage URL | The site's address |
+| Authorization callback URL | `<api>/v1/epic/callback` |
+| Enable Device Flow | Off |
+
+Register it, copy its Client ID to `EPIC_GITHUB_CLIENT_ID`, and generate a
+client secret for `EPIC_GITHUB_CLIENT_SECRET`. The scope is asked for at each
+authorization; nothing on the app sets it. An OAuth App an earlier deployment
+used for `GITHUB_CLIENT_ID` asked for `repo` too: make a new one for Epic, and
+delete the old one (its page, Advanced, Delete application) with any
+`lathe-ghcr-<user id>` Secret it left in Modal.
+
+**Unreal Engine.** The catalog offers it as `byol`: anyone may start it, and
+the editor comes once their own Epic account is linked, which the control plane
+checks with Epic's registry through their Epic connection. What each user
+needs:
 
 1. An Epic Games account, which is how Epic licenses the engine to them: Epic's
    license counts every user of the editor as a licensee of their own and lets
@@ -108,19 +181,20 @@ through their GitHub account. What each user needs:
 2. That account linked to their GitHub account: on epicgames.com, Account, then
    Apps and Accounts, connect GitHub, then accept the invitation to the
    EpicGames organization that GitHub emails them, within seven days.
-3. GitHub connected in Lathe since Lathe asked for `read:packages`; an account
-   connected before then is connected again. `GET /v1/github` says
-   `epic_linked: true` once the account sees Epic's `EpicGames/UnrealEngine`
-   repository and its images on `ghcr.io/epicgames/unreal-engine`.
+3. That GitHub account connected in Lathe with "Connect Epic", under Unreal
+   Engine in the Environment panel. `GET /v1/epic` says `linked: true` once
+   `ghcr.io`'s token service grants the account a pull of
+   `epicgames/unreal-engine`, which it does only for an account Epic linked.
 
 What the deployment needs: the launcher's `unreal_image(registry_secret,
 version)` in `addons/modal/sandbox.py`, which pulls Epic's image with the
 user's own named Modal Secret and layers the session, Blender, and the bridge on
 it; until it is there, an Unreal start fails saying so. The control plane keeps
 that Secret, `lathe-ghcr-<user id>` (`REGISTRY_USERNAME` and
-`REGISTRY_PASSWORD`, the user's GitHub login and token), writing it before
-each Unreal start and when the user connects GitHub again and deleting it when
-they disconnect; a named Secret keeps the layer that pulls the engine cached
+`REGISTRY_PASSWORD`, the login and token of the user's Epic connection),
+writing it before each Unreal start on a linked account and when the user
+connects Epic again, and deleting it when they disconnect Epic; a named Secret
+keeps the layer that pulls the engine cached
 per user, where one made for each start would pull it again every time. A GPU tier with NVENC: the
 editor renders off screen on the GPU and streams itself. Inside the image, the
 Unreal project the session opens needs the Python Editor Script Plugin and the
@@ -164,12 +238,15 @@ pip install -r lathe/control/requirements.txt pytest && pytest lathe/control
 
 runs the API, the MCP endpoint, and the agent against stand-ins for Supabase,
 Modal, Anthropic, fal, and GitHub: who a credential names, what each route and
-tool returns and refuses, that one user's sessions and projects do not exist
+tool returns and refuses, that one user's sessions, projects, and connections do not exist
 for another, the agent's loop driven by a scripted model through every tool,
 that its conversation only ever grows, that `ask_user` ends a turn and a second
 message waits for the first, Nuke's gate and seats, Unreal Engine's gate on an
-account linked to Epic and the user's own credential it is pulled with, and
-that GitHub's callback refuses a state it did not sign and a page off the site.
+Epic connection the registry lets pull it and the user's own credential it is
+pulled with, the GitHub App's token refreshed before it expires and its
+repositories read from its installations, the clone an Unreal engine of a
+linked project starts with and that no row keeps its token, and that GitHub's
+callbacks refuse a state they did not sign and a page off the site.
 
 ```bash
 BLENDER=/path/to/blender pytest addons/modal/unreal
@@ -200,11 +277,17 @@ GPUs, and the session has not been run on one.
 The Studio's backend has run only against its tests' stand-ins: not yet against
 Anthropic, fal, GitHub, or Supabase Storage. The agent's model and generation
 are not billed in credits yet, a conversation that outgrows the model's context
-window has no compaction yet, and an engine does not get the project's GitHub
-repository as a credential of its session yet. The MCP endpoint has no project
-tools.
+window has no compaction yet, and only an Unreal engine clones the project's
+repository as it starts. The MCP endpoint has no project tools.
 
-Unreal Engine cannot start yet: the launcher has no `unreal_image`, since
-nobody on the team has a GitHub account linked to Epic to build and test it
-with. The Epic link check, the bridge to Blender, and the studio's handling of
+The GitHub App and the Epic connection have run only against stand-ins too.
+Whether the registry grants an OAuth App's token a pull of Epic's image is
+unchecked (GitHub's container registry documentation names only personal
+access tokens (classic)), and an authorization GitHub starts during an
+installation may come back without Lathe's state, which the callback answers by
+sending the user to the studio with nothing exchanged (`UNREAL.md`, What is
+open).
+
+Unreal Engine's editor cannot be pulled yet: nobody on the team has a GitHub
+account linked to Epic to build and test `unreal_image` with. The Epic link check, the bridge to Blender, and the studio's handling of
 the engine are built and tested against stand-ins (`UNREAL.md`).

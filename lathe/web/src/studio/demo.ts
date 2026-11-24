@@ -24,13 +24,14 @@
  * game there, and the agent found it and reported what it is, which the engine's card in the
  * Environment panel lists too. Asking to open it, from the agent's question or the card, opens it
  * in the editor and switches the screen to the Unreal view, the other of the engine's two
- * pictures. The demo's GitHub account is linked to Epic, whose account the editor runs on.
+ * pictures. The demo's Epic connection is linked, the GitHub account whose Epic account the
+ * editor runs on.
  *
  * The scene parameter (`?demo=<scene>`) picks a state: the film by default, `offline` for a
  * server with no integrations configured, `empty` for an account with no projects, `legacy` for a
- * control plane from before the studio, which answers its routes with 404, and `no-epic` for a
- * GitHub account not linked to Epic, where opening the game in Unreal answers with the steps that
- * link it.
+ * control plane from before the studio, which answers its routes with 404, and `no-epic` for an
+ * Epic connection whose GitHub account is not linked to Epic, where opening the game in Unreal
+ * answers with the steps that link it.
  * @module
  */
 import {
@@ -40,6 +41,7 @@ import {
   type Asset,
   type ControlPlane,
   type EngineStream,
+  type EpicStatus,
   type GitHubRepo,
   type GitHubStatus,
   type Health,
@@ -603,7 +605,7 @@ function gameEvents(start: number, cloned: number, engine: Session): Scheduled[]
  *
  * @param turn The turn.
  * @param at When each event is written, by seconds into the turn.
- * @param epicLinked Whether the demo's GitHub account is linked to Epic.
+ * @param epicLinked Whether the demo's Epic connection is linked to Epic.
  * @returns The turn's events.
  */
 function openInUnreal(turn: TurnId, at: (seconds: number) => number, epicLinked: boolean): Scheduled[] {
@@ -632,7 +634,7 @@ function openInUnreal(turn: TurnId, at: (seconds: number) => number, epicLinked:
           turn_id: turn,
           kind: 'text',
           data: {
-            text: `The Unreal Editor runs on your own Epic account, and your GitHub account isn’t linked to one yet. One step, in three parts:\n${steps}\n\nThen stop this Unreal engine and start it again: the start brings your own copy of the editor. The Desktop and your clone stay as they are.`,
+            text: `The Unreal Editor runs on your own Epic account, and the GitHub account you connected for Epic isn’t linked to one yet. One step, in three parts:\n${steps}\n\nThen stop this Unreal engine and start it again: the start brings your own copy of the editor. The Desktop and your clone stay as they are.`,
           },
         },
       },
@@ -764,7 +766,7 @@ function demoRepos(now: number): GitHubRepo[] {
  * @param text The person's message.
  * @param turn The turn it starts.
  * @param start When the turn starts.
- * @param epicLinked Whether the demo's GitHub account is linked to Epic.
+ * @param epicLinked Whether the demo's Epic connection is linked to Epic.
  * @returns The turn's events, with their times.
  */
 function reply(project: Project, text: string, turn: TurnId, start: number, epicLinked: boolean): Scheduled[] {
@@ -872,17 +874,16 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     ['demo-film', filmEvents(opened, libraries.get('demo-film') ?? [], snapshot(filmSimulation, opened - 11 * MINUTE))],
     ['demo-game', gameEvents(gameStart, gameCloned, snapshot(gameSimulation, gameStart + 70 * SECOND))],
   ]);
-  /** The demo's GitHub account, connected; linked to Epic unless the scene says otherwise. */
-  const demoGitHub: GitHubStatus = {
-    configured: true,
-    connected: true,
-    login: LOGIN,
-    avatar_url: AVATAR,
-    epic_linked: epicLinked,
-  };
+  /** The demo's GitHub account, connected. */
+  const demoGitHub: GitHubStatus = { configured: true, connected: true, login: LOGIN, avatar_url: AVATAR };
   let github: GitHubStatus = offline
-    ? { configured: false, connected: false, login: null, avatar_url: null, epic_linked: null }
+    ? { configured: false, connected: false, login: null, avatar_url: null }
     : demoGitHub;
+  /** The demo's Epic connection, the same account, linked to Epic unless the scene says otherwise. */
+  const demoEpic: EpicStatus = { configured: true, connected: true, login: LOGIN, linked: epicLinked, detail: null };
+  let epic: EpicStatus = offline
+    ? { configured: false, connected: false, login: null, linked: null, detail: null }
+    : demoEpic;
   let keys: ApiKey[] = [
     {
       id: 'demo-key-1',
@@ -898,6 +899,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     ok: true,
     agent: !offline,
     github: !offline,
+    epic: !offline,
     generation: !offline,
     billing: false,
     tiers: catalog.tiers.slice(0, Math.max(1, catalog.tiers.length - 1)).map((tier) => tier.id),
@@ -1073,7 +1075,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
           pinned: false,
           created_at: now,
           updated_at: now,
-          github_repo: null,
+          github_repo: fields.github_repo ?? null,
           library_sections: [],
           plan: [],
         };
@@ -1243,13 +1245,25 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
         github = demoGitHub;
         throw new ApiError(NOT_CONFIGURED, 'The demo connects without leaving the page: reload to see it connected.');
       }),
+    installGitHub: () =>
+      Promise.reject(new ApiError(NOT_CONFIGURED, 'The demo has no GitHub App to install: its repositories are all listed.')),
     githubRepos: () => soon(() => demoRepos(opened), 400),
     disconnectGitHub: () =>
       soon(() => {
-        github = { ...github, connected: false, login: null, avatar_url: null, epic_linked: null };
+        github = { ...github, connected: false, login: null, avatar_url: null };
       }),
     linkRepo: (projectId, link) =>
-      soon(() => change(projectId, { github_repo: 'repo' in link ? link.repo : `${LOGIN}/${link.create.name}` }), 600),
-    unlinkRepo: (projectId) => soon(() => change(projectId, { github_repo: null })),
+      soon(() => change(projectId, { github_repo: link.repo, github_branch: link.branch ?? null }), 600),
+    unlinkRepo: (projectId) => soon(() => change(projectId, { github_repo: null, github_branch: null })),
+    epic: () => (legacy ? missing() : Promise.resolve(epic)),
+    connectEpic: () =>
+      soon(() => {
+        epic = demoEpic;
+        throw new ApiError(NOT_CONFIGURED, 'The demo connects without leaving the page: reload to see it connected.');
+      }),
+    disconnectEpic: () =>
+      soon(() => {
+        epic = { ...epic, connected: false, login: null, linked: null, detail: null };
+      }),
   };
 }

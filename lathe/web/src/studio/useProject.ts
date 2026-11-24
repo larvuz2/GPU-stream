@@ -25,7 +25,10 @@
  * can bring the screen into view.
  *
  * Engines are re-read every three seconds while one is queued or starting, which is how an
- * engine the person started is seen coming up without the agent saying so. A running engine
+ * engine the person started is seen coming up without the agent saying so, and while a running
+ * Unreal engine is still cloning the project's repository, which is how its card follows the
+ * clone to the project it found; the machine is busy cloning then, so reading it keeps nothing
+ * awake that would otherwise stop, and the reading ends with the clone. A running engine
  * reported without stream links (by an event, since the log carries none, or by a listing that
  * could not mint them) keeps the ones it had, so a picture on screen never loses its frame.
  * @module
@@ -59,7 +62,7 @@ const HIDDEN_MS = 15_000;
 const RETRY_MS = 8000;
 /** How long a sent message counts its turn as running before the log shows the turn. */
 const TURN_GRACE_MS = 20_000;
-/** How often the engines are re-read while one is coming up. */
+/** How often the engines are re-read while one is coming up or cloning the project's repository. */
 const ENGINE_POLL_MS = 3000;
 
 /** A message the control plane accepted, shown as sent until the log has it. */
@@ -397,7 +400,10 @@ export function useProject(client: ControlPlane | null, project: Project, callba
     };
   }, [client, projectId]);
 
-  const comingUp = engines.some((engine) => engine.status === 'queued' || engine.status === 'starting');
+  // An engine still cloning the project's repository is followed too, until its machine reports the clone over
+  const comingUp = engines.some(
+    (engine) => engine.status === 'queued' || engine.status === 'starting' || engine.clone?.state === 'cloning',
+  );
   useEffect(() => {
     if (!comingUp) {
       return;

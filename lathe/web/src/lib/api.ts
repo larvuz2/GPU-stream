@@ -16,7 +16,7 @@
  * checked it, so a response of the wrong shape is an error here and never a broken render later.
  *
  * The studio's routes and shapes are the contract in `lathe/STUDIO.md`: projects, their engines
- * (sessions with a `project_id`), the agent's event log, the library, and GitHub. The event log is
+ * (sessions with a `project_id`), the agent's event log, the library, GitHub, and Epic. The event log is
  * read in pages after a cursor; an event whose kind or data this page does not know is skipped,
  * but still moves the cursor past it, so a newer control plane adds kinds without stalling an
  * older page.
@@ -77,6 +77,22 @@ export interface UnrealProject {
   size_bytes: number | null;
 }
 
+/** Where a clone an engine makes as it starts is: still running, finished, or failed. */
+const CLONE_STATES = ['cloning', 'done', 'failed'] as const;
+
+/**
+ * The clone of the project's repository a running Unreal engine made as it started, as its machine
+ * reports it.
+ */
+export interface EngineClone {
+  /** Whether it is still running, finished, or failed. */
+  state: (typeof CLONE_STATES)[number];
+  /** The folder it clones into, in the machine: the project's folder and the repository's name. */
+  path: string;
+  /** The machine's word on it: how far it has come, or why it failed. */
+  detail: string;
+}
+
 /** A workstation session, as the control plane reports it; a project's engine is one. */
 export interface Session {
   /** The session's identifier. */
@@ -108,6 +124,11 @@ export interface Session {
    * streams its desktop alone and in the event log, which never carries links.
    */
   streams?: EngineStream[];
+  /**
+   * The clone of the project's repository a running Unreal engine made as it started, absent where
+   * it made none or its machine does not say, and in the event log.
+   */
+  clone?: EngineClone;
 }
 
 /** An API key an agent authenticates with; the secret itself is only ever returned at creation. */
@@ -148,8 +169,10 @@ export interface Health {
   ok: boolean;
   /** Whether the agent can run: a model key is configured. */
   agent: boolean | null;
-  /** Whether GitHub can be connected: an OAuth App is configured. */
+  /** Whether GitHub can be connected: a GitHub App is configured. */
   github: boolean | null;
+  /** Whether Epic can be connected: the OAuth App that pulls the person's own Unreal Editor is configured. */
+  epic: boolean | null;
   /** Whether images and videos can be generated: a generation key is configured. */
   generation: boolean | null;
   /** Whether it can sell credits. */
@@ -213,6 +236,11 @@ export interface Project {
   updated_at: string;
   /** The GitHub repository it is linked to, as `owner/name`, or `null`. */
   github_repo: string | null;
+  /**
+   * The branch of it an Unreal engine clones, or `null` (or absent, from an older control plane)
+   * for the repository's default branch.
+   */
+  github_branch?: string | null;
   /** The library's sections, in the order they are shown; the project's own, never a fixed list. */
   library_sections: string[];
   /** The agent's plan. */
@@ -227,6 +255,8 @@ export interface NewProject {
   discipline: string;
   /** The kind of work within the discipline. */
   format: string;
+  /** The repository it starts linked to, as `owner/name`: a project imported from GitHub. */
+  github_repo?: string;
 }
 
 /** The fields of a project that can be changed; each is left as it is when absent. */
@@ -414,9 +444,9 @@ export interface EventPage {
   cursor: number | null;
 }
 
-/** The person's GitHub connection. */
+/** The person's GitHub connection, through the control plane's GitHub App. */
 export interface GitHubStatus {
-  /** Whether the control plane has a GitHub OAuth App to connect with. */
+  /** Whether the control plane has a GitHub App to connect with. */
   configured: boolean;
   /** Whether the person has connected their account. */
   connected: boolean;
@@ -424,15 +454,30 @@ export interface GitHubStatus {
   login: string | null;
   /** Their GitHub avatar, once connected. */
   avatar_url: string | null;
-  /**
-   * Whether their GitHub account is linked to an Epic account, which Unreal Engine starts on: GitHub's
-   * answer, or `null` while it is unknown (GitHub not connected, connected before the studio asked
-   * to read packages, or a control plane that does not check).
-   */
-  epic_linked: boolean | null;
 }
 
-/** A repository of the person's that a project can be linked to. */
+/**
+ * The person's Epic connection: the GitHub account their Epic account is linked to, connected
+ * through an OAuth App that only reads packages, which their own copy of the Unreal Editor is
+ * pulled with.
+ */
+export interface EpicStatus {
+  /** Whether the control plane has that OAuth App to connect with. */
+  configured: boolean;
+  /** Whether the person has connected it. */
+  connected: boolean;
+  /** The GitHub login connected for it, once connected. */
+  login: string | null;
+  /**
+   * Whether Epic's registry lets that account pull the editor: linked, not linked, or `null` while
+   * unknown (not connected, a token GitHub no longer takes, or the registry not answering).
+   */
+  linked: boolean | null;
+  /** Why the link is unknown, where it is unknown though connected. */
+  detail: string | null;
+}
+
+/** A repository the person can link a project to: one of the GitHub App's installations they reach. */
 export interface GitHubRepo {
   /** `owner/name`. */
   full_name: string;
@@ -444,8 +489,16 @@ export interface GitHubRepo {
   updated_at: string;
 }
 
-/** How a project is linked to a repository: an existing one, or one created for it. */
-export type RepoLink = { repo: string } | { create: { name: string; private: boolean } };
+/**
+ * How a project is linked to a repository: its `owner/name`, and the branch an Unreal engine clones
+ * where not its default. The GitHub App makes no repositories: a new one is made on GitHub.
+ */
+export interface RepoLink {
+  /** The repository, as `owner/name`. */
+  repo: string;
+  /** The branch an Unreal engine clones, where not the default. */
+  branch?: string;
+}
 
 /**
  * The operations the studio performs, whatever answers them.
@@ -503,14 +556,25 @@ export interface ControlPlane {
   github(): Promise<GitHubStatus>;
   /** Starts connecting GitHub and returns GitHub's authorization page, which returns to `returnTo`. */
   connectGitHub(returnTo: string): Promise<string>;
-  /** Lists the person's repositories. */
+  /**
+   * Returns the GitHub App's installation page, where the person installs it on an account or
+   * organization, or asks its owners to, returning to `returnTo`.
+   */
+  installGitHub(returnTo: string): Promise<string>;
+  /** Lists the repositories of the GitHub App's installations the person reaches. */
   githubRepos(): Promise<GitHubRepo[]>;
   /** Disconnects GitHub. */
   disconnectGitHub(): Promise<void>;
-  /** Links a project to a repository, creating it first when asked to. */
+  /** Links a project to a repository. */
   linkRepo(projectId: string, link: RepoLink): Promise<Project>;
   /** Unlinks a project from its repository. */
   unlinkRepo(projectId: string): Promise<Project>;
+  /** Reads the person's Epic connection, and whether Epic's registry lets it pull the editor. */
+  epic(): Promise<EpicStatus>;
+  /** Starts connecting Epic and returns GitHub's authorization page, which returns to `returnTo`. */
+  connectEpic(returnTo: string): Promise<string>;
+  /** Disconnects Epic. */
+  disconnectEpic(): Promise<void>;
 }
 
 /** The status an {@link ApiError} carries when no response arrived at all. */
@@ -602,6 +666,10 @@ const isStrings = arrayOf(isString);
 const isEngineStream: Guard<EngineStream> = (value): value is EngineStream =>
   isRecord(value) && isString(value.name) && isWebUrl(value.url);
 
+/** Checks a value into an {@link EngineClone}. */
+const isEngineClone: Guard<EngineClone> = (value): value is EngineClone =>
+  isRecord(value) && oneOf(CLONE_STATES)(value.state) && isString(value.path) && isString(value.detail);
+
 /** Checks a value into a {@link Session}. */
 const isSession: Guard<Session> = (value): value is Session =>
   isRecord(value) &&
@@ -617,7 +685,8 @@ const isSession: Guard<Session> = (value): value is Session =>
   isNumber(value.credits_used) &&
   isNullableNumber(value.queue_position) &&
   optional(isNullableString)(value.project_id) &&
-  optional(arrayOf(isEngineStream))(value.streams);
+  optional(arrayOf(isEngineStream))(value.streams) &&
+  optional(isEngineClone)(value.clone);
 
 /** Checks a value into an {@link UnrealProject}. */
 const isUnrealProject: Guard<UnrealProject> = (value): value is UnrealProject =>
@@ -654,6 +723,8 @@ interface HealthReport {
   agent?: boolean | null;
   /** Whether GitHub can be connected. */
   github?: boolean | null;
+  /** Whether Epic can be connected. */
+  epic?: boolean | null;
   /** Whether media can be generated. */
   generation?: boolean | null;
   /** Whether it can sell credits. */
@@ -668,6 +739,7 @@ const isHealthReport: Guard<HealthReport> = (value): value is HealthReport =>
   isBoolean(value.ok) &&
   optional(isNullableBoolean)(value.agent) &&
   optional(isNullableBoolean)(value.github) &&
+  optional(isNullableBoolean)(value.epic) &&
   optional(isNullableBoolean)(value.generation) &&
   optional(isNullableBoolean)(value.billing) &&
   optional(isStrings)(value.tiers);
@@ -697,6 +769,7 @@ const isProject: Guard<Project> = (value): value is Project =>
   isString(value.created_at) &&
   isString(value.updated_at) &&
   isNullableString(value.github_repo) &&
+  optional(isNullableString)(value.github_branch) &&
   isStrings(value.library_sections) &&
   isPlan(value.plan);
 
@@ -825,7 +898,7 @@ function parseEventPage(body: unknown): EventPage {
 
 /** The GitHub status as it is sent, before an absent login or avatar is read as `null`. */
 interface GitHubReport {
-  /** Whether an OAuth App is configured. */
+  /** Whether a GitHub App is configured. */
   configured: boolean;
   /** Whether the person has connected. */
   connected: boolean;
@@ -833,8 +906,6 @@ interface GitHubReport {
   login?: string | null;
   /** Their avatar. */
   avatar_url?: string | null;
-  /** Whether the account is linked to Epic. */
-  epic_linked?: boolean | null;
 }
 
 /** Checks a value into a {@link GitHubReport}. */
@@ -843,8 +914,30 @@ const isGitHubReport: Guard<GitHubReport> = (value): value is GitHubReport =>
   isBoolean(value.configured) &&
   isBoolean(value.connected) &&
   optional(isNullableString)(value.login) &&
-  optional(nullable(isWebUrl))(value.avatar_url) &&
-  optional(isNullableBoolean)(value.epic_linked);
+  optional(nullable(isWebUrl))(value.avatar_url);
+
+/** The Epic status as it is sent, before an absent login or detail is read as `null`. */
+interface EpicReport {
+  /** Whether the Epic OAuth App is configured. */
+  configured: boolean;
+  /** Whether the person has connected. */
+  connected: boolean;
+  /** The GitHub login connected for Epic. */
+  login?: string | null;
+  /** Whether Epic's registry lets it pull the editor. */
+  linked: boolean | null;
+  /** Why that is unknown. */
+  detail?: string | null;
+}
+
+/** Checks a value into an {@link EpicReport}. */
+const isEpicReport: Guard<EpicReport> = (value): value is EpicReport =>
+  isRecord(value) &&
+  isBoolean(value.configured) &&
+  isBoolean(value.connected) &&
+  optional(isNullableString)(value.login) &&
+  isNullableBoolean(value.linked) &&
+  optional(isNullableString)(value.detail);
 
 /** Checks a value into a {@link GitHubRepo}. */
 const isGitHubRepo: Guard<GitHubRepo> = (value): value is GitHubRepo =>
@@ -988,6 +1081,7 @@ export function createControlPlane(baseUrl: string, accessToken: () => Promise<s
         ok: report.ok,
         agent: report.agent ?? null,
         github: report.github ?? null,
+        epic: report.epic ?? null,
         generation: report.generation ?? null,
         billing: report.billing ?? null,
         tiers: report.tiers ?? null,
@@ -1058,11 +1152,12 @@ export function createControlPlane(baseUrl: string, accessToken: () => Promise<s
         connected: report.connected,
         login: report.login ?? null,
         avatar_url: report.avatar_url ?? null,
-        epic_linked: report.epic_linked ?? null,
       };
     },
     connectGitHub: async (returnTo) =>
       field(await request('POST', '/v1/github/connect', { return_to: returnTo }), 'url', isWebUrl),
+    installGitHub: async (returnTo) =>
+      field(await request('POST', '/v1/github/install', { return_to: returnTo }), 'url', isWebUrl),
     githubRepos: async () => field(await request('GET', '/v1/github/repos'), 'repos', arrayOf(isGitHubRepo)),
     disconnectGitHub: async () => {
       await request('DELETE', '/v1/github');
@@ -1071,5 +1166,20 @@ export function createControlPlane(baseUrl: string, accessToken: () => Promise<s
       field(await request('POST', projectPath(projectId, '/github'), link), 'project', isProject),
     unlinkRepo: async (projectId) =>
       field(await request('DELETE', projectPath(projectId, '/github')), 'project', isProject),
+    epic: async () => {
+      const report = expect(await request('GET', '/v1/epic'), isEpicReport);
+      return {
+        configured: report.configured,
+        connected: report.connected,
+        login: report.login ?? null,
+        linked: report.linked,
+        detail: report.detail ?? null,
+      };
+    },
+    connectEpic: async (returnTo) =>
+      field(await request('POST', '/v1/epic/connect', { return_to: returnTo }), 'url', isWebUrl),
+    disconnectEpic: async () => {
+      await request('DELETE', '/v1/epic');
+    },
   };
 }

@@ -29,14 +29,14 @@ import { brand, catalog } from '../lib/catalog';
 import { isBoolean, isNumber } from '../lib/narrow';
 import { ConnectClaudeDialog } from './ConnectClaude';
 import { CreditsDialog } from './CreditsDialog';
-import type { GitHubReturn } from './EnvironmentPanel';
+import type { EpicReturn, GitHubReturn } from './EnvironmentPanel';
 import { useMediaQuery, usePreference } from './hooks';
 import { NewProjectDialog, type ProjectDraft } from './NewProjectDialog';
 import { ErrorNotice, Notice } from './Notice';
 import { DisciplineIcon } from './DisciplineIcon';
 import { Sidebar } from './Sidebar';
 import type { StreamStandIn } from './Stage';
-import { connected, useAccount, useGitHub, useProjects } from './useAccount';
+import { connected, useAccount, useEpic, useGitHub, useProjects } from './useAccount';
 import { Workspace, type MobileTab } from './Workspace';
 
 /** The query parameter that names the open project. */
@@ -71,6 +71,8 @@ interface StudioProps {
   onDraftDone: () => void;
   /** The outcome of a return from GitHub, shown once. */
   githubReturned: GitHubReturn;
+  /** The outcome of a return from connecting Epic, shown once. */
+  epicReturned: EpicReturn;
   /** Drawn instead of the stream, where there is none to show. */
   standIn?: StreamStandIn;
 }
@@ -90,10 +92,21 @@ function projectInAddress(): string | null {
  * @param props The component's props.
  * @returns The page.
  */
-export function Studio({ client, email, demo, onSignOut, draft, onDraftDone, githubReturned, standIn }: StudioProps) {
+export function Studio({
+  client,
+  email,
+  demo,
+  onSignOut,
+  draft,
+  onDraftDone,
+  githubReturned,
+  epicReturned,
+  standIn,
+}: StudioProps) {
   const account = useAccount(client);
   const projects = useProjects(client);
   const github = useGitHub(client);
+  const epic = useEpic(client);
   const narrow = useMediaQuery(NARROW);
 
   const [selectedId, setSelectedId] = useState<string | null>(projectInAddress);
@@ -218,6 +231,8 @@ export function Studio({ client, email, demo, onSignOut, draft, onDraftDone, git
           projects={projects}
           github={github}
           githubReturned={githubReturned}
+          epic={epic}
+          epicReturned={epicReturned}
           focus={focus}
           onFocus={setFocusWanted}
           narrow={narrow}
@@ -243,6 +258,7 @@ export function Studio({ client, email, demo, onSignOut, draft, onDraftDone, git
       <NewProjectDialog
         open={creating}
         draft={newProject}
+        github={github}
         onClose={() => {
           setCreating(false);
           setNewProject(null);

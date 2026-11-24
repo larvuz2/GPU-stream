@@ -13,6 +13,12 @@
  * (`/app/?discipline=…&format=…&prompt=…`) opens the dialog at the details with all three filled;
  * a format the catalog does not list for the discipline is kept as one more choice, since the
  * format is the project's own text.
+ *
+ * A Games project can also be imported from GitHub: "Import from GitHub" lists the repositories of
+ * the control plane's GitHub App the person reaches, and the project is made already linked to
+ * the one picked, so an Unreal engine started in it clones it. "Create new" is the project made
+ * from nothing, as for every other discipline. Connecting GitHub from the dialog comes back to it
+ * on the import (`source=github`).
  * @module
  */
 import { useEffect, useId, useRef, useState, type SubmitEvent } from 'react';
@@ -23,7 +29,16 @@ import { catalog, findApp, findDiscipline, type Discipline } from '../lib/catalo
 import { cx } from '../lib/cx';
 import { ErrorNotice } from './Notice';
 import { DisciplineIcon } from './DisciplineIcon';
+import { GitHubMark } from './Menu';
 import { appStatusLabel } from './present';
+import { RepoList } from './RepoList';
+import type { GitHub } from './useAccount';
+
+/** The disciplines whose projects can be imported from a GitHub repository. */
+const IMPORTABLE = new Set(['games']);
+
+/** Where a new project comes from. */
+type Source = 'new' | 'github';
 
 /** What the dialog opens filled with, from a link into the studio. */
 export interface ProjectDraft {
@@ -33,6 +48,8 @@ export interface ProjectDraft {
   format?: string;
   /** The first message for the agent. */
   prompt?: string;
+  /** Where the project comes from: `github` opens the dialog on importing a repository. */
+  source?: string;
 }
 
 /** Props of {@link NewProjectDialog}. */
@@ -41,6 +58,8 @@ interface NewProjectDialogProps {
   open: boolean;
   /** What it opens filled with. */
   draft: ProjectDraft | null;
+  /** The GitHub connection, which a project imported from GitHub is made through. */
+  github: GitHub;
   /** Closes the dialog. */
   onClose: () => void;
   /** Creates the project and sends its first message, when there is one. */
@@ -53,11 +72,11 @@ interface NewProjectDialogProps {
  * @param props The component's props.
  * @returns The dialog.
  */
-export function NewProjectDialog({ open, draft, onClose, onCreate }: NewProjectDialogProps) {
+export function NewProjectDialog({ open, draft, github, onClose, onCreate }: NewProjectDialogProps) {
   const titleId = useId();
   return (
     <Dialog open={open} onClose={onClose} labelledBy={titleId} wide>
-      <NewProjectForm titleId={titleId} draft={draft} onCreate={onCreate} />
+      <NewProjectForm titleId={titleId} draft={draft} github={github} onCreate={onCreate} />
     </Dialog>
   );
 }
@@ -68,6 +87,8 @@ interface NewProjectFormProps {
   titleId: string;
   /** What the form starts filled with. */
   draft: ProjectDraft | null;
+  /** The GitHub connection. */
+  github: GitHub;
   /** Creates the project. */
   onCreate: (project: NewProject, prompt: string) => Promise<void>;
 }
@@ -78,7 +99,7 @@ interface NewProjectFormProps {
  * @param props The component's props.
  * @returns The content.
  */
-function NewProjectForm({ titleId, draft, onCreate }: NewProjectFormProps) {
+function NewProjectForm({ titleId, draft, github, onCreate }: NewProjectFormProps) {
   const [discipline, setDiscipline] = useState<Discipline | undefined>(() =>
     draft?.discipline === undefined ? undefined : findDiscipline(draft.discipline),
   );
@@ -92,6 +113,7 @@ function NewProjectForm({ titleId, draft, onCreate }: NewProjectFormProps) {
       titleId={titleId}
       discipline={discipline}
       draft={draft?.discipline === discipline.id ? draft : { prompt: draft?.prompt }}
+      github={github}
       onBack={() => {
         setDiscipline(undefined);
       }}
@@ -159,6 +181,8 @@ interface DetailsProps {
   discipline: Discipline;
   /** What the fields start filled with. */
   draft: ProjectDraft;
+  /** The GitHub connection. */
+  github: GitHub;
   /** Goes back to the disciplines. */
   onBack: () => void;
   /** Creates the project. */
@@ -166,12 +190,13 @@ interface DetailsProps {
 }
 
 /**
- * Renders the details of a new project: its format, its name, and the first message.
+ * Renders the details of a new project: its format, where it comes from where it can be imported,
+ * its name, and the first message.
  *
  * @param props The component's props.
  * @returns The form.
  */
-function Details({ titleId, discipline, draft, onBack, onCreate }: DetailsProps) {
+function Details({ titleId, discipline, draft, github, onBack, onCreate }: DetailsProps) {
   const nameId = useId();
   const promptId = useId();
   const requested = draft.format?.trim() ?? '';
@@ -186,7 +211,14 @@ function Details({ titleId, discipline, draft, onBack, onCreate }: DetailsProps)
   const [prompt, setPrompt] = useState(draft.prompt ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const fallbackName = `Untitled ${format.toLowerCase() || discipline.name.toLowerCase()}`;
+  const importable = IMPORTABLE.has(discipline.id);
+  const [source, setSource] = useState<Source>(importable && draft.source === 'github' ? 'github' : 'new');
+  const [repo, setRepo] = useState<string | null>(null);
+  const importing = source === 'github';
+  const fallbackName =
+    importing && repo !== null
+      ? (repo.split('/').pop() ?? repo)
+      : `Untitled ${format.toLowerCase() || discipline.name.toLowerCase()}`;
   const engines = discipline.engines.map(findApp).filter((app) => app !== undefined);
   const nameField = useRef<HTMLInputElement>(null);
 
@@ -211,7 +243,8 @@ function Details({ titleId, discipline, draft, onBack, onCreate }: DetailsProps)
     setBusy(true);
     setError(null);
     try {
-      await onCreate({ name: name.trim() || fallbackName, discipline: discipline.id, format }, prompt.trim());
+      const made: NewProject = { name: name.trim() || fallbackName, discipline: discipline.id, format };
+      await onCreate(importing && repo !== null ? { ...made, github_repo: repo } : made, prompt.trim());
     } catch (failure) {
       setError(failure);
       setBusy(false);
@@ -256,6 +289,40 @@ function Details({ titleId, discipline, draft, onBack, onCreate }: DetailsProps)
           ))}
         </div>
       </fieldset>
+
+      {importable ? (
+        <fieldset className="mt-6">
+          <legend className="text-sm font-semibold text-muted">Start from</legend>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {(['new', 'github'] as const).map((choice) => (
+              <label key={choice} className="chip h-9 px-3.5 text-sm">
+                <input
+                  type="radio"
+                  name="source"
+                  className="sr-only"
+                  value={choice}
+                  checked={source === choice}
+                  onChange={() => {
+                    setSource(choice);
+                  }}
+                />
+                {choice === 'new' ? 'Create new' : 'Import from GitHub'}
+              </label>
+            ))}
+          </div>
+          {importing ? (
+            <div className="mt-3">
+              <GitHubImport
+                github={github}
+                discipline={discipline.id}
+                format={format}
+                chosen={repo}
+                onChoose={setRepo}
+              />
+            </div>
+          ) : null}
+        </fieldset>
+      ) : null}
 
       <div className="mt-6">
         <label htmlFor={nameId} className="text-sm font-semibold text-muted">
@@ -313,12 +380,114 @@ function Details({ titleId, discipline, draft, onBack, onCreate }: DetailsProps)
       )}
 
       <div className="mt-7 flex justify-end">
-        <button type="submit" className="btn btn-primary" disabled={busy || format === ''}>
+        <button type="submit" className="btn btn-primary" disabled={busy || format === '' || (importing && repo === null)}>
           {busy ? <span className="spinner" aria-hidden="true" /> : null}
           {prompt.trim() === '' ? 'Create project' : 'Create and send'}
           {busy ? null : <ArrowRight className="size-4" aria-hidden="true" />}
         </button>
       </div>
     </form>
+  );
+}
+
+/** Props of {@link GitHubImport}. */
+interface GitHubImportProps {
+  /** The GitHub connection. */
+  github: GitHub;
+  /** The discipline picked, which connecting comes back to. */
+  discipline: string;
+  /** The format picked, which connecting comes back to. */
+  format: string;
+  /** The repository picked, as `owner/name`, or `null`. */
+  chosen: string | null;
+  /** Picks a repository. */
+  onChoose: (repo: string) => void;
+}
+
+/**
+ * Renders the import of a repository: connecting GitHub first where it is not, then the GitHub
+ * App's repositories to pick from, with the way to add one the app is not on.
+ *
+ * Connecting and installing leave the page for GitHub; they come back to the dialog, on this
+ * discipline and format and on the import, through the link the studio opens the dialog from.
+ *
+ * @param props The component's props.
+ * @returns The block.
+ */
+function GitHubImport({ github, discipline, format, chosen, onChoose }: GitHubImportProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const status = github.status;
+
+  /**
+   * Sends the browser to GitHub, coming back to this dialog on the import.
+   *
+   * @param go Connecting, or installing the app.
+   */
+  async function leave(go: (back: URL) => Promise<void>): Promise<void> {
+    const back = new URL(window.location.href);
+    back.searchParams.set('discipline', discipline);
+    back.searchParams.set('format', format);
+    back.searchParams.set('source', 'github');
+    setBusy(true);
+    setError(null);
+    try {
+      await go(back);
+    } catch (failure) {
+      setError(failure);
+      setBusy(false);
+    }
+  }
+
+  let body;
+  if (github.availability === 'loading') {
+    body = <div className="h-9 animate-pulse rounded-xl bg-white/[0.04]" aria-label="Loading GitHub" />;
+  } else if (!status?.configured) {
+    body = (
+      <p className="text-sm text-faint">
+        GitHub is not configured on this server yet. Create the project new, and link a repository once it is.
+      </p>
+    );
+  } else if (!status.connected) {
+    body = (
+      <div>
+        <p className="text-sm text-muted">Connect GitHub to pick your team&rsquo;s repository.</p>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm mt-2.5"
+          disabled={busy}
+          onClick={() => {
+            void leave(github.connect);
+          }}
+        >
+          {busy ? <span className="spinner size-3.5" aria-hidden="true" /> : <GitHubMark className="size-4" />}
+          Connect GitHub
+        </button>
+      </div>
+    );
+  } else {
+    body = (
+      <RepoList
+        loadRepos={github.repos}
+        busy={busy}
+        chosen={chosen}
+        onPick={(repo) => {
+          onChoose(repo.full_name);
+        }}
+        onInstall={() => {
+          void leave(github.install);
+        }}
+      />
+    );
+  }
+  return (
+    <div className="rounded-xl border border-line p-2.5">
+      {body}
+      {error === null ? null : (
+        <div className="mt-2">
+          <ErrorNotice error={error} />
+        </div>
+      )}
+    </div>
   );
 }

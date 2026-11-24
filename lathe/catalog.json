@@ -493,7 +493,7 @@
         "steps": [
           "On epicgames.com, open Account, then Apps and Accounts, and connect your GitHub account.",
           "Accept the invitation to the EpicGames organization that GitHub emails you, within seven days.",
-          "Reconnect GitHub in the project's Environment panel."
+          "Connect Epic in the project's Environment panel, signing in to GitHub with that same account."
         ]
       }
     },

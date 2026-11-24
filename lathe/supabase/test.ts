@@ -17,8 +17,9 @@
  * only in its user's project and a seat-capped app stops at its seats, that a
  * project runs one turn at a time and a dead turn does not hold it, and that
  * the keys a browser holds reach no row and no function. The migrations also
- * apply to a database with no Storage at all, as the first did. `npm test`
- * runs it; it exits non-zero on a failure.
+ * apply to a database with no Storage at all, as the first did, and moving to
+ * the GitHub App drops the OAuth App's grants a database already held. `npm
+ * test` runs it; it exits non-zero on a failure.
  * @module
  */
 import { PGlite } from '@electric-sql/pglite';
@@ -200,7 +201,11 @@ check("a tag names one entry of a project", /duplicate key/.test(await refused(`
 check("the same tag in another project is its own", (await refused(`insert into assets (project_id,section,name,tag) values ('${pb.id}','Songs','Mara','@mara')`)) === null);
 check("untagged entries do not collide", (await refused(`insert into assets (project_id,section,name) values ('${pa.id}','Props','Cup'),('${pa.id}','Props','Plate')`)) === null);
 await db.exec(`insert into agent_messages (project_id,role,content) values ('${pa.id}','user','"hello"')`);
-await db.exec(`insert into github_connections (user_id,login,token_encrypted) values ('${A}','mara-films','gAAAA-sealed')`);
+await db.exec(`insert into github_connections (user_id,login,token_encrypted,refresh_token_encrypted,token_expires_at,github_id,name)
+  values ('${A}','mara-films','gAAAA-sealed','gAAAA-refresh',now() + interval '8 hours',1001,'Mara')`);
+await db.exec(`insert into epic_connections (user_id,login,token_encrypted,scope) values ('${A}','mara-films','gAAAA-epic','read:packages')`);
+check("a project names no branch until it chooses one", (await one("select github_branch from projects where id=$1", [pa.id])).github_branch === null);
+check("one Epic connection per user", /duplicate key/.test(await refused(`insert into epic_connections (user_id,login,token_encrypted) values ('${A}','x','y')`) ?? ""));
 const pc = await one("insert into projects (user_id,name,discipline) values ($1,'Gone','media') returning *", [A]);
 const ec = await one("select * from lathe_request_session($1,'blender','cpu','auto',1,5,$2)", [A, pc.id]);
 await db.exec(`insert into assets (project_id,section,name) values ('${pc.id}','Props','Hat'); insert into agent_messages (project_id,role,content) values ('${pc.id}','user','"bye"')`);
@@ -214,6 +219,13 @@ await one("select * from lathe_end_session($1,'stopped',false)", [ec.id]);
 
 const bucket = await one("select * from storage.buckets where id='library'");
 check("the library bucket exists and is private", bucket.public === false, bucket);
+const upgraded = new PGlite();
+await upgraded.exec(SUPABASE);
+for (const sql of migrations.slice(0, -1)) await upgraded.exec(sql);
+await upgraded.exec(`insert into auth.users values ('${A}','a@x.test'); select lathe_ensure_profile('${A}','a@x.test',60)`);
+await upgraded.exec(`insert into github_connections (user_id,login,token_encrypted,scope) values ('${A}','mara-films','gAAAA-oauth','repo,read:packages')`);
+await upgraded.exec(migrations[migrations.length - 1] ?? "");
+check("moving to the GitHub App drops the OAuth App's grants", ((await upgraded.query<Row>("select count(*)::int n from github_connections")).rows[0] ?? {}).n === 0);
 const bare = new PGlite();
 await bare.exec(SUPABASE);
 check("the migrations apply where there is no Storage", await (async () => {
@@ -231,7 +243,7 @@ for (const role of ["anon", "authenticated"]) {
   check(`${role} sees no profile rows`, (await one("select count(*)::int n from profiles")).n === 0);
   check(`${role} sees no session rows`, (await one("select count(*)::int n from sessions")).n === 0);
   check(`${role} sees no api key rows`, (await one("select count(*)::int n from api_keys")).n === 0);
-  for (const table of ["projects", "assets", "project_events", "agent_messages", "github_connections"]) {
+  for (const table of ["projects", "assets", "project_events", "agent_messages", "github_connections", "epic_connections"]) {
     check(`${role} sees no ${table} rows`, (await one(`select count(*)::int n from ${table}`)).n === 0);
   }
   check(`${role} cannot start a turn`, /permission denied/.test(await refused("select lathe_begin_turn($1,$2,'x',120)", [pa.id, A]) ?? ""));

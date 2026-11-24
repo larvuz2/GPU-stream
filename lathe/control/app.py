@@ -13,8 +13,8 @@ session the way the service does.
 
 Everything the deployment is configured with is the environment of the Modal
 Secret `lathe`, read once per container (`config`). The Supabase secret key,
-the Anthropic, fal, and GitHub credentials, and the secret that seals GitHub
-tokens live only there; Modal's own credentials are the function's identity,
+the Anthropic and fal keys, the GitHub App's and the Epic OAuth App's client
+secrets, and the secret that seals GitHub's tokens live only there; Modal's own credentials are the function's identity,
 so this app starts Sandboxes without holding a Modal token.
 
 The Sandboxes are the launcher's (`addons/modal/sandbox.py`), which this image
@@ -68,8 +68,11 @@ def config() -> Any:
         anthropic_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         agent_model=os.environ.get("LATHE_AGENT_MODEL", ""),
         fal_key=os.environ.get("FAL_KEY", ""),
-        github_client_id=os.environ.get("GITHUB_CLIENT_ID", ""),
-        github_client_secret=os.environ.get("GITHUB_CLIENT_SECRET", ""),
+        github_app_client_id=os.environ.get("GITHUB_APP_CLIENT_ID", ""),
+        github_app_client_secret=os.environ.get("GITHUB_APP_CLIENT_SECRET", ""),
+        github_app_slug=os.environ.get("GITHUB_APP_SLUG", ""),
+        epic_client_id=os.environ.get("EPIC_GITHUB_CLIENT_ID", ""),
+        epic_client_secret=os.environ.get("EPIC_GITHUB_CLIENT_SECRET", ""),
         secret_key=os.environ.get("LATHE_SECRET_KEY", ""),
         team_emails=frozenset(
             email.strip().lower() for email in os.environ.get("LATHE_TEAM_EMAILS", "").split(",") if email.strip()

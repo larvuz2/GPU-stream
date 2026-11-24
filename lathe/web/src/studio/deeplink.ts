@@ -7,6 +7,9 @@
 /**
  * Links into the studio that start a project: `/app/?discipline=<id>&format=<text>&prompt=<text>`.
  *
+ * `source=github` opens the dialog on importing a repository, which is where connecting GitHub
+ * from the dialog comes back to.
+ *
  * The landing page links here with what a visitor picked and typed, and the studio opens the
  * new-project dialog filled with it, sending the prompt as the project's first message once it is
  * created. A visitor who is not signed in yet is sent to sign in first, and the way back from a
@@ -20,7 +23,7 @@ import type { ProjectDraft } from './NewProjectDialog';
 import { isNumber, isRecord, isString, type Guard } from '../lib/narrow';
 
 /** The query parameters a link into the studio carries. */
-const PARAMETERS = ['discipline', 'format', 'prompt'] as const;
+const PARAMETERS = ['discipline', 'format', 'prompt', 'source'] as const;
 
 /** The longest prompt a link may carry, which is more than any address bar holds. */
 const PROMPT_LIMIT = 20_000;
@@ -39,6 +42,8 @@ interface StashedDraft {
   format?: string;
   /** The first message. */
   prompt?: string;
+  /** Where the project comes from: `github` for a repository imported from GitHub. */
+  source?: string;
   /** When it was kept, in milliseconds since the epoch. */
   at: number;
 }
@@ -49,7 +54,8 @@ const isStashedDraft: Guard<StashedDraft> = (value): value is StashedDraft =>
   isNumber(value.at) &&
   (value.discipline === undefined || isString(value.discipline)) &&
   (value.format === undefined || isString(value.format)) &&
-  (value.prompt === undefined || isString(value.prompt));
+  (value.prompt === undefined || isString(value.prompt)) &&
+  (value.source === undefined || isString(value.source));
 
 /**
  * Reads the draft a link carries.
@@ -88,7 +94,7 @@ export function takeKeptDraft(): ProjectDraft | null {
   if (kept === undefined || Date.now() - kept.at > STASH_MS) {
     return null;
   }
-  return { discipline: kept.discipline, format: kept.format, prompt: kept.prompt };
+  return { discipline: kept.discipline, format: kept.format, prompt: kept.prompt, source: kept.source };
 }
 
 /** Drops a link's draft from the address, so a reload does not open the dialog again. */

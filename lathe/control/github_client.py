@@ -1,33 +1,53 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
-"""GitHub for Lathe: the OAuth App a user connects their account through, and the API calls made with it.
+"""GitHub for Lathe: the GitHub App a user connects their repositories through, the OAuth App that reads Epic's
+packages, and the API calls made with each.
 
-A user connects once. The control plane sends them to GitHub's authorization
-page with a `state` it signed, GitHub sends them back to the callback with a
-code, and the control plane trades the code for a token with its client secret.
-The callback carries no credential of the user's own, being a redirect from
-GitHub, so the state is what says whom the token is for: it names the user,
-the page to return to, and an expiry, under an HMAC keyed by `LATHE_SECRET_KEY`
-(`sign_state`, `read_state`). A state nobody signed, or one past its expiry, is
-refused before anything is exchanged, and the page it names is never visited,
-which with the check that it lies under the site's own address
-(`Sessions.github_connect`) keeps the callback from redirecting anywhere else.
+**The GitHub App.** "Connect GitHub" is the app's user authorization: the
+control plane sends the user to GitHub's authorization page with the app's
+client ID and a `state` it signed, GitHub sends them back to the callback with
+a code, and the control plane trades the code for a user access token with the
+app's client secret. A GitHub App asks for no scopes: what its token reaches is
+the app's permissions (repository Contents, read and write, and Metadata,
+read) on the repositories the app is installed on, cut down to what the user
+can reach there. The repositories a user can pick are therefore the ones of the
+installations their token lists (`installations`, `installation_repositories`);
+a repository of an organization that has not installed the app is missing
+until someone installs it there, from the app's installation page
+(`install_url`), which a member who may not install it themselves sends to the
+organization's owners as a request.
 
-The token is stored only encrypted, with Fernet under a key derived from the
+The app's user tokens expire after eight hours and come with a refresh token
+that lasts six months (`Grant`); a refresh (`refresh`) returns a new pair and
+retires the old one, so the service refreshes a token only when it is about to
+expire, and stores the pair it got before using it (`Sessions.github_token`).
+
+**The Epic connection.** Pulling the user's own copy of Unreal Engine from
+`ghcr.io/epicgames/unreal-engine` takes a token that reads packages wherever the
+account may, which a GitHub App's token cannot: the app is not installed on
+EpicGames. That is a small OAuth App of its own that asks for `read:packages`
+alone (`EPIC_SCOPE`). Whether the account is linked to Epic is the registry's
+own answer (`registry_pull`): the token service of `ghcr.io` grants a pull of
+Epic's image only to an account Epic linked, and refuses the rest.
+
+**Both flows' state.** Each callback carries no credential of the user's own,
+being a redirect from GitHub, so the state is what says whom the grant is for:
+it names the user, the page to return to, and an expiry, under an HMAC keyed by
+`LATHE_SECRET_KEY` and the flow it belongs to (`sign_state`, `read_state`), so
+a state of one flow is no state of the other. A state nobody signed, or one
+past its expiry, is refused before anything is exchanged, and the page it
+names is never visited, which with the check that it lies under the site's own
+address (`Sessions.site_page`) keeps either callback from redirecting anywhere
+else.
+
+Every token is stored only encrypted, with Fernet under a key derived from the
 same secret (`seal`, `unseal`), and leaves the control plane only in requests
-to GitHub, and as the user's own credential for pulling their copy of an app
-from GitHub's container registry, which the launcher keeps as that user's own
-Modal Secret (`launcher.py`). Each key derived
-from the secret is for one purpose, so a signed state can never be read as a
-sealed token or the reverse.
-
-The app asks for `repo`, for the project's repository, and `read:packages`,
-for that pull. Whether a user's account is linked to Epic is read from what
-their token can see (`GitHub.epic_access`): Epic gives a linked account the
-private `EpicGames/UnrealEngine` repository, through its organization, and the
-engine's container images on `ghcr.io/epicgames/unreal-engine`. GitHub hides
-what a token cannot see behind a 404, so a 404 is "not linked", never an error.
+to GitHub and its registry, as the user's own registry credential for pulling
+their copy of an app (`launcher.py`), and as the credential an engine clones
+the project's repository with when it starts. Each key derived from the secret
+is for one purpose, so a signed state can never be read as a sealed token or
+the reverse.
 
 A write names its branch (`GitHub.save`), on the read of what is there and on
 the commit alike: the contents API commits to the repository's default branch
@@ -57,27 +77,36 @@ from cryptography.fernet import Fernet, InvalidToken
 AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 TOKEN_URL = "https://github.com/login/oauth/access_token"
 API_URL = "https://api.github.com"
-# Space-delimited, as the authorization page takes them; GitHub lists what it granted with commas
-SCOPE = "repo read:packages"
-PACKAGE_SCOPES = frozenset({"read:packages", "write:packages"})
+APPS_URL = "https://github.com/apps"
+# The container registry's token service, which answers whether an account may pull an image
+REGISTRY_TOKEN_URL = "https://ghcr.io/token"
+REGISTRY_SERVICE = "ghcr.io"
+# What the Epic connection asks for, and the pull an account linked to Epic is granted
+EPIC_SCOPE = "read:packages"
+EPIC_PULL = "repository:epicgames/unreal-engine:pull"
+# The two flows a signed state can belong to
+GITHUB_FLOW = "github"
+EPIC_FLOW = "epic"
 STATE_SECONDS = 600
-# What an account linked to Epic can see: the engine's source and its container images
-EPIC_REPO = "EpicGames/UnrealEngine"
-EPIC_PACKAGE = "/orgs/EpicGames/packages/container/unreal-engine"
 # Calls one listing of a repository's files may make, at most: a walk of a vast tree stops there
 TREE_CALLS = 200
+# What GitHub lists per page at most
+PAGE_SIZE = 100
 
 
 class Grant(NamedTuple):
-    """What GitHub granted for an authorization: the token, and its scopes as GitHub lists them."""
+    """What GitHub granted for an authorization or a refresh.
+
+    `expires_in` and `refresh_token_expires_in` are seconds from the grant, and
+    are absent, with `refresh_token`, for a token that does not expire: an
+    OAuth App's, or a GitHub App's with expiring tokens switched off.
+    """
 
     token: str
     scope: str
-
-
-def reads_packages(scope: str) -> bool:
-    """Whether a grant's scopes let its token pull from GitHub's container registry."""
-    return bool(PACKAGE_SCOPES & {part.strip() for part in scope.split(",")})
+    expires_in: int | None = None
+    refresh_token: str | None = None
+    refresh_token_expires_in: int | None = None
 
 
 class GitHubError(Exception):
@@ -102,8 +131,8 @@ def _unb64(text: str) -> bytes:
     return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
-def sign_state(secret: str, user_id: str, return_to: str, now: float | None = None) -> str:
-    """The `state` of an authorization: the user and the page to return to, expiring, under an HMAC."""
+def sign_state(secret: str, user_id: str, return_to: str, now: float | None = None, flow: str = GITHUB_FLOW) -> str:
+    """The `state` of an authorization of one flow: the user and the page to return to, expiring, under an HMAC."""
     payload = {
         "u": user_id,
         "r": return_to,
@@ -111,16 +140,16 @@ def sign_state(secret: str, user_id: str, return_to: str, now: float | None = No
         "n": secrets.token_urlsafe(8),
     }
     body = _b64(json.dumps(payload, separators=(",", ":")).encode())
-    mac = hmac.new(_key(secret, "github state"), body.encode(), hashlib.sha256).digest()
+    mac = hmac.new(_key(secret, f"{flow} state"), body.encode(), hashlib.sha256).digest()
     return f"{body}.{_b64(mac)}"
 
 
-def read_state(secret: str, state: str, now: float | None = None) -> dict[str, Any] | None:
-    """What a `state` says, or nothing where it was not signed with the secret, is malformed, or has expired."""
+def read_state(secret: str, state: str, now: float | None = None, flow: str = GITHUB_FLOW) -> dict[str, Any] | None:
+    """What a `state` says, or nothing where it was not signed for this flow with the secret, is malformed, or expired."""
     body, _, mac = state.partition(".")
     if not body or not mac or not secret:
         return None
-    expected = hmac.new(_key(secret, "github state"), body.encode(), hashlib.sha256).digest()
+    expected = hmac.new(_key(secret, f"{flow} state"), body.encode(), hashlib.sha256).digest()
     try:
         if not hmac.compare_digest(expected, _unb64(mac)):
             return None
@@ -147,8 +176,13 @@ def unseal(secret: str, sealed: str) -> str | None:
         return None
 
 
+def seconds(value: Any) -> int | None:
+    """A lifetime GitHub sent, in seconds, or nothing where it sent none."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 class GitHub:
-    """GitHub's OAuth endpoints and REST API, as far as Lathe uses them.
+    """GitHub's OAuth endpoints, its REST API, and its container registry's token service, as far as Lathe uses them.
 
     Every call raises `GitHubError` with GitHub's own message where GitHub
     refuses, so the service can say why to the user.
@@ -172,61 +206,108 @@ class GitHub:
             raise GitHubError(response.status_code, message or f"GitHub answered {response.status_code}")
         return response.json() if response.content else None
 
+    def _pages(self, path: str, token: str, key: str, limit: int) -> list[dict[str, Any]]:
+        """The items of a paginated listing that wraps them under `key`, up to `limit` of them."""
+        items: list[dict[str, Any]] = []
+        page = 1
+        while len(items) < limit:
+            body = self._call("GET", f"{API_URL}{path}", token, params={"per_page": PAGE_SIZE, "page": page})
+            batch = body.get(key) or []
+            items.extend(batch)
+            if len(batch) < PAGE_SIZE:
+                break
+            page += 1
+        return items[:limit]
+
     @staticmethod
-    def authorize_url(client_id: str, redirect_uri: str, state: str) -> str:
-        """The page that asks the user to let Lathe reach their repositories."""
-        query = {"client_id": client_id, "redirect_uri": redirect_uri, "scope": SCOPE, "state": state}
+    def authorize_url(client_id: str, redirect_uri: str, state: str, scope: str | None = None) -> str:
+        """The page that asks the user to authorize an app: the GitHub App with no scope, an OAuth App with `scope`."""
+        query = {"client_id": client_id, "redirect_uri": redirect_uri, "state": state}
+        if scope:
+            query["scope"] = scope
         return f"{AUTHORIZE_URL}?{urlencode(query)}"
 
-    def exchange(self, client_id: str, client_secret: str, code: str, redirect_uri: str) -> Grant:
-        """The token a code from the authorization page is worth, with the scopes it carries."""
-        response = self.http.post(
-            TOKEN_URL,
-            headers={"Accept": "application/json"},
-            data={"client_id": client_id, "client_secret": client_secret, "code": code, "redirect_uri": redirect_uri},
-        )
-        body = response.json() if response.content else {}
+    @staticmethod
+    def install_url(slug: str, state: str) -> str:
+        """The GitHub App's installation page, where the user installs it on an account, or asks its owners to."""
+        return f"{APPS_URL}/{quote(slug)}/installations/new?{urlencode({'state': state})}"
+
+    def _grant(self, data: dict[str, str]) -> Grant:
+        """POST to the token endpoint and read the grant, which GitHub refuses in the body as often as in the status."""
+        response = self.http.post(TOKEN_URL, headers={"Accept": "application/json"}, data=data)
+        try:
+            body = response.json() if response.content else {}
+        except ValueError:
+            body = {}
         if response.status_code >= 400 or not body.get("access_token"):
-            raise GitHubError(response.status_code, body.get("error_description") or body.get("error") or "no token")
-        return Grant(body["access_token"], body.get("scope") or "")
+            status = response.status_code if response.status_code >= 400 else 401
+            raise GitHubError(status, body.get("error_description") or body.get("error") or "no token")
+        return Grant(
+            body["access_token"],
+            body.get("scope") or "",
+            seconds(body.get("expires_in")),
+            body.get("refresh_token") or None,
+            seconds(body.get("refresh_token_expires_in")),
+        )
 
-    def user(self, token: str) -> dict[str, Any]:
-        """The account a token is for: `login` and `avatar_url` among the rest."""
-        return self._call("GET", f"{API_URL}/user", token)
+    def exchange(self, client_id: str, client_secret: str, code: str, redirect_uri: str) -> Grant:
+        """The token a code from the authorization page is worth, with its scopes and, where it expires, its refresh."""
+        return self._grant(
+            {"client_id": client_id, "client_secret": client_secret, "code": code, "redirect_uri": redirect_uri}
+        )
 
-    def epic_access(self, token: str) -> bool:
-        """Whether the token's account is linked to Epic: it sees Unreal Engine's repository and its images.
-
-        The images are read with `read:packages`, so the token has to have been granted it
-        (`reads_packages`).
+    def refresh(self, client_id: str, client_secret: str, refresh_token: str) -> Grant:
+        """A new user token and refresh token for a refresh token, which GitHub retires with the old token.
 
         Raises:
-            GitHubError: GitHub refused for another reason than not showing the account either one.
+            GitHubError: 401 where GitHub refused the refresh token: expired, revoked, or already used.
         """
-        for path in (f"/repos/{EPIC_REPO}", EPIC_PACKAGE):
-            try:
-                self._call("GET", f"{API_URL}{path}", token)
-            except GitHubError as error:
-                if error.status == 404:
-                    return False
-                raise
-        return True
-
-    def repos(self, token: str) -> list[dict[str, Any]]:
-        """The repositories the account can push to, most recently updated first."""
-        return self._call(
-            "GET", f"{API_URL}/user/repos", token, params={"sort": "updated", "per_page": 100, "affiliation": "owner,collaborator,organization_member"}
+        return self._grant(
+            {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            }
         )
+
+    def user(self, token: str) -> dict[str, Any]:
+        """The account a token is for: `login`, `id`, `name`, and `avatar_url` among the rest."""
+        return self._call("GET", f"{API_URL}/user", token)
+
+    def installations(self, token: str, limit: int = 1000) -> list[dict[str, Any]]:
+        """The GitHub App's installations the token's user can reach a repository of."""
+        return self._pages("/user/installations", token, "installations", limit)
+
+    def installation_repositories(self, token: str, installation_id: int, limit: int) -> list[dict[str, Any]]:
+        """The repositories of one installation the token's user can reach, each with the user's `permissions`."""
+        return self._pages(f"/user/installations/{int(installation_id)}/repositories", token, "repositories", limit)
+
+    def registry_pull(self, login: str, token: str, scope: str = EPIC_PULL) -> bool:
+        """Whether the container registry grants the account a pull of an image: its token service's own answer.
+
+        The service answers a pull it grants with 200 and a token, and one it does not with 401 or
+        403, whether the account may not pull that image or the token is not good at all; the
+        caller asks GitHub which, where it matters.
+
+        Raises:
+            GitHubError: The registry answered with anything else.
+        """
+        response = self.http.get(
+            REGISTRY_TOKEN_URL,
+            params={"scope": scope, "service": REGISTRY_SERVICE},
+            auth=(login, token),
+            headers={"Accept": "application/json"},
+        )
+        if response.status_code == 200:
+            return True
+        if response.status_code in (401, 403):
+            return False
+        raise GitHubError(response.status_code, f"ghcr.io answered {response.status_code}")
 
     def repo(self, token: str, full_name: str) -> dict[str, Any]:
         """One repository, with the account's `permissions` on it."""
         return self._call("GET", f"{API_URL}/repos/{full_name}", token)
-
-    def create_repo(self, token: str, name: str, private: bool) -> dict[str, Any]:
-        """A new repository of the account's own, with a first commit so files can be saved into it at once."""
-        return self._call(
-            "POST", f"{API_URL}/user/repos", token, json={"name": name, "private": private, "auto_init": True}
-        )
 
     def head(self, token: str, full_name: str, branch: str) -> str | None:
         """The commit a branch points at, or nothing where the repository has no branch of that name."""

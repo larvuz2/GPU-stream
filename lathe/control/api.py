@@ -12,10 +12,11 @@ the Studio contract's, `error` what the first pages read) with its status
 here, or the text of a failed tool call.
 
 The Studio's routes (`lathe/STUDIO.md`, its contract) are projects, their
-library, their engines, their event log and agent, and the GitHub connection.
-One route takes no credential: GitHub's callback, which a browser reaches by
+library, their engines, their event log and agent, the GitHub connection, and
+the Epic connection. Two routes take no credential: GitHub's callbacks, one for
+the GitHub App and one for the Epic OAuth App, which a browser reaches by
 redirect and whose signed `state` names the user instead
-(`Sessions.github_callback`).
+(`Sessions.github_callback`, `Sessions.epic_callback`).
 
 The API is open to any origin. It answers only to a bearer credential, which a
 browser never attaches by itself, so another site's page gains nothing by
@@ -73,11 +74,13 @@ class Checkout(BaseModel):
 
 
 class NewProject(BaseModel):
-    """What `POST /v1/projects` takes."""
+    """What `POST /v1/projects` takes; with `github_repo`, the project starts linked to it."""
 
     name: str = ""
     discipline: str
     format: str = ""
+    github_repo: str | None = None
+    github_branch: str | None = None
 
 
 class ProjectChanges(BaseModel):
@@ -123,23 +126,16 @@ class AssetChanges(BaseModel):
 
 
 class Connect(BaseModel):
-    """What `POST /v1/github/connect` takes: the page of the site to come back to."""
+    """What the connect and install routes take: the page of the site to come back to."""
 
     return_to: str
 
 
-class NewRepo(BaseModel):
-    """A repository to create for a project."""
-
-    name: str
-    private: bool = True
-
-
 class LinkRepo(BaseModel):
-    """What `POST /v1/projects/{pid}/github` takes: an existing repository, or one to create."""
+    """What `POST /v1/projects/{pid}/github` takes: a repository, and the branch an engine clones where not its default."""
 
     repo: str | None = None
-    create: NewRepo | None = None
+    branch: str | None = None
 
 
 def bearer(authorization: str | None) -> str:
@@ -318,6 +314,7 @@ def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> F
             "ok": True,
             "agent": config.agent and config.supabase,
             "github": config.github and config.supabase,
+            "epic": config.epic and config.supabase,
             "generation": config.generation,
             "supabase": config.supabase,
             "billing": config.billing,
@@ -377,7 +374,10 @@ def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> F
 
     @app.post("/v1/projects")
     def create_project(body: NewProject, who: Who) -> dict[str, Any]:
-        return {"project": service().create_project(who, body.name, body.discipline, body.format)}
+        project = service().create_project(
+            who, body.name, body.discipline, body.format, body.github_repo, body.github_branch
+        )
+        return {"project": project}
 
     @app.get("/v1/projects/{project_id}")
     def get_project(project_id: str, who: Who) -> dict[str, Any]:
@@ -452,15 +452,21 @@ def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> F
 
     @app.get("/v1/github")
     def github_status(who: Who) -> dict[str, Any]:
-        return service().github_status(who, epic=True)
+        return service().github_status(who)
 
     @app.post("/v1/github/connect")
     def github_connect(body: Connect, request: Request, who: Who) -> dict[str, str]:
         return {"url": service().github_connect(who, body.return_to, str(request.base_url))}
 
+    @app.post("/v1/github/install")
+    def github_install(body: Connect, who: Who) -> dict[str, str]:
+        return {"url": service().github_install(who, body.return_to)}
+
     @app.get("/v1/github/callback")
-    def github_callback(request: Request, state: str = "", code: str = "", error: str = "") -> Response:
-        destination = service().github_callback(code, state, error, str(request.base_url))
+    def github_callback(
+        request: Request, state: str = "", code: str = "", error: str = "", setup_action: str = ""
+    ) -> Response:
+        destination = service().github_callback(code, state, error, str(request.base_url), setup_action)
         return RedirectResponse(destination, status_code=303)
 
     @app.get("/v1/github/repos")
@@ -473,12 +479,30 @@ def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> F
 
     @app.post("/v1/projects/{project_id}/github")
     def link_repo(project_id: str, body: LinkRepo, who: Who) -> dict[str, Any]:
-        create = body.create.model_dump() if body.create else None
-        return {"project": service().link_repo(who, project_id, body.repo, create)}
+        return {"project": service().link_repo(who, project_id, body.repo, body.branch)}
 
     @app.delete("/v1/projects/{project_id}/github")
     def unlink_repo(project_id: str, who: Who) -> dict[str, Any]:
         return {"project": service().unlink_repo(who, project_id)}
+
+    # Epic: the GitHub account linked to it, which Unreal Engine's editor is pulled with
+
+    @app.get("/v1/epic")
+    def epic_status(who: Who) -> dict[str, Any]:
+        return service().epic_status(who)
+
+    @app.post("/v1/epic/connect")
+    def epic_connect(body: Connect, request: Request, who: Who) -> dict[str, str]:
+        return {"url": service().epic_connect(who, body.return_to, str(request.base_url))}
+
+    @app.get("/v1/epic/callback")
+    def epic_callback(request: Request, state: str = "", code: str = "", error: str = "") -> Response:
+        destination = service().epic_callback(code, state, error, str(request.base_url))
+        return RedirectResponse(destination, status_code=303)
+
+    @app.delete("/v1/epic")
+    def epic_disconnect(who: Who) -> dict[str, Any]:
+        return service().epic_disconnect(who)
 
     app.mount("/", agent_app)
     return app
