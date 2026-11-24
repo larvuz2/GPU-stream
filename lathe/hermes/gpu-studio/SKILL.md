@@ -1,6 +1,6 @@
 ---
 name: gpu-studio
-description: Run the team's cloud studio on Modal - start GPU machines with Nuke or Blender that teammates open in a browser, run Nuke renders and scripts on them unattended, move footage between Google Drive, Discord, and the team's workspace, and stop machines when done. Use whenever a teammate asks for Nuke, Blender, a render, a comp, footage processing, a GPU, or a cloud machine.
+description: Run the team's cloud studio on Modal - start GPU machines with Nuke, Blender, or FilmCraft that teammates open in a browser, run Nuke renders and scripts on them unattended, edit and export films in FilmCraft through its commands, move footage between Google Drive, Discord, and the team's workspace, and stop machines when done. Use whenever a teammate asks for Nuke, Blender, FilmCraft, an edit, a render, a comp, footage processing, a GPU, or a cloud machine.
 ---
 
 <!--
@@ -270,3 +270,40 @@ Renders are not affected.
 The same command runs Blender instead (`--app blender`), on the whole Volume
 unless `--workspace` names a folder. `$S blender --name <name>` runs Python in
 the open Blender from standard input. Use it when a teammate asks for Blender.
+
+## FilmCraft
+
+FilmCraft is a video editor: cutting, color, sound, titles, and export. Use it
+when a teammate asks to edit, cut, assemble, or export a film. Editing needs no
+GPU; a T4 exports long H.264 faster (NVENC: 64 s of 1080p in 17 s, against 23 s
+without a GPU).
+
+```bash
+$S up --app filmcraft --name film-<person> --workspace team/nuke --gpu none \
+  --env SELKIES_MODAL_PROJECT=projects/<project>
+```
+
+It opens the newest `.fcproj` in `projects/<project>` (a new `project.fcproj`
+in a folder with none); keep the project's media in `in/` and exports in `out/`
+of that folder, as for Nuke. Drive it with FilmCraft's commands, one JSON
+request per line, and read each reply (`"ok": false` carries the reason):
+
+```bash
+$S filmcraft --name film-<person> <<'EOF'
+{"method": "engine.execute", "params": {"command": "file.import", "params": {"paths": ["/home/ubuntu/workspace/projects/<p>/in/shot01.mp4"]}}}
+{"method": "engine.execute", "params": {"command": "file.newSequenceFromClip", "params": {"items": [1]}}}
+{"method": "engine.execute", "params": {"command": "timeline.place", "params": {"item": 1, "track": "V1", "audioTrack": "A1", "seconds": 10}}}
+{"method": "engine.execute", "params": {"command": "file.save"}}
+{"method": "engine.execute", "params": {"command": "file.exportMedia", "params": {"path": "/home/ubuntu/workspace/projects/<p>/out/cut_v001.mp4", "format": "h264", "hardwareEncoding": "auto"}}}
+EOF
+echo '{"method": "engine.execute", "params": {"command": "jobs.list"}}' | $S filmcraft --name film-<person>
+```
+
+The import's reply gives the item ids the later commands take. An export runs
+in the background: repeat `jobs.list` until its job says `"finished": true`.
+`{"method": "engine.commands"}` lists every command with its parameters,
+`sequence.inspect` and `project.inspect` show the timeline and bins, and
+`{"method": "ui.screenshot", "params": {"path": "/home/ubuntu/workspace/projects/<p>/screen.png"}}`
+saves FilmCraft's window as the teammate sees it, into a folder that exists
+(it makes none, where an export makes its own). Unsaved edits survive the machine stopping and
+come back, unsaved, in the next one.
