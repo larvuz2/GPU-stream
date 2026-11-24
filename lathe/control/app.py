@@ -46,7 +46,7 @@ image = (
     .add_local_dir(REPO / "addons" / "modal", "/root/launcher", ignore=["**/__pycache__", "*.md", "requirements.txt"])
     .add_local_file(HERE.parent / "catalog.json", "/root/catalog.json")
 )
-for module in ("service.py", "api.py", "agent.py", "launcher.py", "generation.py", "github_client.py"):
+for module in ("service.py", "api.py", "agent.py", "launcher.py", "generation.py", "github_client.py", "unreal.py"):
     image = image.add_local_file(HERE / module, f"/root/{module}")
 if SKILLS.is_dir():
     image = image.add_local_dir(SKILLS, "/root/skills")

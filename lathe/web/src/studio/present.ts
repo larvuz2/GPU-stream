@@ -11,7 +11,7 @@
  * @module
  */
 import type { PlanItem } from '../lib/api';
-import { brand, findDiscipline, type CatalogApp } from '../lib/catalog';
+import { brand, findDiscipline, isOwnLicense, ownLicenseLabel, type CatalogApp } from '../lib/catalog';
 
 /**
  * The name of a discipline.
@@ -24,14 +24,15 @@ export function disciplineName(id: string): string {
 }
 
 /**
- * Whether an app can be started as an engine: an available one, or a team one, which the control
- * plane admits for the team's accounts and refuses for anyone else.
+ * Whether an app can be started as an engine: an available one; a team one, which the control
+ * plane admits for the team's accounts and refuses for anyone else; or one on the person's own
+ * license, which it admits once that license is linked.
  *
  * @param app The catalog app.
  * @returns `true` for an app that can be asked for.
  */
 export function canStart(app: CatalogApp): boolean {
-  return app.status === 'available' || app.status === 'team';
+  return app.status === 'available' || app.status === 'team' || isOwnLicense(app);
 }
 
 /**
@@ -44,6 +45,8 @@ export function appStatusLabel(app: CatalogApp): string {
   switch (app.status) {
     case 'available':
       return '';
+    case 'byol':
+      return ownLicenseLabel(app);
     case 'team':
       return 'Team';
     case 'next':

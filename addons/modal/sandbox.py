@@ -24,6 +24,12 @@ unused (`session.sh`), the Sandbox's lifetime ends it regardless, and `up` for
 a session that is running returns that one rather than starting a second. Work
 saved under `WORKSPACE` is on a Modal Volume and outlives every Sandbox.
 
+A stream that has to leave by another way than Modal's HTTPS proxy, which
+carries HTTP and WebSockets only, takes a raw TCP port Modal exposes
+(`start_session`'s `tcp_ports`, reached at `tcp_address`). WebRTC is such a
+stream: its media is UDP, so it goes through a TURN relay in the Sandbox
+(`with_turn`), which the browser reaches over that TCP port.
+
 An application's own interface is reached from inside the Sandbox, the one
 place it listens: Blender runs the Python it finds in a spool directory
 (`blender_python`), and FilmCraft answers JSON requests on a control channel
@@ -84,6 +90,8 @@ SHARE = "/usr/local/share/selkies-modal"
 # FilmCraft's and PhotoCraft's control channels, which each binds on the Sandbox's loopback only
 FILMCRAFT_CONTROL_PORT = 9876
 PHOTOCRAFT_CONTROL_PORT = 7878
+# The TCP port a session's TURN relay listens on (webrtc/turnserver.sh), exposed with `tcp_ports`
+TURN_PORT = 3478
 
 # What the session is, whoever starts it. Modal terminates TLS and its connect
 # token guards the address, so Selkies serves plain HTTP with no login of its
@@ -220,6 +228,29 @@ def session_image(app: str = "blender") -> modal.Image:
     )
 
 
+def with_turn(image: modal.Image) -> modal.Image:
+    """`image` with the TURN relay that carries a WebRTC stream out of the Sandbox over TCP.
+
+    The relay is coturn, which the base image carries for Selkies' own WebRTC
+    mode; this adds its configuration and two commands. `selkies-modal-turnserver`
+    starts it on `TURN_PORT`, relaying to the Sandbox's own addresses only, and
+    `selkies-modal-turn-credentials HOST:PORT` prints the ICE server a browser
+    uses, with credentials minted from the session's secret, where `HOST:PORT`
+    is what `tcp_address` returns for that port. The session exposes the port
+    when it is started with `tcp_ports=(TURN_PORT,)`. Nothing starts the relay
+    on its own: the application whose stream needs it does (`webrtc/turnserver.sh`).
+
+    The files are layered on the image rather than put in every session's, so
+    an image without the relay, such as Nuke's with its copy of Nuke over it,
+    keeps the layers Modal has cached.
+    """
+    return (
+        image.add_local_file(HERE / "webrtc" / "turnserver.conf", f"{SHARE}/webrtc/turnserver.conf", copy=True)
+        .add_local_file(HERE / "webrtc" / "turnserver.sh", "/usr/local/bin/selkies-modal-turnserver", copy=True)
+        .add_local_file(HERE / "webrtc" / "turn-credentials.py", "/usr/local/bin/selkies-modal-turn-credentials", copy=True)
+    )
+
+
 def nuke_image(workspace: str | None) -> modal.Image:
     """The Nuke session image, with the Nuke the workspace installed copied into it where there is one.
 
@@ -290,15 +321,23 @@ def start_session(
     image: modal.Image | None = None,
     application: str = "blender",
     extra_secrets: tuple[str, ...] = (),
+    tcp_ports: tuple[int, ...] = (),
 ) -> modal.Sandbox:
     """Start a session's Sandbox and return it at once, before Selkies listens.
 
     The session's tokens are made here and reach the Sandbox as a Modal Secret;
     nothing else holds them. Beside Selkies' two are the tokens of FilmCraft's
     and PhotoCraft's control channels, which each takes as 64 hex characters
-    and every request on FilmCraft's carries (`filmcraft_call`). They are made
-    for every session, since a caller holding a built image does not say which
+    and every request on FilmCraft's carries (`filmcraft_call`), and the secret
+    the TURN relay mints its credentials with (`with_turn`). They are made for
+    every session, since a caller holding a built image does not say which
     application it is, and a session of another application leaves them unread.
+
+    `tcp_ports` are ports of the Sandbox Modal exposes as raw TCP, each at a
+    public address of its own (`tcp_address`), beside the HTTPS port the link
+    reaches through Modal's proxy. Modal admits any address to them, with no
+    connect token, so what listens on one authenticates by itself, as the TURN
+    relay does.
 
     `workspace` mounts one directory of the Volume in place of all of it, which
     is what keeps one user's files out of another's session where a service
@@ -322,6 +361,7 @@ def start_session(
             "SELKIES_MODAL_SESSION_TOKEN": secrets.token_urlsafe(32),
             "FILMCRAFT_CONTROL_TOKEN": secrets.token_hex(32),
             "PHOTOCRAFT_CONTROL_TOKEN": secrets.token_hex(32),
+            "SELKIES_MODAL_TURN_SECRET": secrets.token_urlsafe(32),
         }
     )
     return modal.Sandbox.create(
@@ -339,7 +379,21 @@ def start_session(
         volumes={WORKSPACE: volume},
         tags=tags or {},
         readiness_probe=modal.Probe.with_tcp(PORT),
+        unencrypted_ports=list(tcp_ports),
     )
+
+
+def tcp_address(sandbox: modal.Sandbox, port: int) -> tuple[str, int]:
+    """The public host and port that reach one of a running session's `tcp_ports`.
+
+    Modal picks both when the Sandbox starts, so they are asked for, not
+    known ahead, and they last as long as the Sandbox. What arrives there is
+    the bytes a client sent, with no TLS of Modal's around them.
+
+    Raises:
+        KeyError: The session was started with other `tcp_ports`, but not that one.
+    """
+    return sandbox.tunnels()[port].tcp_socket
 
 
 def stop_session(sandbox: modal.Sandbox, wait_seconds: int = 45) -> None:
@@ -540,6 +594,7 @@ def up(args: argparse.Namespace) -> int:
         extra_secrets=tuple(args.secret),
         tags={"session": args.name, "gpu": args.gpu, "app": args.app},
         image=image,
+        tcp_ports=tuple(args.tcp_port),
     )
     where = "without a GPU" if args.gpu == "none" else f"on {args.gpu}"
     say(f"{args.name} is {sandbox.object_id} {where}; waiting for Selkies")
@@ -548,6 +603,9 @@ def up(args: argparse.Namespace) -> int:
         f"Selkies listens after {time.monotonic() - started:.0f} s; the session ends after "
         f"{args.idle_minutes:g} min unused, or {args.lifetime_hours:g} h in all"
     )
+    for port in args.tcp_port:
+        host, public = tcp_address(sandbox, port)
+        say(f"TCP port {port} is reached at {host}:{public}")
     print(session_link(sandbox))
     return 0
 
@@ -727,6 +785,14 @@ def parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME",
         help="a Modal Secret whose variables the session gets, such as the Drive access rclone reads; repeatable",
+    )
+    start.add_argument(
+        "--tcp-port",
+        action="append",
+        default=[],
+        type=int,
+        metavar="PORT",
+        help="a port of the session Modal exposes as raw TCP, open to any address, at a public address up prints; repeatable",
     )
     start.add_argument(
         "--env",

@@ -22,6 +22,8 @@ import {
   findApp,
   findDiscipline,
   isAvailable,
+  isOwnLicense,
+  ownLicenseLabel,
   type CatalogApp,
   type Category,
   type Discipline,
@@ -49,10 +51,11 @@ const STATUS_LABELS: Readonly<Record<string, string>> = {
  * What a badge calls an engine's status.
  *
  * @param app The catalog app.
- * @returns The label; an unknown status reads as "Soon", the least it can promise.
+ * @returns The label: the license an app of status `byol` runs on, such as "Your Epic account";
+ *   an unknown status reads as "Soon", the least it can promise.
  */
 export function statusLabel(app: CatalogApp): string {
-  return STATUS_LABELS[app.status] ?? 'Soon';
+  return isOwnLicense(app) ? ownLicenseLabel(app) : (STATUS_LABELS[app.status] ?? 'Soon');
 }
 
 /**

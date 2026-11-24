@@ -442,7 +442,7 @@ def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> F
 
     @app.get("/v1/github")
     def github_status(who: Who) -> dict[str, Any]:
-        return service().github_status(who)
+        return service().github_status(who, epic=True)
 
     @app.post("/v1/github/connect")
     def github_connect(body: Connect, request: Request, who: Who) -> dict[str, str]:
