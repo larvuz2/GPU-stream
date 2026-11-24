@@ -154,6 +154,44 @@ against stand-ins for it.
   the image, and `ghcr.io/epicgames/unreal-engine:dev-slim-5.8.4` with a token
   not linked to Epic is refused by ghcr (`DENIED`) with the explanation of what
   the user needs.
+- **The machine's desktop and image** (`addons/modal/unreal`, `up --app
+  unreal`). A developer brings their team's project in as they do at their
+  desk with GitHub Desktop. `session_image("unreal")` is the Selkies desktop
+  (with `NVIDIA_DRIVER_CAPABILITIES=all`) opening on a GitHub client with one
+  line: sign in, then clone the game here. The client is Desktop Plus, the fork
+  of GitHub Desktop that follows it (3.6.12); the Linux fork people know,
+  shiftkey/desktop, stops at 3.4.13 of February 2025. Its sign-in goes to
+  Firefox and back without a prompt. It is kept in GNOME's keyring in the
+  workspace, with the client's settings and Git's name and address. The clone
+  dialog offers the project folder (`SELKIES_MODAL_PROJECT`), else `projects`,
+  and Git LFS is set up for every repository. Blender is there with Send to
+  Unreal enabled. `selkies-modal-unreal-projects`, which
+  `unreal_projects(sandbox)` returns, describes every `.uproject` in the
+  workspace: the engine it was saved with, its C++ modules, its enabled plugins
+  and whether each has its source in `Plugins/`, whether its files are in Git
+  LFS and fetched, and its size. The Unreal view is port 8090, reached with
+  `unreal_view_link(sandbox)`: a page saying Unreal is not open yet, served by
+  an s6 service whose server the player is to replace.
+  `selkies-modal-unreal-open` starts the editor off screen with editor
+  streaming and Unreal MCP on loopback, after building the project's C++, and
+  says so when the machine has no editor. `unreal_image(registry_secret,
+  version)` is the same desktop over the engine layer, which sits right above
+  the base so no other change fetches it again. Checked on Modal (timings in
+  `addons/modal/README.md`, Unreal):
+  - The desktop came up on CPU and on a T4.
+  - A UE 5.4 sample with 109 LFS files was cloned with git, and a 5.5 one
+    through the client into the folder it offered; both were described
+    correctly.
+  - The view opened through its link and refused the address without its token.
+  - Blender's add-on was enabled.
+  - The missing editor was reported.
+  - The sign-in went as far as GitHub's token exchange, which refused a
+    made-up code.
+  - The keyring, the repository list, and Git's identity were back in the next
+    session.
+  - `unreal_image`'s recipe built with a public image in place of Epic's, and
+    rebuilt after a script change with the engine layer taken from the cache.
+  - The open script's other outcomes ran against stand-ins for the editor.
 
 - **The bridge** (`addons/modal/unreal`). Blender's add-on `send_to_unreal.py`
   (3D viewport sidebar, tab Unreal) exports the selection into the project's
@@ -210,18 +248,20 @@ against stand-ins for it.
 
 ## What is open
 
-- `unreal_image(registry_secret, version)` in `addons/modal/sandbox.py`, and
-  the session on it: the editor started off screen with editor streaming, the
-  TURN relay, Blender beside it with the add-on, `selkies-modal-project` and
-  this folder on the editor's Python path, and `DefaultRemoteControl.ini` in
-  the editor's project. Whether Modal shares a layer pulled with one user's
-  Secret with another user's build has to be checked there.
-- The control plane is written against the machine side's
-  `session_image("unreal")`, `unreal_projects`, `unreal_view_link`, and
-  `selkies-modal-unreal-open` as stand-ins describe them; the report's field
-  names (`EngineAssociation` or `engine_association`, Git LFS as a flag or
-  `{used, fetched}`) and whether a path is absolute are read either way until
-  they are checked against a running session.
+- A session on `unreal_image` with a real editor. Whether the editor starts on
+  `addons/modal/unreal/open.sh`'s command line is unchecked: the Unreal MCP
+  plugin's name and `-EnablePlugins` are unverified. Also to build: the Pixel
+  Streaming player on the Unreal view and the TURN relay under it
+  (`addons/modal/unreal/view/view.sh` has the plan), and a page on the player
+  counting as use of the session. Whether Modal shares a layer pulled with one
+  user's Secret with another user's build has to be checked there.
+- The GitHub client's sign-in with a real account: it is checked as far as
+  GitHub's token exchange. The client signs in through Desktop Plus's own OAuth
+  app, so an organization that restricts third-party apps has an owner approve
+  it once, as for Lathe's.
+- Firefox shows its own terms of use at its first start in each session, since
+  its profile is not kept. The policy that skips them accepts them on every
+  user's behalf, so it is not set.
 - The studio's Alt+1 and Alt+2 reach the page only while it, not the stream,
   has the keyboard: a stream in focus takes its keys, as it must for the
   editor's own shortcuts.

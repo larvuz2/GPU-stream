@@ -1,0 +1,36 @@
+{
+  "policies": {
+    "DownloadDirectory": "/home/ubuntu/workspace/Downloads",
+    "PromptForDownloadLocation": false,
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "DontCheckDefaultBrowser": true,
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": "",
+    "NoDefaultBookmarks": true,
+    "AutoLaunchProtocolsFromOrigins": [
+      {"protocol": "x-github-desktop-auth", "allowed_origins": ["https://github.com"]},
+      {"protocol": "x-github-desktop-dev-auth", "allowed_origins": ["https://github.com"]},
+      {"protocol": "x-github-client", "allowed_origins": ["https://github.com"]}
+    ],
+    "Handlers": {
+      "schemes": {
+        "x-github-desktop-auth": {
+          "action": "useHelperApp",
+          "ask": false,
+          "handlers": [{"name": "GitHub Desktop Plus", "path": "/usr/local/bin/selkies-modal-unreal-github"}]
+        },
+        "x-github-desktop-dev-auth": {
+          "action": "useHelperApp",
+          "ask": false,
+          "handlers": [{"name": "GitHub Desktop Plus", "path": "/usr/local/bin/selkies-modal-unreal-github"}]
+        },
+        "x-github-client": {
+          "action": "useHelperApp",
+          "ask": false,
+          "handlers": [{"name": "GitHub Desktop Plus", "path": "/usr/local/bin/selkies-modal-unreal-github"}]
+        }
+      }
+    }
+  }
+}

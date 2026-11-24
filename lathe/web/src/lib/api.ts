@@ -69,6 +69,8 @@ export interface UnrealProject {
   cpp_modules: string[];
   /** The plugins it switches on. */
   plugins: string[];
+  /** The ones of them that may not come along: binaries only in the repository, or from the marketplace and not in it. */
+  plugins_to_check: string[];
   /** Whether its repository keeps files in Git LFS, the machine's word for that, or `null` when unknown. */
   lfs: boolean | string | null;
   /** Its size on disk, or `null` when unknown. */
@@ -627,6 +629,7 @@ const isUnrealProject: Guard<UnrealProject> = (value): value is UnrealProject =>
   isString(value.opens) &&
   isStrings(value.cpp_modules) &&
   isStrings(value.plugins) &&
+  isStrings(value.plugins_to_check) &&
   (value.lfs === null || isBoolean(value.lfs) || isString(value.lfs)) &&
   isNullableNumber(value.size_bytes);
 

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+  The Unreal session's window rules, read by the Selkies window manager over its
+  defaults: the line of instructions (autostart) opens at its own size in the
+  middle of the screen and above the GitHub client it is about.
+-->
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <applications>
+    <application title="Get started">
+      <maximized>no</maximized>
+      <layer>above</layer>
+      <position force="yes"><x>center</x><y>center</y></position>
+    </application>
+  </applications>
+</openbox_config>

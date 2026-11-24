@@ -307,59 +307,75 @@ def version_verdict(association: str, engine: str) -> tuple[str, str]:
 
 
 def names(items: Any) -> list[str]:
-    """The names in a list of names or of objects that name one, switched-off plugins left out.
-
-    A `.uproject` lists modules and plugins as objects (`Name`, `Enabled`); the machine's report
-    may write the same in snake case.
-    """
-    found = []
-    for item in items if isinstance(items, list) else []:
-        if isinstance(item, dict):
-            if not item.get("Enabled", item.get("enabled", True)):
-                continue
-            item = item.get("Name", item.get("name"))
-        if isinstance(item, str) and item:
-            found.append(item)
-    return found
+    """The `name` of each object in a list of the machine's report, in order."""
+    if not isinstance(items, list):
+        return []
+    return [item["name"] for item in items if isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"]]
 
 
 def lfs_state(raw: dict[str, Any]) -> bool | str | None:
-    """Whether a found project's repository keeps files in Git LFS, or the machine's word for their state.
+    """Whether a found project's repository keeps files in Git LFS, and whether they are all fetched.
 
-    The report says it as a flag or a word under `lfs`, or as `{used, fetched}` there or under its
-    `repository`; a repository whose LFS files are not fetched has pointers in their place, which
-    the editor cannot open.
+    The machine reports it under `repository.lfs` as `{uses_lfs, files, fetched, not_fetched}`;
+    a file Git LFS keeps that was not fetched still holds LFS's pointer text, which the editor
+    cannot open, so that is said rather than a plain yes. `None` where the folder is in no
+    repository.
     """
     repository = raw.get("repository")
-    lfs = raw.get("lfs", repository.get("lfs") if isinstance(repository, dict) else None)
-    if isinstance(lfs, dict):
-        if not lfs.get("used"):
-            return False
-        return True if lfs.get("fetched", True) else "used, but its files are not fetched yet"
-    return lfs if isinstance(lfs, (bool, str)) else None
+    lfs = repository.get("lfs") if isinstance(repository, dict) else None
+    if not isinstance(lfs, dict):
+        return None
+    if not lfs.get("uses_lfs"):
+        return False
+    missing = lfs.get("not_fetched")
+    if isinstance(missing, int) and missing > 0:
+        return f"used, but {missing} of its {lfs.get('files')} files are not fetched yet"
+    return True
+
+
+def plugins_to_check(plugins: Any) -> list[str]:
+    """The enabled plugins that may not come along to this engine, by the machine's word on each.
+
+    A plugin in the repository without its source is binaries built for some other engine and
+    platform, and one from the marketplace that is not in the repository comes from the developer's
+    own engine install: neither builds here, so each is named for the agent to bring up.
+    """
+    if not isinstance(plugins, list):
+        return []
+    return [
+        plugin["name"]
+        for plugin in plugins
+        if isinstance(plugin, dict)
+        and isinstance(plugin.get("name"), str)
+        and (
+            (plugin.get("in_repository") and not plugin.get("source_in_repository"))
+            or (plugin.get("marketplace") and not plugin.get("in_repository"))
+        )
+    ]
 
 
 def found_project(raw: dict[str, Any], engine: str) -> dict[str, Any]:
     """A `.uproject` the machine found in its workspace, as the agent and the studio read it.
 
-    `raw` is one entry of the machine's report (`unreal_projects` in `addons/modal/sandbox.py`):
-    `path`, `name`, the engine it was saved with (`EngineAssociation`, as the file spells it, or
-    `engine_association`), its C++ `modules`, its `plugins`, Git LFS (`lfs_state`), and `size` in
-    bytes.
+    `raw` is one entry of the machine's report (`addons/modal/unreal/projects.py`, through
+    `unreal_projects` in `addons/modal/sandbox.py`): `path`, `name`, `engine_association` (the
+    engine it was saved with), its C++ `modules` and enabled `plugins` as objects with a `name`,
+    its `repository` (with `lfs`), and `size_bytes`.
     """
     path = str(raw.get("path") or "")
-    association = raw.get("EngineAssociation", raw.get("engine_association"))
+    association = raw.get("engine_association")
     association = association if isinstance(association, str) else ""
     verdict, opens = version_verdict(association, engine)
-    size = raw.get("size", raw.get("size_bytes"))
+    size = raw.get("size_bytes")
     return {
         "path": path,
         "name": str(raw.get("name") or PurePosixPath(path).stem),
         "engine_association": association,
         "version": verdict,
         "opens": opens,
-        "cpp_modules": names(raw.get("modules", raw.get("cpp_modules"))),
+        "cpp_modules": names(raw.get("modules")),
         "plugins": names(raw.get("plugins")),
+        "plugins_to_check": plugins_to_check(raw.get("plugins")),
         "lfs": lfs_state(raw),
         "size_bytes": size if isinstance(size, int) and not isinstance(size, bool) else None,
     }

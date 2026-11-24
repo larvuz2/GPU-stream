@@ -145,6 +145,7 @@ const EMBER_RIDGE: UnrealProject = {
   opens: 'Saved with Unreal Engine 5.8, this engine’s version: it opens as it is.',
   cpp_modules: ['EmberRidge'],
   plugins: ['CommonUI', 'EnhancedInput', 'GameplayAbilities', 'ModelingToolsEditorMode'],
+  plugins_to_check: [],
   lfs: true,
   size_bytes: 3_180_000_000,
 };

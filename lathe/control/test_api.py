@@ -1776,13 +1776,29 @@ def running_unreal(studio: SimpleNamespace, linked: bool = True, sessions: int =
     return game, engine, studio.store.sessions[engine["id"]]["sandbox_id"]
 
 
-def uproject(path: str, association: str = "5.8") -> dict[str, Any]:
-    """A .uproject as the machine reports what it found: a C++ game with one plugin on and one off, in Git LFS."""
+def uproject(path: str, association: str = "5.8", not_fetched: int = 0) -> dict[str, Any]:
+    """A .uproject as the machine reports what it found (`addons/modal/unreal/projects.py`): a C++ game in Git LFS.
+
+    Its plugins are one of the engine's, one in the repository with its source, one in the
+    repository as binaries only, and one from the marketplace that the repository does not carry.
+    """
+    def plugin(name: str, **where: Any) -> dict[str, Any]:
+        return {"name": name, "in_repository": False, "source_in_repository": False, "path": None, "marketplace": False, **where}
+
     return {
-        "path": path, "name": PurePosixPath(path).stem, "EngineAssociation": association,
-        "modules": [{"Name": "EmberRidge", "Type": "Runtime", "LoadingPhase": "Default"}],
-        "plugins": [{"Name": "ModelingToolsEditorMode", "Enabled": True}, {"Name": "Bridge", "Enabled": False}],
-        "lfs": True, "size": 2_400_000_000,
+        "path": path, "name": PurePosixPath(path).stem, "folder": str(PurePosixPath(path).parent),
+        "engine_association": association, "engine_version": association,
+        "modules": [{"name": "EmberRidge", "type": "Runtime", "loading_phase": "Default"}],
+        "plugins": [
+            plugin("ModelingToolsEditorMode"),
+            plugin("RidgeTools", in_repository=True, source_in_repository=True, path="Plugins/RidgeTools"),
+            plugin("Wwise", in_repository=True, path="Plugins/Wwise"),
+            plugin("VoxelPro", marketplace=True),
+        ],
+        "repository": {"root": str(PurePosixPath(path).parent), "branch": "main", "remote": "https://github.com/studio/game",
+                       "submodules": [], "lfs": {"uses_lfs": True, "files": 109, "fetched": 109 - not_fetched,
+                                                 "not_fetched": not_fetched}},
+        "size_bytes": 2_400_000_000, "size": "2.4 GB",
     }
 
 
@@ -1850,7 +1866,8 @@ def test_the_agent_is_told_of_an_unreal_project_until_it_has_looked_at_it(studio
     found = json.loads(tool_results(model.requests[-1])[looking["id"]]["content"])
     (project,) = found["projects"]
     assert (project["path"], project["engine_association"], project["version"]) == (path, "5.8", "same")
-    assert project["cpp_modules"] == ["EmberRidge"] and project["plugins"] == ["ModelingToolsEditorMode"], "Bridge is switched off"
+    assert project["cpp_modules"] == ["EmberRidge"] and project["plugins"] == ["ModelingToolsEditorMode", "RidgeTools", "Wwise", "VoxelPro"]
+    assert project["plugins_to_check"] == ["Wwise", "VoxelPro"]
     assert project["lfs"] is True and project["size_bytes"] == 2_400_000_000
 
     model.script(reply(say("Open it?")))
@@ -1939,17 +1956,17 @@ def test_the_studio_reads_the_unreal_projects_of_a_running_unreal_engine(studio)
     client, launcher = studio.client, studio.launcher
     game, engine, sandbox = running_unreal(studio)
     path = f"/home/ubuntu/workspace/projects/{game['id']}/OldRidge/OldRidge.uproject"
-    snake = {
-        "path": f"/home/ubuntu/workspace/projects/{game['id']}/Next/Next.uproject", "engine_association": "5.9",
-        "cpp_modules": [], "plugins": [{"name": "CommonUI", "enabled": True}, {"name": "Bridge", "enabled": False}],
-        "repository": {"lfs": {"used": True, "fetched": False}}, "size_bytes": 512,
-    }
-    launcher.uprojects[sandbox] = [uproject(path, "5.4"), snake, "not a project"]
+    newer = uproject(f"/home/ubuntu/workspace/projects/{game['id']}/Next/Next.uproject", "5.9", not_fetched=9)
+    launcher.uprojects[sandbox] = [uproject(path, "5.4"), newer, "not a project"]
     route = f"/v1/projects/{game['id']}/engines/{engine['id']}/unreal-projects"
-    project, spelled = client.get(route, headers=auth("alice-token")).json()["projects"]
+    project, later = client.get(route, headers=auth("alice-token")).json()["projects"]
     assert project["version"] == "older" and "agent's branch" in project["opens"]
-    assert (spelled["name"], spelled["version"], spelled["plugins"], spelled["size_bytes"]) == ("Next", "newer", ["CommonUI"], 512)
-    assert "not fetched" in spelled["lfs"], "the machine's report in snake case reads the same"
+    assert project["cpp_modules"] == ["EmberRidge"] and project["size_bytes"] == 2_400_000_000
+    assert project["plugins"] == ["ModelingToolsEditorMode", "RidgeTools", "Wwise", "VoxelPro"]
+    assert project["plugins_to_check"] == ["Wwise", "VoxelPro"], "binaries only, and a marketplace plugin the repository lacks"
+    assert project["lfs"] is True
+    assert (later["name"], later["version"]) == ("Next", "newer")
+    assert later["lfs"] == "used, but 9 of its 109 files are not fetched yet", "pointers the editor cannot open"
     assert client.get(route, headers=auth("bob-token")).status_code == 404
     client.delete(f"/v1/sessions/{engine['id']}", headers=auth("alice-token"))
     assert client.get(route, headers=auth("alice-token")).status_code == 409, "a stopped engine has no workspace to read"

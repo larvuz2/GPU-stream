@@ -525,6 +525,11 @@ function UnrealProjectCard({ project, asked, askable, busyReason, onOpen }: Unre
       </div>
       <p className="mt-1 text-xs text-muted">{facts.join(' · ')}</p>
       {opensAsIs ? null : <p className="mt-1 text-xs leading-relaxed text-faint">{project.opens}</p>}
+      {project.plugins_to_check.length === 0 ? null : (
+        <p className="mt-1 text-xs leading-relaxed text-warn">
+          May not come along: {project.plugins_to_check.join(', ')}
+        </p>
+      )}
       <div className="mt-2 flex items-center gap-2">
         <button
           type="button"
