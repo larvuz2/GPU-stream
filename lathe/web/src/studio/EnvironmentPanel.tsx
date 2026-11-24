@@ -31,6 +31,7 @@ import {
   findDiscipline,
   findTier,
   gpuLabel,
+  tierFits,
   isOwnLicense,
   minutesFor,
   ownLicenseLabel,
@@ -323,11 +324,12 @@ function StartForm({ project, health, me, github, onStart, onAddCredits }: Start
   const openTiers = health?.tiers ?? null;
   const isOpen = (tier: Tier): boolean => openTiers === null || openTiers.includes(tier.id);
   const [pickedTier, setPickedTier] = useState<string | null>(null);
-  const tier =
-    catalog.tiers.find((candidate) => candidate.id === pickedTier && isOpen(candidate)) ??
-    catalog.tiers.find((candidate) => candidate.gpu !== null && isOpen(candidate)) ??
-    catalog.tiers.find(isOpen);
   const app = findApp(pickedApp);
+  const usable = (candidate: Tier): boolean => isOpen(candidate) && (app === undefined || tierFits(candidate, app));
+  const tier =
+    catalog.tiers.find((candidate) => candidate.id === pickedTier && usable(candidate)) ??
+    catalog.tiers.find((candidate) => candidate.gpu !== null && usable(candidate)) ??
+    catalog.tiers.find(usable);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const ready =
@@ -403,9 +405,9 @@ function StartForm({ project, health, me, github, onStart, onAddCredits }: Start
           }}
         >
           {catalog.tiers.map((candidate) => (
-            <option key={candidate.id} value={candidate.id} disabled={!isOpen(candidate)} title={gpuLabel(candidate)}>
+            <option key={candidate.id} value={candidate.id} disabled={!usable(candidate)} title={gpuLabel(candidate)}>
               {candidate.name}
-              {isOpen(candidate) ? '' : ' (off)'}
+              {!isOpen(candidate) ? ' (off)' : app !== undefined && !tierFits(candidate, app) ? ' (needs a GPU)' : ''}
             </option>
           ))}
         </select>

@@ -486,6 +486,7 @@
         "architecture"
       ],
       "source": "https://www.unrealengine.com",
+      "requires_gpu": true,
       "license": {
         "label": "Your Epic account",
         "url": "https://www.unrealengine.com/en-US/ue-on-github",

@@ -599,7 +599,8 @@ class Sessions:
         (`require_own_license`).
 
         Raises:
-            Refused: 400 for an app, tier, or region that is not on offer, 402 without the credits
+            Refused: 400 for an app, tier, or region that is not on offer, or a tier without the GPU
+                the app needs (`requires_gpu`: Unreal's editor renders only on one), 402 without the credits
                 for a first minute, 403 for a team app outside the team or an own license that is
                 not linked, 409 at the user's session limit, with every seat of the app taken, for a
                 tier that is switched off, or while the link cannot be checked.
@@ -611,6 +612,8 @@ class Sessions:
             raise Refused(400, "Unknown tier or region.")
         if tier not in self.config.tiers:
             raise Refused(409, "That tier is not switched on yet. Pick another one.")
+        if offered.get("requires_gpu") and not self.catalog.tiers[tier]["gpu"]:
+            raise Refused(400, f"{offered['name']} needs a GPU. Pick a tier with one.")
         if offered["status"] == "byol":
             self.require_own_license(user.id, offered)
         profile = self.me(user)

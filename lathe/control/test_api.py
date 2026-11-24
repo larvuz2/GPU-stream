@@ -1357,6 +1357,8 @@ def test_unreal_starts_only_for_a_github_account_linked_to_epic(studio):
     linked = lambda: client.get("/v1/github", headers=auth("alice-token")).json()["epic_linked"]
 
     assert linked() is None, "unknown without GitHub"
+    no_gpu = client.post(f"/v1/projects/{game['id']}/engines", headers=auth("alice-token"), json={"app": "unreal", "tier": "cpu"})
+    assert no_gpu.status_code == 400 and "needs a GPU" in no_gpu.json()["detail"], "the editor renders only on a GPU"
     refused = start()
     assert refused.status_code == 409 and "Connect GitHub first" in refused.json()["detail"]
 

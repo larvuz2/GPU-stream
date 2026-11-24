@@ -76,6 +76,24 @@ The parts that need no Unreal binary: nobody on the team has a GitHub account
 linked to Epic, so the editor cannot be pulled, and each part below is tested
 against stand-ins for it.
 
+- **The transport** (step 1, measured). WebRTC video from a Sandbox reached
+  headless Chromium and Firefox in a second Sandbox through coturn over TCP,
+  on the public address Modal gives a raw port, with the browsers relay-only:
+  connected in 0.2 s in one region (0.5 s across the country), the first frame
+  in 0.35 s (1.3 s), 30 frames a second with none dropped, a round trip of
+  15-17 ms (66-97 ms), at 2.9 to 12 Mbps. A wrong credential and a peer
+  outside the Sandbox are refused. The launcher has it as `start_session(...,
+  tcp_ports=...)`, `tcp_address()`, `up --tcp-port`, and `with_turn(image)`
+  (`addons/modal/webrtc`). Chromium cannot be the test browser inside gVisor
+  (it gathers no candidates there); people's own browsers are not affected.
+- **Fetching the editor** (`addons/modal/unreal/fetch-engine.sh`). A build step
+  that streams one directory out of a container image with crane, logged in
+  with the build's secret, which no layer keeps. Checked on Modal: a public
+  image's directory arrives owned by the session's user with no login left in
+  the image, and `ghcr.io/epicgames/unreal-engine:dev-slim-5.8.4` with a token
+  not linked to Epic is refused by ghcr (`DENIED`) with the explanation of what
+  the user needs.
+
 - **The bridge** (`addons/modal/unreal`). Blender's add-on `send_to_unreal.py`
   (3D viewport sidebar, tab Unreal) exports the selection into the project's
   `bridge/` folder, as glTF binary for meshes and FBX for anything with an
@@ -132,4 +150,16 @@ against stand-ins for it.
   repository, so the check cannot show the link (it reads "not linked", or
   unknown with GitHub's refusal), and Lathe needs Epic's approval of its OAuth
   App or another way for a user to grant the pull.
-- An Unreal start on a tier without a GPU is not refused yet.
+- **The base image the sessions are built on is gone from its registry.** The
+  Selkies base digest `addons/modal/sandbox.py` pins
+  (`ghcr.io/selkies-project/selkies/base@sha256:5e9d022a...`) answers 404 on
+  ghcr now; the newest release there is `2.2.1-ubuntu26.04`. Every session
+  image builds today only because Modal has the base cached, so a build that
+  has to pull it again (a two-stage Dockerfile did, and failed with "manifest
+  unknown") fails. Moving the pin to a published release changes every app's
+  image, the Nuke copy among them (about 50 minutes to rebuild), so it is its
+  own change, with every app checked and the team's Nuke image built before it
+  reaches main.
+
+An Unreal start on a tier without a GPU is refused (`requires_gpu` in the
+catalog), and the Environment panel marks such a tier "needs a GPU".

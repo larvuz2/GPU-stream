@@ -56,6 +56,8 @@ export interface CatalogApp {
   source: string;
   /** The license a person brings, for an app of status `byol`. */
   license?: AppLicense;
+  /** Whether the app starts only on a tier with a GPU (Unreal's editor renders on nothing else). */
+  requires_gpu?: boolean;
 }
 
 /**
@@ -251,6 +253,17 @@ export function packBonus(pack: CreditPack): number {
  */
 export function findApp(id: string): CatalogApp | undefined {
   return catalog.apps.find((app) => app.id === id);
+}
+
+/**
+ * Whether a tier can run an app: any tier, except a tier without a GPU for an app that needs one.
+ *
+ * @param tier The tier.
+ * @param app The app.
+ * @returns `true` where the app can start on the tier.
+ */
+export function tierFits(tier: Tier, app: CatalogApp): boolean {
+  return app.requires_gpu !== true || tier.gpu !== null;
 }
 
 /**
