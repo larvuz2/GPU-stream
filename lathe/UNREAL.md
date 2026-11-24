@@ -57,6 +57,52 @@ it is offered to the public.
 | Blender and Unreal | One machine, one project folder. A Blender add-on exports the selection (glTF, or FBX for rigs) into the project's `bridge/` folder and asks the editor to import it through its Remote Control API on loopback, which runs the import in the editor's Python; the editor sends back the same way to Blender's Python spool. No network between machines is needed for the hand-off. |
 | The agent | Drives the editor through the Remote Control API and its Python now, and through the editor's MCP server on 5.9. |
 
+## A studio's existing project
+
+Studios do not start from nothing: a team keeps its game in a GitHub
+repository, each developer clones it into a folder of their choosing, opens the
+`.uproject` there with the Unreal Editor, and commits what changed from their
+own Git client under their own name. The engine does the same thing for them in
+the cloud, without changing how the team works.
+
+**Once per person.** Sign up; connect GitHub (one click); link that GitHub
+account to Epic, which most Unreal developers already have. Where the team's
+GitHub organization restricts third-party apps, which new organizations do by
+default, an owner of the organization approves Lathe once (Settings,
+Third-party access); until then the organization's repositories do not appear.
+
+**Once per game.** A Games project picks the repository and its branch. Lathe
+reads the `.uproject` before anything starts and shows what it found: the
+engine version the project was saved with (`EngineAssociation`), whether it has
+C++ modules or only Blueprints, its plugins, and whether the repository keeps
+its assets in Git LFS.
+
+**Each start.** The machine clones the repository into the user's own folder of
+the workspace Volume with their token, Git LFS included, the first time, and
+only fetches after that; the engine's derived data cache stays beside it, so
+shaders compile once per project rather than once per start. Commits carry the
+person's own GitHub name and address, as each developer's own client does.
+
+**Versions.** The engine runs one current version, 5.8.4 now, which carries
+Epic's Unreal MCP server (experimental in 5.8); 5.9 becomes the default when it
+is released, and is offered as a preview only where Epic publishes its image.
+A project is never converted on the team's own branches:
+
+| The project was saved with | What the engine does |
+| --- | --- |
+| The engine's version | Opens it as it is. |
+| An older version | Opens it on the agent's branch (`lathe/<project>`), where the editor upgrades what it saves. Assets saved by a newer editor do not open in an older one, so the upgrade stays on that branch until the team decides to move. |
+| A newer version | Says so: Unreal does not open a project in an older editor. |
+
+**What may not come along.** C++ modules are compiled for Linux in the machine
+with the engine's own toolchain (the first build takes the longest); where code
+written for an older engine no longer compiles, the agent shows the errors and
+helps fix them on its branch. A plugin with its source is compiled the same
+way; one distributed as binaries only, without a Linux build for this version,
+is switched off in the agent's copy of the `.uproject` and listed, so the
+editor opens without it. The team still packages Windows builds on their own
+machines: the engine runs Linux.
+
 ## Order of work
 
 1. Prove the transport: WebRTC media from a Sandbox to a browser outside Modal
