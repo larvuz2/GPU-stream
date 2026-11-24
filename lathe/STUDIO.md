@@ -82,8 +82,10 @@ session.
 ## Contract: the control plane's API
 
 Every route takes the Supabase access token (`Authorization: Bearer`), as the
-existing routes do, and answers JSON. Refusals are `{"detail": "..."}` with the
-status that says why.
+existing routes do, except GitHub's callback, which GitHub's redirect reaches
+with a signed `state` instead, and answers JSON. Refusals are
+`{"detail": "..."}`, with the same text under `error` for the first pages, and
+the status that says why.
 
 ```text
 GET    /v1/health                          {ok, agent, github, generation}: which integrations are configured
@@ -98,7 +100,7 @@ POST   /v1/sessions/{sid}/link             {url} (existing)
 DELETE /v1/sessions/{sid}                  stops an engine (existing)
 GET    /v1/projects/{pid}/events?after=N   {events: [Event], running}
 POST   /v1/projects/{pid}/messages         {text} -> 202 {turn_id}; 409 while a turn runs
-POST   /v1/projects/{pid}/stop             stops the running turn
+POST   /v1/projects/{pid}/stop             stops the running turn -> {stopped}: whether one ran
 GET    /v1/projects/{pid}/library          {sections: [string], assets: [Asset]}
 POST   /v1/projects/{pid}/library          {section, name, tag?, description?, metadata?} -> {asset}
 POST   /v1/projects/{pid}/library/{aid}/media   multipart file -> {asset}
@@ -108,7 +110,7 @@ GET    /v1/github                          {configured, connected, login?, avata
 POST   /v1/github/connect                  {return_to} -> {url}: GitHub's authorization page
 GET    /v1/github/callback                 GitHub returns here; redirects to return_to?github=connected|failed
 GET    /v1/github/repos                    {repos: [{full_name, private, html_url, updated_at}]}
-DELETE /v1/github                          disconnects
+DELETE /v1/github                          disconnects -> the same as GET /v1/github
 POST   /v1/projects/{pid}/github           {repo} or {create: {name, private}} -> {project}
 DELETE /v1/projects/{pid}/github           -> {project}
 ```
@@ -127,7 +129,7 @@ Event    {id, turn_id, kind, data, created_at}, kind one of
            tool_end      {call_id, ok, summary, media?: [{kind, url}]}
            ask           {question, options: [string]}
            plan          {items}
-           library       {asset}
+           library       {asset}, or {sections} when the agent set the sections
            engine        {engine: Session}
            turn_end      {}
            error         {message}
