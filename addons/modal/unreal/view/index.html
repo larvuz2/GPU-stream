@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<!--
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+  The Unreal view before an editor streams there (view.sh, serve.py). It loads
+  nothing from elsewhere. Its script asks the same address every five seconds
+  and reloads once the answer no longer carries the placeholder's header, which
+  is when the editor's player owns the port.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unreal Editor</title>
+<style>
+  :root {
+    --background: #f4f5f7;
+    --card: #ffffff;
+    --text: #1d2026;
+    --muted: #5b6270;
+    --line: #dfe2e8;
+    --accent: #2f6fde;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: #121418;
+      --card: #1b1e24;
+      --text: #eef0f4;
+      --muted: #a2a9b6;
+      --line: #2b303a;
+      --accent: #6b9cff;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid;
+    place-items: center;
+    padding: 24px 16px;
+    background: var(--background);
+    color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Ubuntu, Roboto, sans-serif;
+  }
+  main {
+    width: 100%;
+    max-width: 440px;
+    padding: 36px 32px 28px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--card);
+    text-align: center;
+  }
+  svg { width: 48px; height: 48px; color: var(--accent); }
+  h1 { margin: 16px 0 8px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  p { margin: 0; color: var(--muted); }
+  .steps { margin: 20px 0 0; padding: 0; list-style: none; text-align: left; }
+  .steps li {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+  }
+  .steps b {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--card);
+    font-size: 13px;
+    line-height: 22px;
+    text-align: center;
+  }
+  .note { margin-top: 18px; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <rect x="2.5" y="4" width="19" height="13" rx="2"></rect>
+    <path d="M8 21h8M12 17v4"></path>
+    <path d="M10 8.5v5l4.5-2.5z"></path>
+  </svg>
+  <h1>Unreal isn't open yet</h1>
+  <p>Clone your project on the Desktop, then ask the agent to open it.</p>
+  <ol class="steps">
+    <li><b>1</b><span>On the Desktop, sign in to GitHub and clone your game.</span></li>
+    <li><b>2</b><span>Ask the agent to open it in Unreal.</span></li>
+  </ol>
+  <p class="note">The editor appears here by itself once it runs.</p>
+</main>
+<script>
+  // Reload once this address is served by something other than this page: the editor's player
+  setInterval(async () => {
+    try {
+      const response = await fetch(location.href, { method: "HEAD", cache: "no-store" });
+      if (response.ok && response.headers.get("X-Selkies-Modal-View") !== "placeholder") {
+        location.reload();
+      }
+    } catch {
+      // The port is changing hands; the next check sees what owns it
+    }
+  }, 5000);
+</script>
+</body>
+</html>

@@ -35,7 +35,10 @@ place it listens: Blender runs the Python it finds in a spool directory
 (`blender_python`), and FilmCraft answers JSON requests on a control channel
 bound to the Sandbox's loopback, for the session's own token only
 (`filmcraft_call`). Neither is exposed beyond the Sandbox, so driving one takes
-the Modal credentials that started it, as a link does.
+the Modal credentials that started it, as a link does. An Unreal session
+describes the projects cloned into its workspace the same way
+(`unreal_projects`), and has a second page beside its desktop on a port of its
+own, the Unreal view (`unreal_view_link`).
 
 This is Python because Modal's Python SDK is the interface the image
 definition, the Sandbox, and the connect token are reached through.
@@ -79,6 +82,14 @@ CRAFT_RELEASES = {
     "filmcraft": (FILMCRAFT_VERSION, FILMCRAFT_SHA256),
     "photocraft": (PHOTOCRAFT_VERSION, PHOTOCRAFT_SHA256),
 }
+# The Unreal session's GitHub client: Desktop Plus, a fork of GitHub Desktop kept current with it
+# that publishes Linux packages; its Debian package and the SHA-256 its GitHub release lists for it
+DESKTOP_PLUS_VERSION = "3.6.12.0"
+DESKTOP_PLUS_SHA256 = "91ac51e9f338ea4a6d8aa41ddbf547d7437eabc8bb8750955a9a10b8f8a23d87"
+# Epic's development images, and where the editor is in them and in a session
+UNREAL_ENGINE_IMAGE = "ghcr.io/epicgames/unreal-engine"
+UNREAL_ENGINE_SOURCE = "/home/ue4/UnrealEngine"
+UNREAL_ROOT = "/opt/unreal"
 
 PORT = 8080
 WORKSPACE = "/home/ubuntu/workspace"
@@ -92,6 +103,8 @@ FILMCRAFT_CONTROL_PORT = 9876
 PHOTOCRAFT_CONTROL_PORT = 7878
 # The TCP port a session's TURN relay listens on (webrtc/turnserver.sh), exposed with `tcp_ports`
 TURN_PORT = 3478
+# The Unreal view, the Unreal session's second page beside the desktop (unreal/view/view.sh)
+UNREAL_VIEW_PORT = 8090
 
 # What the session is, whoever starts it. Modal terminates TLS and its connect
 # token guards the address, so Selkies serves plain HTTP with no login of its
@@ -147,6 +160,23 @@ APP_ENV = {
         # The control channel; its token is the session's own (start_session)
         "PHOTOCRAFT_CONTROL_PORT": str(PHOTOCRAFT_CONTROL_PORT),
     },
+    "unreal": {
+        "SELKIES_MODAL_APP": "unreal",
+        # The desktop, whose taskbar keeps the GitHub client, Firefox, and Blender in reach
+        "SELKIES_DESKTOP": "true",
+        # Modal mounts NVIDIA's graphics libraries only with this, and the editor renders through
+        # them (Vulkan, off screen)
+        "NVIDIA_DRIVER_CAPABILITIES": "all",
+        # The GitHub client's settings and sign-in (the keyring it keeps its token in) and Git's own
+        # settings, kept in the workspace (session.sh; unreal/github.sh names the client's folder)
+        "SELKIES_MODAL_PERSIST": ".desktop-plus .local/share/keyrings .config/git",
+        "SELKIES_MODAL_UNREAL_VIEW_PORT": str(UNREAL_VIEW_PORT),
+        # Blender beside the editor, as the blender app keeps it, so the editor's Send to Blender
+        # reaches its spool
+        "SELKIES_MODAL_BLENDER_SPOOL": BLENDER_SPOOL,
+        "BLENDER_USER_RESOURCES": f"{WORKSPACE}/.blender",
+        "SELKIES_MODAL_BLENDER_RECOVERY": f"{WORKSPACE}/.blender/autosave",
+    },
 }
 APPS = tuple(APP_ENV)
 
@@ -154,6 +184,26 @@ APPS = tuple(APP_ENV)
 def say(message: str) -> None:
     """Print progress to stderr, which leaves stdout to what a command returns."""
     print(f"selkies-modal: {message}", file=sys.stderr, flush=True)
+
+
+def blender_install() -> tuple[str, str]:
+    """The Dockerfile steps that put Blender and the idle counter's reader on the base image.
+
+    One layer, which the Blender and Unreal sessions both start with, so the
+    Unreal desktop takes the one the Blender session already built from Modal's
+    cache.
+    """
+    series = BLENDER_VERSION.rsplit(".", 1)[0]
+    archive = f"https://download.blender.org/release/Blender{series}/blender-{BLENDER_VERSION}-linux-x64.tar.xz"
+    return (
+        "RUN selkies-privileged-files run sh -c '"
+        "apt-get update && apt-get install --no-install-recommends -y xprintidle && "
+        "apt-get clean && rm -rf /var/lib/apt/lists/*'",
+        f"RUN curl -fsSL -o /tmp/blender.tar.xz {archive} && "
+        f"echo '{BLENDER_SHA256}  /tmp/blender.tar.xz' | sha256sum -c - && "
+        "mkdir -p /opt/blender && tar -xJf /tmp/blender.tar.xz -C /opt/blender --strip-components=1 && "
+        "rm -f /tmp/blender.tar.xz && ln -s /opt/blender/blender /usr/local/bin/blender",
+    )
 
 
 def session_image(app: str = "blender") -> modal.Image:
@@ -173,8 +223,12 @@ def session_image(app: str = "blender") -> modal.Image:
     FilmCraft and PhotoCraft are the Debian packages of their GitHub releases,
     each checked against the hash its release publishes (`craft/install.sh`),
     with what finds the session's project folder (`craft/project.sh`); FilmCraft
-    adds the client of its control channel (`filmcraft/control.sh`).
+    adds the client of its control channel (`filmcraft/control.sh`). Unreal's
+    is the desktop its editor runs beside, without the editor
+    (`unreal_desktop`); `unreal_image` is the same desktop with the editor.
     """
+    if app == "unreal":
+        return with_session(unreal_desktop(modal.Image.from_registry(BASE_IMAGE)), app)
     if app in CRAFT_RELEASES:
         version, sha256 = CRAFT_RELEASES[app]
         image = (
@@ -202,23 +256,22 @@ def session_image(app: str = "blender") -> modal.Image:
             .add_local_file(HERE / "nuke" / "init.py", f"{SHARE}/nuke/init.py", copy=True)
         )
     else:
-        series = BLENDER_VERSION.rsplit(".", 1)[0]
-        archive = f"https://download.blender.org/release/Blender{series}/blender-{BLENDER_VERSION}-linux-x64.tar.xz"
         image = (
             modal.Image.from_registry(BASE_IMAGE)
-            .dockerfile_commands(
-                "RUN selkies-privileged-files run sh -c '"
-                "apt-get update && apt-get install --no-install-recommends -y xprintidle && "
-                "apt-get clean && rm -rf /var/lib/apt/lists/*'",
-                f"RUN curl -fsSL -o /tmp/blender.tar.xz {archive} && "
-                f"echo '{BLENDER_SHA256}  /tmp/blender.tar.xz' | sha256sum -c - && "
-                "mkdir -p /opt/blender && tar -xJf /tmp/blender.tar.xz -C /opt/blender --strip-components=1 && "
-                "rm -f /tmp/blender.tar.xz && ln -s /opt/blender/blender /usr/local/bin/blender",
-            )
+            .dockerfile_commands(*blender_install())
             .add_local_file(HERE / "blender" / "autostart", "/etc/xdg/openbox/autostart", copy=True)
             .add_local_file(HERE / "blender" / "session.py", f"{SHARE}/blender-session.py", copy=True)
             .add_local_file(HERE / "blender" / "run-python.sh", "/usr/local/bin/selkies-modal-blender", copy=True)
         )
+    return with_session(image, app)
+
+
+def with_session(image: modal.Image, app: str) -> modal.Image:
+    """`image` with what every session runs on: its main process, its command runners, and its environment.
+
+    These are the last layers of every session image, so a change to them
+    rebuilds only themselves, never the application under them.
+    """
     return (
         image.add_local_file(HERE / "session.sh", "/usr/local/bin/selkies-modal-session", copy=True)
         .add_local_file(HERE / "run.sh", "/usr/local/bin/selkies-modal-run", copy=True)
@@ -226,6 +279,123 @@ def session_image(app: str = "blender") -> modal.Image:
         .env({**SESSION_ENV, **APP_ENV[app]})
         .entrypoint([])
     )
+
+
+def unreal_desktop(image: modal.Image) -> modal.Image:
+    """The desktop an Unreal session works on, layered over `image`: the base, or the base with the editor.
+
+    A studio's developer works the way they do on their own machine: they sign
+    in to GitHub in a GitHub client, clone their team's repository, and open its
+    `.uproject`. So the session is the Selkies desktop (`SELKIES_DESKTOP`), and
+    it starts on that client:
+
+    - **GitHub.** Desktop Plus, a fork of GitHub Desktop kept current with it
+      (`unreal/install.sh` says why it rather than the older Linux fork), with
+      Git LFS, which Unreal repositories keep their assets in. Its sign-in
+      opens in Firefox, comes back to it through the URL scheme Firefox hands
+      it, and is kept in GNOME's keyring in the workspace (`unreal/github.sh`),
+      so it is done once. Its clone dialog offers the session's projects folder.
+    - **The line of instructions.** At start, while that folder holds no
+      Unreal project yet, one line over the client says to sign in and clone
+      the game there (`unreal/autostart`).
+    - **Finding the project.** `selkies-modal-unreal-projects` describes every
+      `.uproject` in the workspace (`unreal_projects`).
+    - **The Unreal view.** A second page on its own port (`unreal_view_link`),
+      which an s6 service serves: a page saying Unreal is not open yet, until
+      an editor streams there (`unreal/view/view.sh`).
+    - **Opening a project.** `selkies-modal-unreal-open` starts the editor off
+      screen with its own stream, where the image has it (`unreal_image`), and
+      otherwise says it is not installed (`unreal/open.sh`).
+    - **Blender**, as the blender app has it, with the Send to Unreal add-on
+      enabled (`unreal/blender.sh`).
+
+    The layers are ordered by how often they change: Blender and the packages,
+    then the small files. `image` is the base for the desktop alone, and the
+    base with the editor for `unreal_image`, so the editor, the largest layer by
+    far, sits under everything else and nothing above it fetches it again.
+    """
+    unreal = HERE / "unreal"
+    return (
+        image.dockerfile_commands(*blender_install())
+        .add_local_file(unreal / "install.sh", f"{SHARE}/unreal/install.sh", copy=True)
+        .dockerfile_commands(
+            f"RUN selkies-privileged-files run sh {SHARE}/unreal/install.sh {DESKTOP_PLUS_VERSION} {DESKTOP_PLUS_SHA256}",
+            # Git LFS's filters for every repository, whichever Git clones it
+            "RUN git lfs install --system --skip-repo",
+        )
+        .add_local_file(unreal / "firefox-policies.json", "/etc/firefox/policies/policies.json", copy=True)
+        .add_local_file(unreal / "mimeapps.list", "/etc/xdg/mimeapps.list", copy=True)
+        .add_local_file(unreal / "desktop-config", "/etc/xdg/selkies-desktop/config", copy=True)
+        .add_local_file(unreal / "rc.xml", "/etc/xdg/openbox/rc.xml", copy=True)
+        .add_local_file(unreal / "desktop-plus.desktop", "/usr/local/share/applications/desktop-plus.desktop", copy=True)
+        .add_local_file(unreal / "blender.desktop", "/usr/local/share/applications/blender.desktop", copy=True)
+        .add_local_file(unreal / "autostart", "/etc/xdg/openbox/autostart", copy=True)
+        .add_local_file(unreal / "github.sh", "/usr/local/bin/selkies-modal-unreal-github", copy=True)
+        .add_local_file(unreal / "blender.sh", "/usr/local/bin/selkies-modal-unreal-blender", copy=True)
+        .add_local_file(unreal / "projects.py", "/usr/local/bin/selkies-modal-unreal-projects", copy=True)
+        .add_local_file(unreal / "open.sh", "/usr/local/bin/selkies-modal-unreal-open", copy=True)
+        .add_local_file(unreal / "view" / "view.sh", "/usr/local/bin/selkies-modal-unreal-view", copy=True)
+        .add_local_file(unreal / "view" / "serve.py", f"{SHARE}/unreal/view/serve.py", copy=True)
+        .add_local_file(unreal / "view" / "index.html", f"{SHARE}/unreal/view/index.html", copy=True)
+        .add_local_file(unreal / "view" / "run", "/etc/service/unreal-view/run", copy=True)
+        .add_local_file(unreal / "view" / "finish", "/etc/service/unreal-view/finish", copy=True)
+        # The bridge: Blender's add-on, and the editor's side, which the editor finds on UE_PYTHONPATH
+        .add_local_file(unreal / "send_to_unreal.py", f"{SHARE}/unreal/send_to_unreal.py", copy=True)
+        .add_local_file(unreal / "unreal_import.py", f"{SHARE}/unreal/unreal_import.py", copy=True)
+        .add_local_file(unreal / "send_to_blender.py", f"{SHARE}/unreal/send_to_blender.py", copy=True)
+        .add_local_file(unreal / "init_unreal.py", f"{SHARE}/unreal/init_unreal.py", copy=True)
+        .add_local_file(unreal / "DefaultRemoteControl.ini", f"{SHARE}/unreal/DefaultRemoteControl.ini", copy=True)
+        .add_local_file(HERE / "craft" / "project.sh", "/usr/local/bin/selkies-modal-project", copy=True)
+        .add_local_file(HERE / "blender" / "session.py", f"{SHARE}/blender-session.py", copy=True)
+        .add_local_file(HERE / "blender" / "run-python.sh", "/usr/local/bin/selkies-modal-blender", copy=True)
+        .run_commands(
+            # s6 runs as the session's user and writes its state into the services' folder and beside
+            # each service, so both stay that user's, as the base image has them; adding the view's
+            # files hands the folder to root
+            "chown 1000:1000 /etc/service && chown -R 1000:1000 /etc/service/unreal-view",
+            # Blender finds the add-on in a scripts folder of its own; a link, so the add-on still
+            # finds the editor's half beside it
+            f"mkdir -p {SHARE}/unreal/blender/addons && "
+            f"ln -sfn ../../send_to_unreal.py {SHARE}/unreal/blender/addons/send_to_unreal.py",
+        )
+    )
+
+
+def engine_layer(reference: str, source: str, registry_secret: modal.Secret) -> modal.Image:
+    """The base image with one directory of a container image copied to `UNREAL_ROOT`, pulled with `registry_secret`.
+
+    `unreal/fetch-engine.sh` streams `source` out of `reference` with crane,
+    logged in with the Secret's `REGISTRY_USERNAME` and `REGISTRY_PASSWORD`,
+    which no layer keeps. The layer is the user's own: Modal keys it by the
+    Secret it was built with, so a user's named Secret keeps it cached for them.
+    """
+    return (
+        modal.Image.from_registry(BASE_IMAGE)
+        .add_local_file(HERE / "unreal" / "fetch-engine.sh", f"{SHARE}/unreal/fetch-engine.sh", copy=True)
+        .dockerfile_commands(
+            f"RUN sh {SHARE}/unreal/fetch-engine.sh {reference} {source} {UNREAL_ROOT}", secrets=[registry_secret]
+        )
+    )
+
+
+def unreal_image(registry_secret: modal.Secret, version: str) -> modal.Image:
+    """The Unreal session image of one user: the Unreal desktop with the editor of `version` in `UNREAL_ROOT`.
+
+    The editor is Epic's development image of that version
+    (`ghcr.io/epicgames/unreal-engine:dev-slim-<version>`), pulled with the
+    user's own registry credential, `registry_secret`, a GitHub login and token
+    of an account linked to Epic: Epic's license keeps each user on their own
+    copy (`lathe/UNREAL.md`). It is the image's first layer above the base,
+    about 40 GB, so the desktop and the scripts over it change without fetching
+    it again.
+
+    Raises:
+        ValueError: `version` is not a version number such as 5.8.4.
+    """
+    if not re.fullmatch(r"\d+\.\d+(\.\d+)?", version):
+        raise ValueError(f"{version!r} is not an Unreal Engine version such as 5.8.4")
+    engine = engine_layer(f"{UNREAL_ENGINE_IMAGE}:dev-slim-{version}", UNREAL_ENGINE_SOURCE, registry_secret)
+    return with_session(unreal_desktop(engine), "unreal")
 
 
 def with_turn(image: modal.Image) -> modal.Image:
@@ -480,6 +650,41 @@ def filmcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] |
     return result if isinstance(result, dict) else {"result": result}
 
 
+def unreal_projects(sandbox: modal.Sandbox) -> list[dict[str, Any]]:
+    """The Unreal projects in an Unreal session's workspace, as `selkies-modal-unreal-projects` describes them.
+
+    One entry per `.uproject`, with its path and name, the engine it was saved
+    with (`engine_association` as the file has it; `engine_version` where that
+    is a version such as 5.4), its C++ modules, its enabled plugins and whether
+    each has its source in the project's `Plugins` folder, its repository with
+    whether Git LFS is used and its files fetched, and its size
+    (`unreal/projects.py` documents every field). Asking counts as use of the
+    session, as any command run in it does.
+
+    Raises:
+        RuntimeError: The session has no such command (another application's) or it failed, with what it said.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-unreal-projects")
+    output = process.stdout.read()
+    if process.wait() != 0:
+        raise RuntimeError(f"the session's Unreal projects could not be read: {process.stderr.read().strip()}")
+    return json.loads(output)
+
+
+def unreal_view_link(sandbox: modal.Sandbox) -> str:
+    """A link that opens an Unreal session's Unreal view, the page beside its desktop, with a new connect token.
+
+    The view is its own port (`UNREAL_VIEW_PORT`), so its link is a connect
+    token of its own, which is the only credential it takes: what serves it, a
+    page until the editor streams and the editor's player after
+    (`unreal/view/view.sh`), has no login of its own. Asking for it counts as
+    use of the session, as asking for the desktop's link does.
+    """
+    sandbox.exec("sh", "-c", 'touch "$SELKIES_MODAL_ACTIVITY_FILE"').wait()
+    credentials = sandbox.create_connect_token(port=UNREAL_VIEW_PORT)
+    return f"{credentials.url}/?_modal_connect_token={credentials.token}"
+
+
 def screenshot(sandbox: modal.Sandbox) -> bytes:
     """The session's screen as a JPEG no wider than 1280 pixels, small enough to hand to a model.
 
@@ -606,16 +811,18 @@ def up(args: argparse.Namespace) -> int:
     for port in args.tcp_port:
         host, public = tcp_address(sandbox, port)
         say(f"TCP port {port} is reached at {host}:{public}")
+    if args.app == "unreal":
+        say(f"the Unreal view is {unreal_view_link(sandbox)}")
     print(session_link(sandbox))
     return 0
 
 
 def url(args: argparse.Namespace) -> int:
-    """Print a new link to a running session."""
+    """Print a new link to a running session, or to an Unreal session's Unreal view."""
     sandbox = find_session(args.name)
     if sandbox is None:
         raise SystemExit(f"selkies-modal: no session named {args.name} is running")
-    print(session_link(sandbox))
+    print(unreal_view_link(sandbox) if args.view == "unreal" else session_link(sandbox))
     return 0
 
 
@@ -802,7 +1009,13 @@ def parser() -> argparse.ArgumentParser:
         metavar="NAME=value",
         help="a variable for the session, such as SELKIES_DESKTOP=true or SELKIES_ENCODER=av1enc; repeatable",
     )
-    named(command("url", url, "Print a new link to a running session."))
+    link = named(command("url", url, "Print a new link to a running session."))
+    link.add_argument(
+        "--view",
+        choices=("desktop", "unreal"),
+        default="desktop",
+        help="the page the link opens: the desktop, or an Unreal session's Unreal view (default: %(default)s)",
+    )
     command("ls", ls, "List the running sessions.")
     execute = named(command("exec", run, "Run a command in a session's environment."))
     execute.add_argument("arguments", nargs=argparse.REMAINDER, metavar="-- command", help="the command and its arguments")

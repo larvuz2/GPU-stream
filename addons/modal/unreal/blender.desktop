@@ -1,0 +1,18 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Blender in the start menu, the quick launch, and the desktop of an Unreal
+# session, started with the Send to Unreal add-on (blender.sh). The icon is
+# the one Blender's release archive carries.
+[Desktop Entry]
+Type=Application
+Name=Blender
+GenericName=3D Modeler
+Comment=Model, then send it to Unreal from the sidebar's Unreal tab
+Exec=selkies-modal-unreal-blender %F
+Icon=/opt/blender/blender.svg
+Terminal=false
+StartupWMClass=Blender
+Categories=Graphics;3DGraphics;
+MimeType=application/x-blender;
