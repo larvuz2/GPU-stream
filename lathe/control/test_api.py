@@ -427,12 +427,12 @@ class FakeGitHub:
 
     def add_repository(
         self, full_name: str, push: bool, updated: str = "2026-11-24T00:00:00Z", private: bool = True,
-        files: dict[str, str] | None = None,
+        files: dict[str, str] | None = None, pull: bool = True,
     ) -> dict[str, Any]:
         """A repository with one commit on `main`, its default branch."""
         self.repositories[full_name] = {
             "full_name": full_name, "private": private, "html_url": f"https://github.com/{full_name}",
-            "updated_at": updated, "default_branch": "main", "permissions": {"push": push},
+            "updated_at": updated, "default_branch": "main", "permissions": {"push": push, "pull": pull},
         }
         self.commit(full_name, "main", files or {"README.md": f"# {full_name}\n"})
         return self.repositories[full_name]
@@ -1616,7 +1616,10 @@ def test_github_connects_through_a_signed_state_and_links_projects(studio):
     film = new_project(client)
     link = lambda body: client.post(f"/v1/projects/{film['id']}/github", headers=auth("alice-token"), json=body)
     assert link({"repo": "alice-gh/film"}).json()["project"]["github_repo"] == "alice-gh/film"
-    assert link({"repo": "someone/theirs"}).status_code == 403
+    studio.github.add_repository("someone/sealed", push=False, pull=False)
+    assert link({"repo": "someone/sealed"}).status_code == 403, "a repository the account cannot read"
+    read_only = link({"repo": "someone/theirs"})
+    assert read_only.json()["project"]["github_repo"] == "someone/theirs", "reading is enough to link and ask about it"
     assert link({"repo": "someone/missing"}).status_code == 404
     assert link({"repo": "not a repo"}).status_code == 400
     assert link({}).status_code == 400

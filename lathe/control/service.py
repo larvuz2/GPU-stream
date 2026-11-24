@@ -1382,11 +1382,15 @@ class Sessions:
     def link_repo(
         self, user: User, project_id: str, repo: str | None = None, create: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        """Link the user's project to a repository of theirs, an existing one they can push to or a new one.
+        """Link the user's project to a repository they can read, an existing one or a new one of theirs.
+
+        Reading is enough to link: a developer whose team's game they can only read still asks the
+        agent about its assets. Writing is checked where it happens, since the agent writes only to a
+        branch of its own (`github_save`), which needs push access and says so when it has none.
 
         Raises:
             Refused: 400 for a malformed repository name or neither, 403 for a repository the account
-                cannot push to, 409 without a GitHub connection or for a name GitHub refuses.
+                cannot read, 409 without a GitHub connection or for a name GitHub refuses.
         """
         project = self.owned_project(user, project_id)
         token = self.require_github(user.id)
@@ -1399,8 +1403,8 @@ class Sessions:
                 if not REPO_FULL_NAME.fullmatch(repo):
                     raise Refused(400, "Name the repository as owner/name.")
                 found = self.github.repo(token, repo)
-                if not found.get("permissions", {}).get("push"):
-                    raise Refused(403, "This GitHub account cannot push to that repository.")
+                if not found.get("permissions", {}).get("pull"):
+                    raise Refused(403, "This GitHub account cannot read that repository.")
                 full_name = found["full_name"]
             else:
                 raise Refused(400, "Name a repository, or one to create.")
