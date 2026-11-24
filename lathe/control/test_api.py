@@ -12,9 +12,11 @@ the way a scripted conversation says, recording every request it was sent.
 What is tested here is this side: who a credential names, what each route and
 tool returns and refuses, that one user's sessions, projects, libraries, and
 engines are invisible to another, that the agent's conversation only ever
-grows, that GitHub's callback takes nothing it did not sign, and that Unreal
-Engine starts only for an account linked to Epic, pulled with that user's own
-token. Run with `pytest lathe/control`.
+grows, that GitHub's callback takes nothing it did not sign, that the agent
+writes to no branch of a repository but its own, that it reads an Unreal
+project's assets from the repository alone, and that Unreal Engine starts only
+for an account linked to Epic, pulled with that user's own token. Run with
+`pytest lathe/control`.
 """
 
 from __future__ import annotations
@@ -40,7 +42,18 @@ import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
-from agent import TOOL_NAMES, Agent, Claude, Reply, echoable, invalid, read_skills, replace_tags, skills_for
+from agent import (
+    TOOL_NAMES,
+    Agent,
+    Claude,
+    Reply,
+    echoable,
+    invalid,
+    read_skills,
+    replace_tags,
+    skills_directory,
+    skills_for,
+)
 from api import create_app
 from generation import IMAGE_MODELS, VIDEO_MODELS, Fal, GenerationStopped, video_kilotokens
 from github_client import GitHub, GitHubError, Grant, read_state, reads_packages, seal, sign_state, unseal
@@ -376,14 +389,21 @@ class InlineJobs:
 
 
 class FakeGitHub:
-    """GitHub, as far as Lathe reaches it: one account, the codes it grants, its repositories and their files.
+    """GitHub, as far as Lathe reaches it: one account, the codes it grants, its repositories, their branches and files.
 
     `repo-only-code` is a grant from before Lathe asked for `read:packages`. `linked_to_epic` holds
     the tokens whose account sees Epic's repository and images, and `epic_refusal` is what GitHub
     answers the check with instead, when set.
+
+    A branch points at a commit, and a commit is a snapshot of every file of its repository
+    (`commits`), so a test can hold a branch's files before and after. A tree is listed from a
+    commit's files the way the Git Trees API lists one, a subtree's SHA naming its commit and
+    folder, and a recursive listing longer than `tree_limit` entries comes back truncated, as
+    GitHub's does past 100,000. `files`, the walk over those listings, is the real client's.
     """
 
     authorize_url = staticmethod(GitHub.authorize_url)
+    files = GitHub.files
 
     def __init__(self) -> None:
         self.codes = {
@@ -394,15 +414,48 @@ class FakeGitHub:
         self.linked_to_epic: set[str] = set()
         self.epic_refusal: GitHubError | None = None
         self.epic_checks: list[str] = []
-        self.repositories: dict[str, dict[str, Any]] = {
-            "alice-gh/film": {"full_name": "alice-gh/film", "private": True, "html_url": "https://github.com/alice-gh/film",
-                              "updated_at": "2026-11-20T00:00:00Z", "permissions": {"push": True}},
-            "someone/theirs": {"full_name": "someone/theirs", "private": False, "html_url": "https://github.com/someone/theirs",
-                               "updated_at": "2026-11-19T00:00:00Z", "permissions": {"push": False}},
-        }
-        self.files: dict[tuple[str, str], str] = {}
+        self.repositories: dict[str, dict[str, Any]] = {}
+        self.commits: dict[str, dict[str, str]] = {}
+        self.refs: dict[tuple[str, str], str] = {}
+        self.made_branches: list[tuple[str, str, str]] = []
+        self.tree_calls: list[tuple[str, bool]] = []
+        self.tree_limit = 100_000
         self.redirects: list[str] = []
         self.tokens: list[str] = []
+        self.add_repository("alice-gh/film", push=True, updated="2026-11-20T00:00:00Z")
+        self.add_repository("someone/theirs", push=False, updated="2026-11-19T00:00:00Z", private=False)
+
+    def add_repository(
+        self, full_name: str, push: bool, updated: str = "2026-11-24T00:00:00Z", private: bool = True,
+        files: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """A repository with one commit on `main`, its default branch."""
+        self.repositories[full_name] = {
+            "full_name": full_name, "private": private, "html_url": f"https://github.com/{full_name}",
+            "updated_at": updated, "default_branch": "main", "permissions": {"push": push},
+        }
+        self.commit(full_name, "main", files or {"README.md": f"# {full_name}\n"})
+        return self.repositories[full_name]
+
+    def commit(self, full_name: str, branch: str, files: dict[str, str]) -> str:
+        """Point a branch at a new commit of these files; returns the commit's SHA."""
+        sha = f"{len(self.commits) + 1:040x}"
+        self.commits[sha] = dict(files)
+        self.refs[(full_name, branch)] = sha
+        return sha
+
+    def branch_files(self, full_name: str, branch: str) -> dict[str, str]:
+        return self.commits[self.refs[(full_name, branch)]]
+
+    def at(self, full_name: str, ref: str | None) -> dict[str, str]:
+        """The files at a branch, at a commit, or on the default branch for no ref."""
+        if ref is None:
+            ref = self.repositories[full_name]["default_branch"]
+        if (full_name, ref) in self.refs:
+            return self.branch_files(full_name, ref)
+        if ref in self.commits:
+            return self.commits[ref]
+        raise GitHubError(404, f"No commit found for the ref {ref}")
 
     def exchange(self, client_id: str, client_secret: str, code: str, redirect_uri: str) -> Grant:
         self.redirects.append(redirect_uri)
@@ -433,21 +486,57 @@ class FakeGitHub:
         full_name = f"alice-gh/{name}"
         if full_name in self.repositories:
             raise GitHubError(422, "name already exists on this account")
-        self.repositories[full_name] = {"full_name": full_name, "private": private, "html_url": f"https://github.com/{full_name}",
-                                        "updated_at": "2026-11-24T00:00:00Z", "permissions": {"push": True}}
-        return self.repositories[full_name]
+        return self.add_repository(full_name, push=True, private=private)
 
-    def read(self, token: str, full_name: str, path: str) -> dict[str, Any]:
-        if not path:
-            return {"entries": sorted({p.split("/")[0] for repo, p in self.files if repo == full_name})}
-        if (full_name, path) not in self.files:
+    def head(self, token: str, full_name: str, branch: str) -> str | None:
+        return self.refs.get((full_name, branch))
+
+    def branches_under(self, token: str, full_name: str, prefix: str) -> list[str]:
+        return sorted(branch for repo, branch in self.refs if repo == full_name and branch.startswith(prefix))
+
+    def create_branch(self, token: str, full_name: str, branch: str, sha: str) -> None:
+        if (full_name, branch) in self.refs:
+            raise GitHubError(422, "Reference already exists")
+        self.refs[(full_name, branch)] = sha
+        self.made_branches.append((full_name, branch, sha))
+
+    def tree(self, token: str, full_name: str, sha: str, recursive: bool) -> dict[str, Any]:
+        self.tree_calls.append((sha, recursive))
+        commit, _, folder = sha.partition(":")
+        prefix = f"{folder}/" if folder else ""
+        entries: dict[str, dict[str, Any]] = {}
+        for path in sorted(self.commits[commit]):
+            if not path.startswith(prefix):
+                continue
+            parts = path[len(prefix) :].split("/")
+            for depth in range(1, len(parts)):
+                below = "/".join(parts[:depth])
+                entries[below] = {"path": below, "type": "tree", "sha": f"{commit}:{prefix}{below}"}
+            entries["/".join(parts)] = {"path": "/".join(parts), "type": "blob", "sha": f"blob-{path}"}
+        listing = [entry for entry in entries.values() if recursive or "/" not in entry["path"]]
+        truncated = recursive and len(listing) > self.tree_limit
+        return {"sha": sha, "tree": listing[: self.tree_limit] if truncated else listing, "truncated": truncated}
+
+    def read(self, token: str, full_name: str, path: str, ref: str | None = None) -> dict[str, Any]:
+        files = self.at(full_name, ref)
+        prefix = f"{path}/" if path else ""
+        if path in files:
+            return {"text": files[path], "sha": f"blob-{path}"}
+        below = {name[len(prefix) :].split("/")[0] + ("/" if "/" in name[len(prefix) :] else "") for name in files if name.startswith(prefix)}
+        if not below:
             raise GitHubError(404, "Not Found")
-        return {"text": self.files[(full_name, path)], "sha": "abc"}
+        return {"entries": sorted(below)}
 
-    def save(self, token: str, full_name: str, path: str, content: str, message: str) -> dict[str, Any]:
+    def save(
+        self, token: str, full_name: str, path: str, content: str, message: str, branch: str | None = None
+    ) -> dict[str, Any]:
         self.tokens.append(token)
-        self.files[(full_name, path)] = content
-        return {"html_url": f"https://github.com/{full_name}/commit/abc", "message": message}
+        # As GitHub's contents API does, a write that names no branch commits to the default branch
+        branch = branch or self.repositories[full_name]["default_branch"]
+        if (full_name, branch) not in self.refs:
+            raise GitHubError(404, f"Branch {branch} not found")
+        sha = self.commit(full_name, branch, {**self.branch_files(full_name, branch), path: content})
+        return {"html_url": f"https://github.com/{full_name}/commit/{sha}", "message": message}
 
 
 class FakeFal:
@@ -1233,7 +1322,7 @@ def test_the_engine_tools_act_in_the_projects_own_running_engine(studio):
     assert engine_events == ["starting", "running", "ended"]
 
 
-def test_the_github_tools_write_and_read_the_linked_repository(studio):
+def test_the_agent_saves_only_to_a_branch_of_its_own_made_from_the_default_head(studio):
     client, model, github = studio.client, studio.model, studio.github
     film = new_project(client)
     unlinked = use("github_save", path="script.fountain", content="FADE IN:", message="Script")
@@ -1243,16 +1332,254 @@ def test_the_github_tools_write_and_read_the_linked_repository(studio):
 
     connect_alice(studio)
     client.post(f"/v1/projects/{film['id']}/github", headers=auth("alice-token"), json={"repo": "alice-gh/film"})
+    repo, branch = "alice-gh/film", f"lathe/mara-{film['id'][:8]}"
+    main_head, main_files = github.refs[(repo, "main")], dict(github.branch_files(repo, "main"))
+    # A teammate's project of the same name, linked to the same repository, made its own branch first
+    theirs = github.commit(repo, "lathe/mara-0000beef", {**main_files, "notes.md": "theirs"})
+
     saved = use("github_save", path="/script.fountain", content="FADE IN:", message="Lock the script")
     escape = use("github_read", path="../secrets")
-    read = use("github_read", path="script.fountain")
-    model.script(reply(saved, escape, read), reply(say("Saved.")))
+    on_default = use("github_read", path="script.fountain")
+    on_own = use("github_read", path="script.fountain", ref="agent")
+    model.script(reply(saved, escape, on_default, on_own), reply(say("Saved.")))
     message(client, film["id"], "Save the script")
     results = tool_results(model.requests[-1])
-    assert github.files == {("alice-gh/film", "script.fountain"): "FADE IN:"}
-    assert json.loads(results[saved["id"]]["content"])["commit"] == "https://github.com/alice-gh/film/commit/abc"
-    assert results[escape["id"]]["is_error"] and results[read["id"]]["content"] == "FADE IN:"
+    first = json.loads(results[saved["id"]]["content"])
+    assert (first["branch"], first["branch_made_now"], first["default_branch"]) == (branch, True, "main")
+    assert first["compare"] == f"https://github.com/{repo}/compare/main...{branch}?expand=1"
+    assert github.made_branches == [(repo, branch, main_head)], "made once, from the default branch's head"
+    assert results[escape["id"]]["is_error"]
+    assert results[on_default["id"]]["is_error"], "what the agent saved is not on the default branch"
+    assert results[on_own["id"]]["content"] == "FADE IN:"
+
+    # Renamed since, the project still saves to the branch it made
+    client.patch(f"/v1/projects/{film['id']}", headers=auth("alice-token"), json={"name": "Mara's Light"})
+    again = use("github_save", path="shotlist.md", content="| 1 | wide |", message="Shot list")
+    model.script(reply(again), reply(say("Saved again.")))
+    message(client, film["id"], "Save the shot list")
+    second = json.loads(tool_results(model.requests[-1])[again["id"]]["content"])
+    assert (second["branch"], second["branch_made_now"]) == (branch, False)
+    assert len(github.made_branches) == 1
+    assert github.branch_files(repo, branch) == {**main_files, "script.fountain": "FADE IN:", "shotlist.md": "| 1 | wide |"}
+    assert github.refs[(repo, "main")] == main_head and github.branch_files(repo, "main") == main_files, "the default branch never changed"
+    assert github.refs[(repo, "lathe/mara-0000beef")] == theirs, "nor did the teammate's branch"
     assert github.tokens[-1] == "gho_alice_token"
+    log = events(client, film["id"])["events"]
+    ends = [e["data"]["summary"] for e in log if e["kind"] == "tool_end"]
+    assert f"Committed script.fountain to {branch}, a new branch" in ends and f"Committed shotlist.md to {branch}" in ends
+
+
+def test_a_repository_the_account_cannot_push_to_is_refused_and_left_as_it_is(studio):
+    client, model, github = studio.client, studio.model, studio.github
+    film = new_project(client)
+    connect_alice(studio)
+    client.post(f"/v1/projects/{film['id']}/github", headers=auth("alice-token"), json={"repo": "alice-gh/film"})
+    # The account's access was lowered to read after the project was linked
+    github.repositories["alice-gh/film"]["permissions"]["push"] = False
+    before = dict(github.refs)
+    saved = use("github_save", path="script.fountain", content="FADE IN:", message="Script")
+    read = use("github_read", path="README.md")
+    model.script(reply(saved, read), reply(say("I cannot save there.")))
+    message(client, film["id"], "Save the script")
+    results = tool_results(model.requests[-1])
+    assert results[saved["id"]]["is_error"] and "cannot push to alice-gh/film" in results[saved["id"]]["content"]
+    assert "saved nothing" in results[saved["id"]]["content"]
+    assert github.refs == before and github.made_branches == []
+    assert results[read["id"]]["content"] == "# alice-gh/film\n", "reading still works"
+
+
+def test_the_github_client_names_the_branch_on_every_write():
+    """The real client over a recorded GitHub: a save reads and commits on the branch it is given, never the default."""
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        path = request.url.path
+        if request.method == "GET" and path == "/repos/o/r/contents/notes.md":
+            return httpx.Response(200, json={"encoding": "base64", "content": base64.b64encode(b"old").decode(), "sha": "blob1"})
+        if request.method == "PUT" and path == "/repos/o/r/contents/notes.md":
+            return httpx.Response(201, json={"commit": {"html_url": "https://github.com/o/r/commit/c2"}})
+        if path == "/repos/o/r/git/ref/heads/main":
+            return httpx.Response(200, json={"object": {"sha": "c1"}})
+        if path == "/repos/o/r/git/matching-refs/heads/lathe":
+            return httpx.Response(200, json=[{"ref": "refs/heads/lathe-old"}, {"ref": "refs/heads/lathe/mara-0123abcd"}])
+        if request.method == "POST" and path == "/repos/o/r/git/refs":
+            return httpx.Response(201, json={"ref": "refs/heads/lathe/mara-0123abcd"})
+        if path == "/repos/o/r/git/trees/c1":
+            return httpx.Response(200, json={"tree": [{"path": "Game.uproject", "type": "blob", "sha": "b"}], "truncated": False})
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    github = GitHub()
+    github.http = httpx.Client(headers=github.http.headers, transport=httpx.MockTransport(answer))
+    branch = "lathe/mara-0123abcd"
+    assert github.save("gho_t", "o/r", "notes.md", "new", "Notes", branch) == {"html_url": "https://github.com/o/r/commit/c2"}
+    read, write = seen
+    assert read.url.params["ref"] == branch
+    assert json.loads(write.content) == {
+        "message": "Notes", "content": base64.b64encode(b"new").decode(), "branch": branch, "sha": "blob1"}
+    assert github.head("gho_t", "o/r", "main") == "c1" and github.head("gho_t", "o/r", "gone") is None
+    assert github.branches_under("gho_t", "o/r", "lathe/") == [branch]
+    github.create_branch("gho_t", "o/r", branch, "c1")
+    assert json.loads(seen[-1].content) == {"ref": f"refs/heads/{branch}", "sha": "c1"}
+    assert github.files("gho_t", "o/r", "c1") == ([{"path": "Game.uproject", "type": "blob", "sha": "b"}], True)
+    assert seen[-1].url.params["recursive"] == "1"
+
+
+CAPYVERSE = "capy-studio/capyverse-odyssey"
+LFS_POINTER = "version https://git-lfs.github.com/spec/v1\noid sha256:0\nsize 1\n"
+CAPYVERSE_FILES = {
+    ".gitattributes": "*.uasset filter=lfs diff=lfs merge=lfs -text\n*.umap filter=lfs diff=lfs merge=lfs -text\n"
+                      "# art sources\n*.psd filter=lfs diff=lfs merge=lfs -text\n*.ini text eol=lf\n",
+    "README.md": "# Capyverse Odyssey\n",
+    # The editor writes some with a byte order mark
+    "CapyverseOdyssey.uproject": "\ufeff" + json.dumps({
+        "FileVersion": 3, "EngineAssociation": "5.8", "Category": "",
+        "Modules": [{"Name": "CapyverseOdyssey", "Type": "Runtime", "LoadingPhase": "Default"}],
+        "Plugins": [{"Name": "ModelingToolsEditorMode", "Enabled": True, "TargetAllowList": ["Editor"]},
+                    {"Name": "CapyAbilities", "Enabled": True}, {"Name": "Bridge", "Enabled": False}],
+    }, indent="\t"),
+    "Config/DefaultEngine.ini": "[/Script/EngineSettings.GameMapsSettings]\n",
+    "Source/CapyverseOdyssey/CapyverseOdyssey.cpp": "// The game's module\n",
+    **{f"Content/{path}": LFS_POINTER for path in (
+        "Maps/L_Burrow.umap", "Maps/L_Burrow_BuiltData.uasset", "Maps/L_Swamp.umap",
+        "__ExternalActors__/Maps/L_Swamp/0/AB/3XK9QZ.uasset", "__ExternalActors__/Maps/L_Swamp/1/C4/9Y2M1P.uasset",
+        "Blueprints/BP_Capy.uasset",
+        "Characters/Capy/SK_Capy.uasset", "Characters/Capy/SKEL_Capy.uasset",
+        "Characters/Capy/Animations/A_Capy_Idle.uasset", "Characters/Capy/Animations/A_Capy_Run.uasset",
+        "Characters/Capy/Animations/AM_Capy_Bite.uasset", "Characters/Capy/Animations/BS_Capy_Locomotion.uasset",
+        "Characters/Capy/Animations/ABP_Capy.uasset", "Characters/Capy/Animations/Capy_Dodge.uasset",
+        "Environment/Swamp/SM_Lily.uasset", "Environment/Swamp/SM_Log.uasset",
+        "Environment/Swamp/T_Lily_D.uasset", "Environment/Swamp/T_Lily_N.uasset",
+        "Environment/Swamp/M_Swamp.uasset", "Environment/Swamp/MI_Lily_Wet.uasset",
+        "UI/WBP_MainMenu.uasset", "UI/WBP_HUD.uasset",
+        "Audio/S_Splash.uasset", "Audio/A_Wind.uasset", "Audio/SC_Swamp.uasset",
+        "VFX/NS_Splash.uasset",
+        "Data/DT_Loot.uasset",
+        "Developers/alice/Scratch.uasset",
+    )},
+    "Plugins/Gameplay/CapyAbilities/CapyAbilities.uplugin": "{\"FriendlyName\": \"Capy Abilities\"}",
+    "Plugins/Gameplay/CapyAbilities/Content/Abilities/BP_Dash.uasset": LFS_POINTER,
+    "Plugins/Gameplay/CapyAbilities/Content/Animations/AS_Dash.uasset": LFS_POINTER,
+    "Plugins/Gameplay/CapyAbilities/Source/CapyAbilities/CapyAbilities.cpp": "// The plugin's module\n",
+    "Samples/Demo/Demo.uproject": "{\"EngineAssociation\": \"5.3\"}",
+    "Samples/Demo/Content/SM_Cube.uasset": LFS_POINTER,
+}
+CAPYVERSE_COUNTS = {
+    "maps": 2, "animations": 8, "textures": 2, "meshes": 3, "materials": 2, "blueprints": 2, "sounds": 3,
+    "effects": 1, "ui": 2, "data": 1, "other": 2,
+}
+
+
+def unreal_project(studio: SimpleNamespace) -> dict[str, Any]:
+    """A Games project linked to the team's Unreal repository, which the account can push to."""
+    studio.github.add_repository(CAPYVERSE, push=True, files=CAPYVERSE_FILES)
+    connect_alice(studio)
+    game = new_project(studio.client, name="Capyverse Odyssey", discipline="games", format="Game")
+    linked = studio.client.post(f"/v1/projects/{game['id']}/github", headers=auth("alice-token"), json={"repo": CAPYVERSE})
+    assert linked.status_code == 200, linked.text
+    return game
+
+
+def test_unreal_assets_are_read_from_the_repository_by_their_names(studio):
+    client, model, github = studio.client, studio.model, studio.github
+    game = unreal_project(studio)
+    before = dict(github.refs)
+    everything = use("unreal_assets")
+    animations = use("unreal_assets", kind="animations")
+    environment = use("unreal_assets", path="Content/Environment")
+    model.script(reply(everything, animations, environment), reply(say("There are 28 assets.")))
+    message(client, game["id"], "List me all the assets")
+    results = tool_results(model.requests[-1])
+    assert not any(result.get("is_error") for result in results.values()), results
+
+    whole = json.loads(results[everything["id"]]["content"])
+    assert whole["counts"] == CAPYVERSE_COUNTS
+    project = whole["project"]
+    assert (project["file"], project["engine_association"], project["engine"]) == (
+        "CapyverseOdyssey.uproject", "5.8", "Unreal Engine 5.8")
+    assert project["plugins_enabled"] == ["ModelingToolsEditorMode", "CapyAbilities"] and project["plugins_disabled"] == ["Bridge"]
+    assert project["project_plugins"] == ["CapyAbilities"] and project["cpp_modules"] == ["CapyverseOdyssey"]
+    assert whole["other_projects"] == ["Samples/Demo/Demo.uproject"]
+    assert whole["content_roots"] == ["Content", "Plugins/Gameplay/CapyAbilities/Content"]
+    assert whole["git_lfs"] == ["*.psd", "*.uasset", "*.umap"]
+    listed = [path for kind in whole["assets"].values() for path in kind["paths"]]
+    assert not any(path.startswith("Samples/") or "__ExternalActors__" in path for path in listed), "another project's and a map's data"
+    assert whole["assets"]["maps"]["paths"] == ["Content/Maps/L_Burrow.umap", "Content/Maps/L_Swamp.umap"]
+    assert "Content/Maps/L_Burrow_BuiltData.uasset" in whole["assets"]["other"]["paths"], "a .uasset is never a map"
+    assert whole["assets"]["sounds"]["types"] == {"Sound Wave": 2, "Sound Cue": 1}, "A_ in Audio/ is a sound, not an animation"
+    assert whole["assets"]["meshes"]["types"] == {"Static Mesh": 2, "Skeletal Mesh": 1}
+    notes = " ".join(whole["notes"])
+    assert "Asset Registry" in notes and "dev.epicgames.com" in notes and "Git LFS" in notes and "2 files are World Partition" in notes
+
+    one = json.loads(results[animations["id"]]["content"])
+    assert one["counts"] == {"animations": 8} and list(one["assets"]) == ["animations"]
+    assert "Plugins/Gameplay/CapyAbilities/Content/Animations/AS_Dash.uasset" in one["assets"]["animations"]["paths"]
+    assert one["assets"]["animations"]["types"]["named by its folder"] == 1, "Capy_Dodge, in Animations/"
+    assert one["assets"]["animations"]["types"]["Animation Sequence"] == 3
+
+    swamp = json.loads(results[environment["id"]]["content"])
+    assert {kind: count for kind, count in swamp["counts"].items() if count} == {"textures": 2, "meshes": 2, "materials": 2}
+
+    log = events(client, game["id"])["events"]
+    titles = [e["data"]["title"] for e in log if e["kind"] == "tool_start"]
+    assert titles == ["Listing the Unreal project's assets", "Listing the Unreal project's animations",
+                      "Listing the Unreal project's assets in Content/Environment"]
+    ends = [e["data"]["summary"] for e in log if e["kind"] == "tool_end"]
+    assert ends[0].startswith("28 assets: 2 maps, 8 animations") and ends[1] == "8 animations"
+    assert github.refs == before and github.made_branches == [], "reading the team's repository changed nothing"
+
+
+def test_a_tree_github_truncates_is_walked_a_subtree_at_a_time(studio):
+    client, model, github = studio.client, studio.model, studio.github
+    game = unreal_project(studio)
+    listings = []
+    for limit in (100_000, 12):
+        github.tree_limit = limit
+        calls = len(github.tree_calls)
+        listing = use("unreal_assets")
+        model.script(reply(listing), reply(say("Listed.")))
+        message(client, game["id"], "All the assets")
+        listings.append((json.loads(tool_results(model.requests[-1])[listing["id"]]["content"]), github.tree_calls[calls:]))
+    (whole, untruncated), (walked, truncated) = listings
+    assert untruncated == [(github.refs[(CAPYVERSE, "main")], True)], "one recursive listing where GitHub gives it all"
+    assert any(not recursive for _, recursive in truncated) and len(truncated) > len(untruncated)
+    assert walked == whole, "the walk finds every asset the whole listing does"
+
+
+def test_unreal_assets_cuts_long_lists_and_says_how_many_more(studio, monkeypatch):
+    client, model = studio.client, studio.model
+    game = unreal_project(studio)
+    monkeypatch.setattr("agent.ASSET_PATHS_EACH", 2)
+    listing = use("unreal_assets")
+    model.script(reply(listing), reply(say("Listed.")))
+    message(client, game["id"], "All the assets")
+    found = json.loads(tool_results(model.requests[-1])[listing["id"]]["content"])
+    animations = found["assets"]["animations"]
+    assert len(animations["paths"]) == 2 and animations["count"] == 8 and animations["more"] == 6
+    assert found["counts"] == CAPYVERSE_COUNTS, "the counts are of everything"
+    assert any("left out" in note for note in found["notes"])
+
+
+def test_unreal_assets_says_when_the_repository_is_not_an_unreal_project(studio):
+    client, model = studio.client, studio.model
+    film = new_project(client)
+    connect_alice(studio)
+    client.post(f"/v1/projects/{film['id']}/github", headers=auth("alice-token"), json={"repo": "alice-gh/film"})
+    listing = use("unreal_assets")
+    model.script(reply(listing), reply(say("No Unreal project there.")))
+    message(client, film["id"], "List the maps")
+    result = tool_results(model.requests[-1])[listing["id"]]
+    assert result["is_error"] and "no .uproject" in result["content"]
+
+
+def test_the_unreal_skill_is_read_for_the_disciplines_that_use_unreal():
+    skills = read_skills(skills_directory())
+    chosen = {discipline: [skill.name for skill in skills_for(skills, CATALOG, discipline)]
+              for discipline in ("games", "architecture", "experiences", "media")}
+    assert all("unreal" in chosen[discipline] for discipline in ("games", "architecture", "experiences"))
+    assert "unreal" not in chosen["media"] and "filmcraft" in chosen["media"] and "filmcraft" not in chosen["games"]
+    text = next(skill for skill in skills if skill.name == "unreal").body
+    assert "unreal_assets" in text and "github_save" in text
 
 
 def connect_alice(studio: SimpleNamespace, return_to: str = f"{SITE}/app/", code: str = "good-code") -> Any:

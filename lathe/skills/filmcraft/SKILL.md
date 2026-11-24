@@ -287,8 +287,11 @@ Stills cost $0.03-0.15 each depending on the image model.
 ## Saving the work
 
 The library holds the media; the project's repository holds the words. With a repository
-linked, `github_save(path, content, message)` after each locked stage, and `github_read(path)`
-before editing a file someone else may have changed:
+linked, `github_save(path, content, message)` after each locked stage. It commits to your own
+branch, never the default one: the first save tells the person the branch and gives them the
+compare link, where they open a pull request. `github_read(path, ref: "agent")` reads what you
+saved; `github_read(path)` reads the default branch, before you edit a file someone else may
+have changed there:
 
 ```text
 README.md                logline, format, platform, budget and spend, status

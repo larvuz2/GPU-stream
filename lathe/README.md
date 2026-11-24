@@ -46,8 +46,8 @@ projects around sessions. A user makes a project of a discipline of the
 catalog, and talks with its agent: Claude, with tools to keep the project's
 plan and library, generate images and video on fal.ai from the library's
 reference images, start engines (sessions opened in the project's folder of
-the user's workspace) and drive them, and save the project's documents to the
-GitHub repository the user linked. Each message runs one turn of the agent as a
+the user's workspace) and drive them, and save the project's documents to a
+branch of its own in the GitHub repository the user linked. Each message runs one turn of the agent as a
 Modal function (`agent_turn`), which writes what it does to the project's event
 log as it goes; the page polls the log. The mechanism is in the docblocks of
 [`control/agent.py`](control/agent.py) and [`control/service.py`](control/service.py).

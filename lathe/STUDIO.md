@@ -77,9 +77,13 @@ user's Epic account, `UNREAL.md`), `next` (being built: PhotoCraft), `soon`.
 A person connects their own GitHub account once (an OAuth App the control plane
 holds: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`), then links a project to a
 repository, new or existing, from the Environment panel. The token stays in the
-control plane; the agent saves the project's script, library manifest, and shot
-list there, and engines that need the repository get it as a credential of their
-session. The same connection is how Unreal Engine is licensed: the app asks for
+control plane. The repository may be a whole team's, so the agent reads it
+freely and saves the project's documents only to a branch of its own,
+`lathe/<project name>-<the project id's first eight characters>`, made from the
+default branch's head the first time; it never writes to the default branch or
+to a branch it did not make, and each save gives the person the compare link
+from which they open a pull request. Engines that need the repository get it
+as a credential of their session. The same connection is how Unreal Engine is licensed: the app asks for
 `read:packages` beside `repo`, `epic_linked` says whether the account is linked
 to Epic, and an Unreal engine starts only while it is, pulled with that user's
 own token.

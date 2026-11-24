@@ -52,6 +52,19 @@ that answer between steps.
 
 Every tool acts as the project's user, through `Sessions`, so the agent of one
 user's project reaches nothing of another's.
+
+A project's repository may be a whole team's, shared by everyone who works on
+the game, so the agent reads it freely and writes only to a branch of its own
+(`tool_github_save`): `lathe/`, the project's name as a slug, and the first
+eight characters of the project's id, made from the default branch's head the
+first time a file is saved. The id is what makes the branch this project's:
+teammates who each link a project named after the game to the same repository
+get a branch each, and a branch someone else made never ends in this
+project's id, so the agent never writes to one. It is also how the branch is
+found again (`own_branch`), since the project keeps no record of it: by the
+id it ends in, whatever the project is called now. Nothing the agent does
+writes to the default branch, and the person brings its work in with a pull
+request from the compare link the save gives back.
 """
 
 from __future__ import annotations
@@ -63,10 +76,12 @@ import shlex
 import threading
 import time
 import traceback
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Protocol
+from urllib.parse import quote
 
 import anthropic
 
@@ -101,6 +116,7 @@ from service import (
     normal_tag,
     safe_name,
 )
+import unreal
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_MODEL = "claude-fable-5-2"
@@ -125,6 +141,11 @@ IMAGE_SECONDS = 300
 VIDEO_SECONDS = 1200
 # Where an engine mounts the user's workspace, unless its environment says otherwise
 WORKSPACE = "/home/ubuntu/workspace"
+# The agent's branches in a repository: this, the project's name as a slug, and the start of its id
+BRANCH_PREFIX = "lathe/"
+# Paths unreal_assets gives of one kind asked for, and of each kind when none is
+ASSET_PATHS_ONE_KIND = 250
+ASSET_PATHS_EACH = 15
 
 
 class TurnStopped(Exception):
@@ -369,8 +390,10 @@ The machines an engine runs on (`tier`):
   using it. The person watches a running engine in the Screen panel. Every engine of this project opens in the
   project's folder, `{folder}`, which they share; `engine_import` copies library entries into its `library`
   folder.
-- `github_save` keeps the project's script, library manifest, and shot list in the GitHub repository the person
-  linked; `github_read` reads them back.
+- `github_save` keeps the project's documents in the GitHub repository the person linked, on a branch of your own
+  (`lathe/...`), never on its default branch or a branch someone else made; give the person the branch and the
+  compare link it returns, where they open a pull request. `github_read` reads the default branch, or your branch
+  with `ref: agent`.
 - The project's state (its name, plan, library, engines, and GitHub link) arrives as a system message at the start
   of each turn. Trust it over what you remember of earlier turns.
 - Before you start, say in a line what you are about to do; brief updates while you work help the person follow
@@ -555,7 +578,10 @@ TOOLS = [
     ),
     tool(
         "github_save",
-        "Save a text file to the project's GitHub repository in one commit, creating or replacing it.",
+        "Save a text file to the project's GitHub repository in one commit, creating or replacing it, on the agent's "
+        "own branch (lathe/<project>-<id>), which is made from the default branch the first time. It never writes to "
+        "the default branch or to a branch the agent did not make. Returns the branch and a compare link, where the "
+        "person opens a pull request.",
         {
             "path": {"type": "string", "description": "A path in the repository, like script/mara.fountain."},
             "content": STRING,
@@ -566,8 +592,31 @@ TOOLS = [
     tool(
         "github_read",
         "Read a text file of the project's GitHub repository, or list a folder ('' for the top).",
-        {"path": STRING},
+        {
+            "path": STRING,
+            "ref": {
+                "type": "string",
+                "enum": ["default", "agent"],
+                "description": "default: the repository's default branch, what the team has (the default). "
+                "agent: the agent's own branch, what it saved.",
+            },
+        },
         ["path"],
+    ),
+    tool(
+        "unreal_assets",
+        "List the assets of the Unreal project in the linked GitHub repository, from the repository alone, with no "
+        "engine running: the .uproject's engine version (EngineAssociation) and plugins, every kind's count, and the "
+        "paths, by kind. Kinds are read from each asset's name (Epic's naming conventions) and folder, not from the "
+        "editor's Asset Registry. Also says whether the repository stores its binaries with Git LFS.",
+        {
+            "kind": {"type": "string", "enum": list(unreal.KINDS), "description": "Only assets of this kind."},
+            "path": {
+                "type": "string",
+                "description": "Only assets inside this folder of the repository, like Content/Characters.",
+            },
+        },
+        [],
     ),
 ]
 TOOL_NAMES = [definition["name"] for definition in TOOLS]
@@ -649,6 +698,13 @@ def repository_path(path: str) -> str:
     if any(part in (".", "..") for part in parts) or len("/".join(parts)) > 255:
         raise Refused(400, "That is not a path in the repository.")
     return "/".join(parts)
+
+
+def agent_branch(project: dict[str, Any]) -> str:
+    """The branch a project's agent makes in its repository: `lathe/<name as a slug>-<the id's first eight characters>`."""
+    letters = unicodedata.normalize("NFKD", project["name"]).encode("ascii", "ignore").decode().lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", letters).strip("-")[:40].rstrip("-") or "project"
+    return f"{BRANCH_PREFIX}{slug}-{project['id'][:8]}"
 
 
 @dataclass
@@ -994,8 +1050,11 @@ class Agent:
             "engine_exec": "Running a command",
             "engine_import": f"Importing {', '.join(arguments.get('tags', []))}",
             "filmcraft": f"FilmCraft: {arguments.get('method', '')}",
-            "github_save": f"Saving {arguments.get('path', '')} to GitHub",
-            "github_read": f"Reading {arguments.get('path', '') or 'the repository'} from GitHub",
+            "github_save": f"Saving {arguments.get('path', '')} to the agent's branch on GitHub",
+            "github_read": f"Reading {arguments.get('path', '') or 'the repository'} from "
+            f"{'the agent' if arguments.get('ref') == 'agent' else 'the default'} branch on GitHub",
+            "unreal_assets": f"Listing the Unreal project's {arguments.get('kind') or 'assets'}"
+            + (f" in {arguments['path']}" if arguments.get("path") else ""),
         }.get(name, name)
 
     # Plan and library
@@ -1348,21 +1407,133 @@ class Agent:
             raise Refused(409, "This project is not linked to a GitHub repository; the person links one in the Environment panel.")
         return token, repo
 
+    def own_branch(self, turn: Turn, token: str, repo: str) -> str | None:
+        """The agent's branch in the project's repository, if it made one: the one that ends in the project's id."""
+        suffix = f"-{turn.project_id[:8]}"
+        branches = self.sessions.github.branches_under(token, repo, BRANCH_PREFIX)
+        return next((branch for branch in branches if branch.endswith(suffix)), None)
+
     def tool_github_save(self, turn: Turn, path: str, content: str, message: str) -> Result:
         token, repo = self.repository(turn)
         where = repository_path(path)
         if not where:
             raise Refused(400, "Name the file to save.")
-        commit = self.sessions.github.save(token, repo, where, content, message.strip() or f"Update {where}")
+        github = self.sessions.github
+        found = github.repo(token, repo)
+        if not found.get("permissions", {}).get("push"):
+            raise Refused(
+                403,
+                f"This GitHub account cannot push to {repo}, so the agent cannot keep a branch of its own there and "
+                "saved nothing. Reading the repository still works; to save, the repository's owner gives this "
+                "account write access.",
+            )
+        base = found["default_branch"]
+        branch = self.own_branch(turn, token, repo)
+        made = branch is None
+        if branch is None:
+            head = github.head(token, repo, base)
+            if head is None:
+                raise Refused(409, f"{repo} has no commit on {base} to branch from yet.")
+            branch = agent_branch(turn.project)
+            github.create_branch(token, repo, branch, head)
+        commit = github.save(token, repo, where, content, message.strip() or f"Update {where}", branch)
+        compare = f"{found['html_url']}/compare/{quote(base)}...{quote(branch)}?expand=1"
         return Result(
-            json.dumps({"repo": repo, "path": where, "commit": commit.get("html_url")}), f"Committed {where} to {repo}"
+            json.dumps(
+                {
+                    "repo": repo,
+                    "branch": branch,
+                    "branch_made_now": made,
+                    "default_branch": base,
+                    "path": where,
+                    "commit": commit.get("html_url"),
+                    "compare": compare,
+                    "note": f"Saved on {branch}, not on {base}, which is unchanged. Tell the person the branch and "
+                    f"give them the compare link, where they open a pull request to bring it into {base}.",
+                }
+            ),
+            f"Committed {where} to {branch}" + (", a new branch" if made else ""),
         )
 
-    def tool_github_read(self, turn: Turn, path: str) -> Result:
+    def tool_github_read(self, turn: Turn, path: str, ref: str = "default") -> Result:
         token, repo = self.repository(turn)
         where = repository_path(path)
-        found = self.sessions.github.read(token, repo, where)
+        branch = None
+        if ref == "agent":
+            branch = self.own_branch(turn, token, repo)
+            if branch is None:
+                raise Refused(404, f"The agent has no branch in {repo} yet: nothing has been saved there.")
+        found = self.sessions.github.read(token, repo, where, ref=branch)
+        side = f" on {branch}" if branch else ""
         if "entries" in found:
-            return Result("\n".join(found["entries"]) or "(empty)", f"{len(found['entries'])} entries in {where or repo}")
+            return Result(
+                "\n".join(found["entries"]) or "(empty)", f"{len(found['entries'])} entries in {where or repo}{side}"
+            )
         text = found["text"]
-        return Result(text if len(text) <= READ_LIMIT else text[:READ_LIMIT] + "\n[cut]", f"{len(text)} characters")
+        return Result(text if len(text) <= READ_LIMIT else text[:READ_LIMIT] + "\n[cut]", f"{len(text)} characters{side}")
+
+    # Unreal Engine
+
+    def tool_unreal_assets(self, turn: Turn, kind: str | None = None, path: str | None = None) -> Result:
+        token, repo = self.repository(turn)
+        folder = repository_path(path or "")
+        github = self.sessions.github
+        base = github.repo(token, repo)["default_branch"]
+        head = github.head(token, repo, base)
+        if head is None:
+            raise Refused(409, f"{repo} has no commit on {base} yet, so it holds no Unreal project.")
+        entries, whole = github.files(token, repo, head)
+        files = [entry["path"] for entry in entries if entry["type"] == "blob"]
+        project, others = unreal.find_project(files, folder)
+        if project is None:
+            raise Refused(
+                404,
+                f"{repo} has no .uproject within {unreal.PROJECT_DEPTH} folders of its top"
+                + (f" for {folder}" if folder else "")
+                + ("" if whole else ", as far as GitHub could list it")
+                + ", so it holds no Unreal project this tool can read.",
+            )
+        facts = unreal.read_project(github.read(token, repo, project, ref=head)["text"])
+        home = unreal.parent(project)
+        attributes = [name for name in dict.fromkeys([".gitattributes", f"{home}/.gitattributes".lstrip("/")]) if name in files]
+        lfs = sorted(
+            {pattern for name in attributes for pattern in unreal.lfs_patterns(github.read(token, repo, name, ref=head)["text"])}
+        )
+        found = unreal.survey(files, project, folder, kind, ASSET_PATHS_ONE_KIND if kind else ASSET_PATHS_EACH)
+        notes = [
+            "Kinds are read from names in the repository: each asset's prefix under Epic's recommended asset naming "
+            f"conventions ({unreal.EPIC_NAMING}), the community style guides where Epic's page names none "
+            f"({unreal.STYLE_GUIDE}, {unreal.LOOMAN_GUIDE}), and its folder's name as a second hint. A team's own "
+            "names can differ; the exact class of each asset comes from the editor's Asset Registry once an Unreal "
+            "engine runs on this project.",
+            f"The repository stores {', '.join(lfs)} with Git LFS: Git holds a pointer for each, so every path is "
+            "here, and their content comes with an LFS clone."
+            if lfs
+            else "No .gitattributes stores files with Git LFS: the binary assets are in Git itself.",
+        ]
+        if any(listed["more"] for listed in found["assets"].values()):
+            notes.append("A kind's `more` counts its paths left out; ask for that kind, or a folder, to see them.")
+        if found["world_partition_files"]:
+            notes.append(
+                f"{found['world_partition_files']} files are World Partition's one-file-per-actor data of the maps "
+                "(__ExternalActors__, __ExternalObjects__), not counted as assets."
+            )
+        if not whole:
+            notes.append("GitHub's listing of the repository was too large to finish, so these counts are of part of it.")
+        answer = {
+            "repo": repo,
+            "branch": base,
+            "project": {"file": project, **facts, "project_plugins": found["project_plugins"]},
+            "other_projects": others,
+            "content_roots": found["content_roots"],
+            "git_lfs": lfs,
+            "counts": {kind: found["counts"][kind]} if kind else found["counts"],
+            "assets": found["assets"],
+            "notes": notes,
+        }
+        if kind:
+            summary = f"{found['counts'][kind]} {kind}"
+        else:
+            counts = ", ".join(f"{count} {name}" for name, count in found["counts"].items() if count)
+            summary = f"{sum(found['counts'].values())} assets: {counts}"
+        return Result(json.dumps(answer), (summary + ("" if whole else ", in part of the repository"))[:200])

@@ -163,3 +163,13 @@ against stand-ins for it.
 
 An Unreal start on a tier without a GPU is refused (`requires_gpu` in the
 catalog), and the Environment panel marks such a tier "needs a GPU".
+
+The agent answers questions about a project's assets from its repository
+before any engine runs: `unreal_assets` (`lathe/control/unreal.py`) reads the
+`.uproject` (the engine it needs, its plugins), lists `Content/` and each
+plugin's `Content/` through the Git Trees API, and classifies each asset by its
+name's prefix under Epic's naming conventions and its folder, saying that the
+exact classes come from the editor's Asset Registry. The `unreal` skill
+(`lathe/skills/unreal`), which Games, Architecture, and Experiences projects
+load, has it answer that way and leave the team's repository as it is: it
+writes only when asked, only to its own branch.

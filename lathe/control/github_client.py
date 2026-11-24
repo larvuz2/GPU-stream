@@ -28,6 +28,16 @@ their token can see (`GitHub.epic_access`): Epic gives a linked account the
 private `EpicGames/UnrealEngine` repository, through its organization, and the
 engine's container images on `ghcr.io/epicgames/unreal-engine`. GitHub hides
 what a token cannot see behind a 404, so a 404 is "not linked", never an error.
+
+A write names its branch (`GitHub.save`), on the read of what is there and on
+the commit alike: the contents API commits to the repository's default branch
+when none is named, and the default branch of a team's repository is the one
+place Lathe's agent must never write (`agent.py`, `tool_github_save`).
+
+A repository's files are listed through the Git Trees API (`GitHub.files`),
+recursive in one call where GitHub can, and walked a subtree at a time where
+GitHub cuts the recursive listing short, which a game's repository of tens of
+thousands of assets is large enough to make it do.
 """
 
 from __future__ import annotations
@@ -54,6 +64,8 @@ STATE_SECONDS = 600
 # What an account linked to Epic can see: the engine's source and its container images
 EPIC_REPO = "EpicGames/UnrealEngine"
 EPIC_PACKAGE = "/orgs/EpicGames/packages/container/unreal-engine"
+# Calls one listing of a repository's files may make, at most: a walk of a vast tree stops there
+TREE_CALLS = 200
 
 
 class Grant(NamedTuple):
@@ -216,24 +228,92 @@ class GitHub:
             "POST", f"{API_URL}/user/repos", token, json={"name": name, "private": private, "auto_init": True}
         )
 
-    def read(self, token: str, full_name: str, path: str) -> dict[str, Any]:
-        """A file's text and its blob SHA, or a directory's listing as `entries`."""
-        body = self._call("GET", f"{API_URL}/repos/{full_name}/contents/{quote(path)}", token)
+    def head(self, token: str, full_name: str, branch: str) -> str | None:
+        """The commit a branch points at, or nothing where the repository has no branch of that name."""
+        try:
+            return self._call("GET", f"{API_URL}/repos/{full_name}/git/ref/heads/{quote(branch)}", token)["object"]["sha"]
+        except GitHubError as error:
+            if error.status == 404:
+                return None
+            raise
+
+    def branches_under(self, token: str, full_name: str, prefix: str) -> list[str]:
+        """The names of the repository's branches that start with a prefix, such as `lathe/`.
+
+        GitHub is asked without the prefix's closing slash, which not every proxy in front of it
+        passes, and the names are held to the whole prefix here.
+        """
+        asked = quote(prefix.rstrip("/"))
+        refs = self._call("GET", f"{API_URL}/repos/{full_name}/git/matching-refs/heads/{asked}", token)
+        names = [ref["ref"][len("refs/heads/") :] for ref in refs]
+        return [name for name in names if name.startswith(prefix)]
+
+    def create_branch(self, token: str, full_name: str, branch: str, sha: str) -> None:
+        """Make a branch at a commit; GitHub refuses one whose name is taken."""
+        self._call("POST", f"{API_URL}/repos/{full_name}/git/refs", token, json={"ref": f"refs/heads/{branch}", "sha": sha})
+
+    def tree(self, token: str, full_name: str, sha: str, recursive: bool) -> dict[str, Any]:
+        """One listing of the Git Trees API: a tree's `tree` entries, under it or all below it, and whether it was `truncated`."""
+        return self._call(
+            "GET", f"{API_URL}/repos/{full_name}/git/trees/{sha}", token, params={"recursive": "1"} if recursive else None
+        )
+
+    def files(self, token: str, full_name: str, sha: str, calls: int = TREE_CALLS) -> tuple[list[dict[str, Any]], bool]:
+        """Every entry below a commit or tree, with its path from the top, and whether the listing is whole.
+
+        A recursive listing holds the whole tree unless GitHub truncated it,
+        which it does past 100,000 entries or 7 MB. A truncated tree is listed
+        again without recursion, and each of its subtrees is listed the same way
+        as the whole was, so a large repository costs one call for each tree
+        too large to list at once and one for each subtree below those. The
+        walk stops after `calls` calls, which keeps one question about a vast
+        repository from spending the account's hourly allowance; the listing
+        is then not whole.
+        """
+        entries: list[dict[str, Any]] = []
+        pending = [("", sha)]
+        whole = True
+        made = 0
+        while pending:
+            if made >= calls:
+                return entries, False
+            prefix, tree_sha = pending.pop()
+            made += 1
+            listing = self.tree(token, full_name, tree_sha, recursive=True)
+            if listing.get("truncated"):
+                if made >= calls:
+                    return entries, False
+                made += 1
+                listing = self.tree(token, full_name, tree_sha, recursive=False)
+                whole = whole and not listing.get("truncated")
+                pending.extend((f"{prefix}{entry['path']}/", entry["sha"]) for entry in listing["tree"] if entry["type"] == "tree")
+            entries.extend({**entry, "path": f"{prefix}{entry['path']}"} for entry in listing["tree"])
+        return entries, whole
+
+    def read(self, token: str, full_name: str, path: str, ref: str | None = None) -> dict[str, Any]:
+        """A file's text and its blob SHA, or a directory's listing as `entries`, on the default branch or at `ref`."""
+        body = self._call(
+            "GET", f"{API_URL}/repos/{full_name}/contents/{quote(path)}", token, params={"ref": ref} if ref else None
+        )
         if isinstance(body, list):
             return {"entries": [f"{entry['name']}{'/' if entry['type'] == 'dir' else ''}" for entry in body]}
         if body.get("encoding") != "base64":
             raise GitHubError(413, "That file is too large to read through the contents API.")
         return {"text": base64.b64decode(body["content"]).decode("utf-8", errors="replace"), "sha": body["sha"]}
 
-    def save(self, token: str, full_name: str, path: str, content: str, message: str) -> dict[str, Any]:
-        """Write a file in one commit, creating it or replacing what is there; returns the commit."""
+    def save(self, token: str, full_name: str, path: str, content: str, message: str, branch: str) -> dict[str, Any]:
+        """Write a file in one commit on a branch, creating it or replacing what is there; returns the commit."""
         try:
-            sha = self.read(token, full_name, path).get("sha")
+            sha = self.read(token, full_name, path, ref=branch).get("sha")
         except GitHubError as error:
             if error.status != 404:
                 raise
             sha = None
-        body: dict[str, Any] = {"message": message, "content": base64.b64encode(content.encode()).decode()}
+        body: dict[str, Any] = {
+            "message": message,
+            "content": base64.b64encode(content.encode()).decode(),
+            "branch": branch,
+        }
         if sha:
             body["sha"] = sha
         return self._call("PUT", f"{API_URL}/repos/{full_name}/contents/{quote(path)}", token, json=body)["commit"]
