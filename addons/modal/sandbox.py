@@ -63,10 +63,16 @@ BASE_IMAGE = (
 )
 BLENDER_VERSION = "5.2.4"
 BLENDER_SHA256 = "2fd14c50987426897ba60237ee996edf2b4151f4b1a72a460ca20be58c1d2d86"
-# FilmCraft's Debian package from its GitHub release, and the hash the release's SHA256SUMS.txt
-# lists for it
+# FilmCraft's and PhotoCraft's Debian packages from their GitHub releases, and the hash each
+# release's SHA256SUMS.txt lists for it
 FILMCRAFT_VERSION = "0.20.1"
 FILMCRAFT_SHA256 = "5667c7505c91d2ad9de3c4acb15cb02fc9f138fae74dce9c7c5f08bc29edb3a8"
+PHOTOCRAFT_VERSION = "0.23.1"
+PHOTOCRAFT_SHA256 = "baabdcdbe46df2f72ccf6ecc2e98be00fbc33dbd4c1cd9426362a89a4b95f673"
+CRAFT_RELEASES = {
+    "filmcraft": (FILMCRAFT_VERSION, FILMCRAFT_SHA256),
+    "photocraft": (PHOTOCRAFT_VERSION, PHOTOCRAFT_SHA256),
+}
 
 PORT = 8080
 WORKSPACE = "/home/ubuntu/workspace"
@@ -75,8 +81,9 @@ ACTIVITY_FILE = "/tmp/selkies-modal/activity"
 PID_FILE = "/tmp/selkies-modal/pid"
 BLENDER_SPOOL = "/tmp/selkies-modal/blender"
 SHARE = "/usr/local/share/selkies-modal"
-# FilmCraft's control channel, which FilmCraft binds on the Sandbox's loopback only
+# FilmCraft's and PhotoCraft's control channels, which each binds on the Sandbox's loopback only
 FILMCRAFT_CONTROL_PORT = 9876
+PHOTOCRAFT_CONTROL_PORT = 7878
 
 # What the session is, whoever starts it. Modal terminates TLS and its connect
 # token guards the address, so Selkies serves plain HTTP with no login of its
@@ -127,6 +134,11 @@ APP_ENV = {
         # there is one, for the export renderer, beside NVDEC and NVENC; OpenGL is left out.
         "WGPU_BACKEND": "vulkan",
     },
+    "photocraft": {
+        "SELKIES_MODAL_APP": "photocraft",
+        # The control channel; its token is the session's own (start_session)
+        "PHOTOCRAFT_CONTROL_PORT": str(PHOTOCRAFT_CONTROL_PORT),
+    },
 }
 APPS = tuple(APP_ENV)
 
@@ -150,20 +162,22 @@ def session_image(app: str = "blender") -> modal.Image:
     it out behind a login and a license its user accepts, so the session
     installs it into the workspace once that user has (`nuke/setup.sh`); the
     image carries what that takes, Firefox among it (`nuke/install-deps.sh`).
-    FilmCraft is the Debian package of its GitHub release, checked against the
-    hash the release publishes (`filmcraft/install.sh`), with the client of its
-    control channel (`filmcraft/control.sh`).
+    FilmCraft and PhotoCraft are the Debian packages of their GitHub releases,
+    each checked against the hash its release publishes (`craft/install.sh`),
+    with what finds the session's project folder (`craft/project.sh`); FilmCraft
+    adds the client of its control channel (`filmcraft/control.sh`).
     """
-    if app == "filmcraft":
+    if app in CRAFT_RELEASES:
+        version, sha256 = CRAFT_RELEASES[app]
         image = (
             modal.Image.from_registry(BASE_IMAGE)
-            .add_local_file(HERE / "filmcraft" / "install.sh", f"{SHARE}/filmcraft/install.sh", copy=True)
-            .dockerfile_commands(
-                f"RUN selkies-privileged-files run sh {SHARE}/filmcraft/install.sh filmcraft {FILMCRAFT_VERSION} {FILMCRAFT_SHA256}"
-            )
-            .add_local_file(HERE / "filmcraft" / "autostart", "/etc/xdg/openbox/autostart", copy=True)
-            .add_local_file(HERE / "filmcraft" / "control.sh", "/usr/local/bin/selkies-modal-filmcraft", copy=True)
+            .add_local_file(HERE / "craft" / "install.sh", f"{SHARE}/craft/install.sh", copy=True)
+            .dockerfile_commands(f"RUN selkies-privileged-files run sh {SHARE}/craft/install.sh {app} {version} {sha256}")
+            .add_local_file(HERE / "craft" / "project.sh", "/usr/local/bin/selkies-modal-project", copy=True)
+            .add_local_file(HERE / app / "autostart", "/etc/xdg/openbox/autostart", copy=True)
         )
+        if app == "filmcraft":
+            image = image.add_local_file(HERE / "filmcraft" / "control.sh", "/usr/local/bin/selkies-modal-filmcraft", copy=True)
     elif app == "nuke":
         image = (
             modal.Image.from_registry(BASE_IMAGE)
@@ -280,11 +294,11 @@ def start_session(
     """Start a session's Sandbox and return it at once, before Selkies listens.
 
     The session's tokens are made here and reach the Sandbox as a Modal Secret;
-    nothing else holds them. Beside Selkies' two is the token of FilmCraft's
-    control channel, which FilmCraft takes as 64 hex characters and every
-    request on that channel carries (`filmcraft_call`). It is made for every
-    session, since a caller holding a built image does not say which
-    application it is, and a session of another application leaves it unread.
+    nothing else holds them. Beside Selkies' two are the tokens of FilmCraft's
+    and PhotoCraft's control channels, which each takes as 64 hex characters
+    and every request on FilmCraft's carries (`filmcraft_call`). They are made
+    for every session, since a caller holding a built image does not say which
+    application it is, and a session of another application leaves them unread.
 
     `workspace` mounts one directory of the Volume in place of all of it, which
     is what keeps one user's files out of another's session where a service
@@ -307,6 +321,7 @@ def start_session(
             "SELKIES_MASTER_TOKEN": secrets.token_urlsafe(32),
             "SELKIES_MODAL_SESSION_TOKEN": secrets.token_urlsafe(32),
             "FILMCRAFT_CONTROL_TOKEN": secrets.token_hex(32),
+            "PHOTOCRAFT_CONTROL_TOKEN": secrets.token_hex(32),
         }
     )
     return modal.Sandbox.create(

@@ -234,15 +234,38 @@ but was no faster than the CPU, the encoder being the slow part. Measured on
 Editing is as responsive without a GPU as with one, so `--gpu none` serves
 cutting, and a T4 pays for itself on long exports.
 
+## PhotoCraft
+
+`--app photocraft` starts a session for
+[PhotoCraft](https://github.com/storytold/photocraft), the same team's photo
+editor, installed the same way from its release (`PHOTOCRAFT_VERSION`,
+`PHOTOCRAFT_SHA256`) and opened in the same project folder, so it reads and
+writes the files a FilmCraft session of that project does:
+
+```bash
+addons/modal/selkies-modal up --app photocraft --name poster --gpu none --env SELKIES_MODAL_PROJECT=projects/trailer
+```
+
+Its settings and the recovery copies of unsaved documents are in `.photocraft`
+in the project folder. A project's first PhotoCraft session settles its
+rendering on the CPU (PhotoCraft's CPU compatibility mode): the window has no
+hardware adapter in a Sandbox, and PhotoCraft otherwise says so in a notice at
+every start. Its control channel listens on the Sandbox's loopback (port 7878)
+for the session's own token, and reads and writes the project folder alone. A
+connection authenticates first, `{"method": "auth", "params": {"token": ...}}`
+from inside the Sandbox, where `PHOTOCRAFT_CONTROL_TOKEN` holds it; the
+launcher has no verb for it yet.
+
 ## The session
 
 The image is the base container by digest with three additions: Blender's
 release archive from blender.org, checked against the hash blender.org
 publishes, `xprintidle` to read the display's idle counter, and this
 directory's scripts. `BASE_IMAGE`, `BLENDER_VERSION`, and `BLENDER_SHA256` at
-the top of `sandbox.py` choose what it is built from, as `FILMCRAFT_VERSION`
-and `FILMCRAFT_SHA256` do for FilmCraft's image, and a change to any of them
-builds a new image on the next `up` or `build`.
+the top of `sandbox.py` choose what it is built from, as `FILMCRAFT_VERSION`,
+`FILMCRAFT_SHA256`, `PHOTOCRAFT_VERSION`, and `PHOTOCRAFT_SHA256` do for
+FilmCraft's and PhotoCraft's images, and a change to any of them builds a new
+image on the next `up` or `build`.
 
 The Selkies window manager runs Blender as the session's application,
 maximized, and starts it again if it is quit. Every other
