@@ -329,6 +329,7 @@ export function Workspace(props: WorkspaceProps) {
                 screenId={screen?.id ?? null}
                 health={account.health}
                 me={account.me}
+                github={github}
                 onStart={async (app, tier) => {
                   const engine = await data.startEngine({ app, tier, region: AUTO_REGION });
                   setScreenId(engine.id);

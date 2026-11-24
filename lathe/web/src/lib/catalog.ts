@@ -16,6 +16,21 @@
  */
 import raw from '../../../catalog.json';
 
+/**
+ * The license a person brings for an app of status `byol`, and how they link it.
+ *
+ * The control plane reads the same entry: its refusal to start the app before the license is
+ * linked lists these steps.
+ */
+export interface AppLicense {
+  /** What the license is, as a badge names it, such as "Your Epic account". */
+  label: string;
+  /** The maker's page on linking it. */
+  url: string;
+  /** The steps that link it, in order, each a sentence. */
+  steps: string[];
+}
+
 /** An app a session can run. */
 export interface CatalogApp {
   /** The identifier the control plane takes, and the stem of the app's art and logo files. */
@@ -26,7 +41,9 @@ export interface CatalogApp {
   version: string;
   /**
    * `available` for an app anyone can launch, `team` for one only the team's accounts can (an app whose
-   * license is the user's own, such as Nuke), `next` for the one being built now, `soon` for the rest.
+   * license is the user's own, such as Nuke), `byol` for one anyone can launch once they have linked
+   * their own license for it ({@link CatalogApp.license}), `next` for the one being built now, `soon`
+   * for the rest.
    */
   status: string;
   /** One sentence on what the app is for. */
@@ -37,6 +54,8 @@ export interface CatalogApp {
   disciplines: string[];
   /** Where the app comes from: its open-source repository or its maker's page. */
   source: string;
+  /** The license a person brings, for an app of status `byol`. */
+  license?: AppLicense;
 }
 
 /**
@@ -155,6 +174,26 @@ export const IDLE_SHUTDOWN_MINUTES = 10;
  */
 export function isAvailable(app: CatalogApp): boolean {
   return app.status === 'available';
+}
+
+/**
+ * Whether an app runs on a license the person brings, and starts once they have linked it.
+ *
+ * @param app The catalog app.
+ * @returns `true` for an app of status `byol`.
+ */
+export function isOwnLicense(app: CatalogApp): boolean {
+  return app.status === 'byol';
+}
+
+/**
+ * What an app of status `byol` is labeled with: the license the person brings.
+ *
+ * @param app The catalog app.
+ * @returns The license's label, such as "Your Epic account", or a phrase for an app whose entry names none.
+ */
+export function ownLicenseLabel(app: CatalogApp): string {
+  return app.license?.label ?? 'Your own license';
 }
 
 /** The apps a session can run today, in catalog order. */

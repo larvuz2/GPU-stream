@@ -13,7 +13,7 @@
  * @module
  */
 import { ChevronDown } from 'lucide-react';
-import { brand, catalog, IDLE_SHUTDOWN_MINUTES, liveApps } from '../lib/catalog';
+import { brand, catalog, IDLE_SHUTDOWN_MINUTES, liveApps, ownLicenseLabel } from '../lib/catalog';
 import { usd } from '../lib/format';
 import { SectionHeading } from './SectionHeading';
 import { appsWithStatus, listFormat, liveDisciplines } from './studio';
@@ -74,6 +74,15 @@ function questions(): Question[] {
       answer: `With credits, and no subscription. One credit is ${usd(catalog.credit_usd)}, each engine spends a set number of credits per minute on the tier it runs on, and a new account starts with ${catalog.signup_credits} free credits. Pricing for the agent's own model and for generation will be listed here before either is billed.`,
     },
   ];
+  for (const app of appsWithStatus('byol')) {
+    const steps = app.license?.steps ?? [];
+    answers.push({
+      question: `What do I need for ${app.name}?`,
+      answer: `${ownLicenseLabel(app)}. ${app.name} runs under its maker's license to you, not to ${brand}, so it opens once your account is linked${
+        steps.length === 0 ? '.' : `: ${steps.map((step, index) => `(${index + 1}) ${step}`).join(' ')}`
+      }`,
+    });
+  }
   for (const app of team) {
     answers.push({
       question: `Why is ${app.name} for teams only?`,

@@ -95,7 +95,35 @@ homepage URL is the site's address; its authorization callback URL is
 Copy its client ID to `GITHUB_CLIENT_ID`, generate a client secret and copy it
 to `GITHUB_CLIENT_SECRET`, and set `LATHE_SECRET_KEY`. Users then connect their
 own accounts from a project's Environment panel; the app asks for the `repo`
-scope, and its token never leaves the control plane.
+and `read:packages` scopes, and its token leaves the control plane only for
+GitHub and as the user's own credential for pulling Unreal Engine (below).
+
+**Unreal Engine.** The catalog offers it as `byol`: anyone may start it once
+their own Epic account is linked, and the control plane checks that link
+through their GitHub account. What each user needs:
+
+1. An Epic Games account, which is how Epic licenses the engine to them: Epic's
+   license counts every user of the editor as a licensee of their own and lets
+   no one hand one copy of it around (`UNREAL.md`).
+2. That account linked to their GitHub account: on epicgames.com, Account, then
+   Apps and Accounts, connect GitHub, then accept the invitation to the
+   EpicGames organization that GitHub emails them, within seven days.
+3. GitHub connected in Lathe since Lathe asked for `read:packages`; an account
+   connected before then is connected again. `GET /v1/github` says
+   `epic_linked: true` once the account sees Epic's `EpicGames/UnrealEngine`
+   repository and its images on `ghcr.io/epicgames/unreal-engine`.
+
+What the deployment needs: the launcher's `unreal_image(registry_username,
+registry_token, version)` in `addons/modal/sandbox.py`, which pulls Epic's image
+with the credential the control plane hands it for that one start (the user's
+GitHub login and token) and layers the session, Blender, and the bridge on it;
+until it is there, an Unreal start fails saying so. A GPU tier with NVENC: the
+editor renders off screen on the GPU and streams itself. Inside the image, the
+Unreal project the session opens needs the Python Editor Script Plugin and the
+Remote Control API plugin, with `addons/modal/unreal/DefaultRemoteControl.ini`
+in its `Config` folder, so Blender's Send to Unreal can ask the editor to import
+(`addons/modal/unreal/send_to_unreal.py`). Epic should confirm this way of
+offering the editor before it is offered to the public (`UNREAL.md`).
 
 Then build the session image and deploy:
 
@@ -135,8 +163,17 @@ Modal, Anthropic, fal, and GitHub: who a credential names, what each route and
 tool returns and refuses, that one user's sessions and projects do not exist
 for another, the agent's loop driven by a scripted model through every tool,
 that its conversation only ever grows, that `ask_user` ends a turn and a second
-message waits for the first, Nuke's gate and seats, and that GitHub's callback
-refuses a state it did not sign and a page off the site.
+message waits for the first, Nuke's gate and seats, Unreal Engine's gate on an
+account linked to Epic and the user's own credential it is pulled with, and
+that GitHub's callback refuses a state it did not sign and a page off the site.
+
+```bash
+BLENDER=/path/to/blender pytest addons/modal/unreal
+```
+
+runs the Blender side of the bridge to Unreal in a real Blender, against a
+stand-in for the editor's Remote Control API, and the way back through
+Blender's own spool.
 
 ```bash
 cd lathe/supabase && npm install && npm test
@@ -162,3 +199,8 @@ are not billed in credits yet, a conversation that outgrows the model's context
 window has no compaction yet, and an engine does not get the project's GitHub
 repository as a credential of its session yet. The MCP endpoint has no project
 tools.
+
+Unreal Engine cannot start yet: the launcher has no `unreal_image`, since
+nobody on the team has a GitHub account linked to Epic to build and test it
+with. The Epic link check, the bridge to Blender, and the studio's handling of
+the engine are built and tested against stand-ins (`UNREAL.md`).

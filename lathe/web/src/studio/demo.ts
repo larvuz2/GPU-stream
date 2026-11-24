@@ -19,9 +19,14 @@
  * here starts a turn whose events arrive over a few seconds, under the studio's own polling, and
  * an engine started here queues, starts, and runs. The images are the site's own artwork.
  *
+ * Beside the film is a game, a world being blocked out with an Unreal engine open: the editor's
+ * own stream beside the desktop Blender runs on, the two pictures the Screen panel switches
+ * between. The demo's GitHub account is linked to Epic, which Unreal Engine starts on.
+ *
  * The scene parameter (`?demo=<scene>`) picks a state: the film by default, `offline` for a
- * server with no integrations configured, `empty` for an account with no projects, and `legacy`
- * for a control plane from before the studio, which answers its routes with 404.
+ * server with no integrations configured, `empty` for an account with no projects, `legacy` for a
+ * control plane from before the studio, which answers its routes with 404, and `no-epic` for a
+ * GitHub account not linked to Epic.
  * @module
  */
 import {
@@ -29,6 +34,7 @@ import {
   type ApiKey,
   type Asset,
   type ControlPlane,
+  type EngineStream,
   type GitHubRepo,
   type GitHubStatus,
   type Health,
@@ -42,6 +48,7 @@ import {
   type TurnId,
 } from '../lib/api';
 import { catalog } from '../lib/catalog';
+import { appImage } from '../lib/media';
 
 /** The address the demo's account is shown under. */
 export const DEMO_EMAIL = 'you@example.com';
@@ -95,6 +102,23 @@ interface Simulation {
   tier: string;
   /** The states, in the order they are entered. */
   phases: Phase[];
+  /** What it streams beside its desktop, for an engine that does. */
+  streams?: EngineStream[];
+}
+
+/**
+ * What an engine of an app streams beside its desktop in the demo: an Unreal engine, its editor.
+ *
+ * The demo has no stream to serve, so the editor's address is the art its picture is drawn with,
+ * which is what a tab opened on it shows.
+ *
+ * @param app The catalog app.
+ * @returns The streams, or `undefined` for an app that streams its desktop alone.
+ */
+function demoStreams(app: string): EngineStream[] | undefined {
+  return app === 'unreal'
+    ? [{ name: 'Unreal Editor', url: new URL(appImage('unreal'), window.location.origin).href }]
+    : undefined;
 }
 
 /**
@@ -124,6 +148,7 @@ function snapshot(simulation: Simulation, now: number): Session {
     end_reason: ended?.reason ?? null,
     credits_used: started === undefined ? 0 : Math.ceil(((ended?.at ?? now) - started.at) / MINUTE) * rate,
     queue_position: current?.status === 'queued' ? 1 : null,
+    ...(simulation.streams === undefined ? {} : { streams: simulation.streams }),
   };
 }
 
@@ -440,6 +465,47 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
   return events.map((event, index) => ({ event, at: times[index] ?? now }));
 }
 
+/**
+ * The game's conversation: the agent opening an Unreal engine to block out the world.
+ *
+ * @param start When the turn starts.
+ * @param engine The Unreal engine the agent opened.
+ * @returns The events, in order, with their times.
+ */
+function gameEvents(start: number, engine: Session): Scheduled[] {
+  const turn = 'game-turn-1';
+  const step = (seconds: number, event: EventBody): Scheduled => ({ at: start + seconds * SECOND, event });
+  return [
+    step(0, {
+      turn_id: turn,
+      kind: 'user_message',
+      data: { text: 'Block out Ember Ridge as a playable level: a path up the ridge to the beacon tower, at dusk.' },
+    }),
+    step(4, {
+      turn_id: turn,
+      kind: 'text',
+      data: {
+        text: 'I will open Unreal Engine on your Epic account, with Blender beside it on the same machine: the rocks and the tower are quicker to shape in Blender, and the light and the path are Unreal’s.',
+      },
+    }),
+    step(5, { turn_id: turn, kind: 'tool_start', data: { call_id: 'g1', tool: 'engine_start', title: 'Open Unreal Engine' } }),
+    step(70, { turn_id: turn, kind: 'engine', data: { engine } }),
+    step(72, {
+      turn_id: turn,
+      kind: 'tool_end',
+      data: { call_id: 'g1', ok: true, summary: 'Unreal Engine 5.8 on Pro, Blender on its desktop.' },
+    }),
+    step(74, {
+      turn_id: turn,
+      kind: 'text',
+      data: {
+        text: 'The editor is on the Screen. Switch it to **Desktop** for Blender: what you send from there with **Send to Unreal** lands in the editor under `/Game/Blender`, and I will light the ridge once the tower is in.',
+      },
+    }),
+    step(75, { turn_id: turn, kind: 'turn_end', data: {} }),
+  ];
+}
+
 /** The demo's projects, as the sidebar lists them. */
 function demoProjects(now: number): Project[] {
   const project = (
@@ -478,6 +544,22 @@ function demoProjects(now: number): Project[] {
         library_sections: ['Products', 'Shots'],
       },
       2 * DAY,
+    ),
+    project(
+      {
+        id: 'demo-game',
+        name: 'Ember Ridge',
+        discipline: 'games',
+        format: 'World',
+        library_sections: ['Environments', 'Props'],
+        plan: [
+          { id: 'g1', title: 'Open Unreal Engine with Blender beside it', status: 'done' },
+          { id: 'g2', title: 'Block out the ridge and the beacon tower in Blender', status: 'active' },
+          { id: 'g3', title: 'Send them to Unreal and lay the path', status: 'pending' },
+          { id: 'g4', title: 'Light the ridge at dusk', status: 'pending' },
+        ],
+      },
+      20 * MINUTE,
     ),
     project(
       { id: 'demo-interior', name: 'Glasshouse retreat', discipline: 'architecture', format: 'Interior' },
@@ -592,31 +674,48 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   const opened = Date.now();
   const legacy = scene === 'legacy';
   const offline = scene === 'offline';
+  const epicLinked = scene !== 'no-epic';
   let projects = scene === 'empty' ? [] : demoProjects(opened);
   const libraries = new Map<string, Asset[]>([['demo-film', filmLibrary(opened)]]);
-  let simulations: Simulation[] = [
-    {
-      id: 'demo-engine-1',
-      project: 'demo-film',
-      app: 'filmcraft',
-      tier: 't4',
-      phases: [
-        { at: opened - 11 * MINUTE - 40 * SECOND, status: 'queued' },
-        { at: opened - 11 * MINUTE - 30 * SECOND, status: 'starting' },
-        { at: opened - 11 * MINUTE, status: 'running' },
-      ],
-    },
-  ];
-  const filmEngine = snapshot(
-    simulations[0] ?? { id: '', project: '', app: '', tier: '', phases: [] },
-    opened - 11 * MINUTE,
-  );
+  const filmSimulation: Simulation = {
+    id: 'demo-engine-1',
+    project: 'demo-film',
+    app: 'filmcraft',
+    tier: 't4',
+    phases: [
+      { at: opened - 11 * MINUTE - 40 * SECOND, status: 'queued' },
+      { at: opened - 11 * MINUTE - 30 * SECOND, status: 'starting' },
+      { at: opened - 11 * MINUTE, status: 'running' },
+    ],
+  };
+  const gameStart = opened - 25 * MINUTE;
+  const gameSimulation: Simulation = {
+    id: 'demo-engine-2',
+    project: 'demo-game',
+    app: 'unreal',
+    tier: 'l4',
+    phases: [
+      { at: gameStart + 5 * SECOND, status: 'starting' },
+      { at: gameStart + 70 * SECOND, status: 'running' },
+    ],
+    streams: demoStreams('unreal'),
+  };
+  let simulations: Simulation[] = [filmSimulation, gameSimulation];
   const logs = new Map<string, Scheduled[]>([
-    ['demo-film', filmEvents(opened, libraries.get('demo-film') ?? [], filmEngine)],
+    ['demo-film', filmEvents(opened, libraries.get('demo-film') ?? [], snapshot(filmSimulation, opened - 11 * MINUTE))],
+    ['demo-game', gameEvents(gameStart, snapshot(gameSimulation, gameStart + 70 * SECOND))],
   ]);
+  /** The demo's GitHub account, connected; linked to Epic unless the scene says otherwise. */
+  const demoGitHub: GitHubStatus = {
+    configured: true,
+    connected: true,
+    login: LOGIN,
+    avatar_url: AVATAR,
+    epic_linked: epicLinked,
+  };
   let github: GitHubStatus = offline
-    ? { configured: false, connected: false, login: null, avatar_url: null }
-    : { configured: true, connected: true, login: LOGIN, avatar_url: AVATAR };
+    ? { configured: false, connected: false, login: null, avatar_url: null, epic_linked: null }
+    : demoGitHub;
   let keys: ApiKey[] = [
     {
       id: 'demo-key-1',
@@ -850,6 +949,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
             { at: now + 4 * SECOND, status: 'starting' },
             { at: now + 12 * SECOND, status: 'running' },
           ],
+          streams: demoStreams(request.app),
         };
         simulations = [...simulations, simulation];
         return snapshot(simulation, now);
@@ -960,13 +1060,13 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     github: () => (legacy ? missing() : Promise.resolve(github)),
     connectGitHub: () =>
       soon(() => {
-        github = { configured: true, connected: true, login: LOGIN, avatar_url: AVATAR };
+        github = demoGitHub;
         throw new ApiError(NOT_CONFIGURED, 'The demo connects without leaving the page: reload to see it connected.');
       }),
     githubRepos: () => soon(() => demoRepos(opened), 400),
     disconnectGitHub: () =>
       soon(() => {
-        github = { ...github, connected: false, login: null, avatar_url: null };
+        github = { ...github, connected: false, login: null, avatar_url: null, epic_linked: null };
       }),
     linkRepo: (projectId, link) =>
       soon(() => change(projectId, { github_repo: 'repo' in link ? link.repo : `${LOGIN}/${link.create.name}` }), 600),

@@ -8,9 +8,10 @@
  * What the demo's Screen shows in place of a stream: a still picture of an engine at work.
  *
  * The demo has no workstation to stream, so it draws one: an editor's media bin, viewer, and
- * timeline for an editing app, and the app's own artwork for any other. It is sized in container
- * units, so it reads the same in the column and in focus mode. It is part of the demo's chunk and
- * never shown over a real engine.
+ * timeline for an editing app, and the app's own artwork for any other. An Unreal engine's desktop
+ * is the Blender that runs on it, drawn with Blender's artwork, and its editor's own stream with
+ * the art of Unreal Engine's card. It is sized in container units, so it reads the same in the
+ * column and in focus mode. It is part of the demo's chunk and never shown over a real engine.
  * @module
  */
 import type { CatalogApp } from '../lib/catalog';
@@ -50,6 +51,8 @@ const TRACKS: readonly { name: string; clips: readonly [number, number, string][
 interface DemoScreenProps {
   /** The engine's app. */
   app: CatalogApp | undefined;
+  /** The stream beside the engine's desktop on screen, or `null` for the desktop. */
+  stream: string | null;
 }
 
 /**
@@ -58,13 +61,15 @@ interface DemoScreenProps {
  * @param props The component's props.
  * @returns The picture, filling its frame.
  */
-export function DemoScreen({ app }: DemoScreenProps) {
+export function DemoScreen({ app, stream }: DemoScreenProps) {
   if (app?.id !== 'filmcraft') {
+    const blenderBeside = app?.id === 'unreal' && stream === null;
+    const picture = blenderBeside ? engineImage('blender') : app === undefined ? undefined : engineImage(app.id);
     return (
       <div className="art absolute inset-0" style={{ '--accent': app?.accent }}>
-        <img src={(app === undefined ? undefined : engineImage(app.id)) ?? STILLS[2]} alt="" className="art-image" data-loaded="true" />
+        <img src={picture ?? STILLS[2]} alt="" className="art-image" data-loaded="true" />
         <span className="absolute bottom-3 left-3 rounded-md bg-ink-950/70 px-2 py-1 text-xs font-semibold">
-          {app?.name}
+          {blenderBeside ? 'Desktop · Blender' : (stream ?? app?.name)}
         </span>
       </div>
     );

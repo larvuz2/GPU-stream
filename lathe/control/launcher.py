@@ -17,12 +17,16 @@ Each app's session image is defined once per container and reused, so no start
 waits on a definition another start already made; Modal itself caches what
 the definitions build. Nuke's is the exception: it is the image `nuke_image`
 makes from the user's own install in their workspace, defined at each start,
-since the install a user just made has to be in their next session.
+since the install a user just made has to be in their next session. Unreal
+Engine's is another: Epic's image pulled with the user's own registry
+credential (`OwnCopy`) by the launcher's `unreal_image`, defined at each start
+and never kept here, so one user's copy is never another's image.
 
 Modal is imported where it is used, so the service's tests can stand in for
 the launcher module and run without Modal installed. FilmCraft's command
-channel (`filmcraft_call`) is looked up on the launcher module when it is
-called, so a launcher without it still starts every other app.
+channel (`filmcraft_call`) and Unreal Engine's image (`unreal_image`) are
+looked up on the launcher module when they are needed, so a launcher without
+them still starts every other app.
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ import sys
 from typing import Any
 from urllib.parse import urlsplit
 
-from service import IDLE_SECONDS, LIFETIME_SECONDS, READY_SECONDS
+from service import IDLE_SECONDS, LIFETIME_SECONDS, READY_SECONDS, OwnCopy
 
 LAUNCHER_DIR = "/root/launcher"
 FILMCRAFT_SECONDS = 60
@@ -72,20 +76,39 @@ class ModalLauncher:
 
         return modal.Sandbox.from_id(sandbox_id)
 
-    def image(self, session: dict[str, Any]) -> Any:
-        """The session image of the session's app: this container's for most apps, the user's own for Nuke."""
+    def image(self, session: dict[str, Any], own_copy: OwnCopy | None = None) -> Any:
+        """The session image of the session's app: this container's for most apps, the user's own for Nuke and Unreal.
+
+        Raises:
+            RuntimeError: For Unreal Engine, a launcher without `unreal_image`, or a start without the
+                user's own registry credential.
+        """
         app = session.get("app") or "blender"
         if app == "nuke":
             return self.launcher.nuke_image(f"users/{session['user_id']}")
+        if app == "unreal":
+            build = getattr(self.launcher, "unreal_image", None)
+            if build is None:
+                raise RuntimeError("This deployment's launcher cannot build Unreal Engine's image yet.")
+            if own_copy is None:
+                raise RuntimeError("Unreal Engine is pulled only with the user's own registry credential.")
+            return build(
+                registry_username=own_copy.registry_username,
+                registry_token=own_copy.registry_token,
+                version=own_copy.version,
+            )
         if app not in self.images:
             self.images[app] = self.launcher.session_image(app)
         return self.images[app]
 
-    def start(self, session: dict[str, Any], tier: dict[str, Any], region: str | None) -> str:
+    def start(
+        self, session: dict[str, Any], tier: dict[str, Any], region: str | None, own_copy: OwnCopy | None = None
+    ) -> str:
         """Start the session's Sandbox in its user's own directory of the workspace and wait until it streams.
 
         A Sandbox that does not come up is ended before the failure is
-        reported, so a start that fails leaves nothing running.
+        reported, so a start that fails leaves nothing running. `own_copy` is
+        the user's registry credential, for an app pulled with it.
         """
         project = session.get("project_id")
         env = {}
@@ -109,7 +132,7 @@ class ModalLauncher:
             region=region,
             workspace=f"/users/{session['user_id']}",
             tags=tags,
-            image=self.image(session),
+            image=self.image(session, own_copy),
             application=session.get("app") or "blender",
         )
         try:

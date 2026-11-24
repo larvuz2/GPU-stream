@@ -8,9 +8,10 @@
  * The landing page's engines: the creative software a project's agent opens, grouped by the
  * catalog's status, and how engines hand work to one another.
  *
- * The live engines come first and largest, then the ones coming next with the discipline each is
- * first made for, then the team's (software whose license is the user's own, such as Nuke), and
- * the rest as compact chips. Every name, status, tagline, and version is the catalog's. An engine
+ * The live engines come first and largest, then the ones a person starts on a license of their own
+ * once it is linked (Unreal Engine on their Epic account), badged with that license, then the ones
+ * coming next with the discipline each is first made for, then the team's (software whose license
+ * is the user's own, such as Nuke), and the rest as compact chips. Every name, status, tagline, and version is the catalog's. An engine
  * is pictured by its own interface where it is open source; software that is someone else's
  * product is pictured by concept art of the work made in it, never by its interface or its logo.
  *
@@ -70,6 +71,7 @@ const HAND_OFFS: readonly HandOff[] = [
  */
 export function Engines() {
   const live = appsWithStatus('available');
+  const own = appsWithStatus('byol');
   const next = appsWithStatus('next');
   const team = appsWithStatus('team');
   const soon = appsWithStatus('soon');
@@ -96,7 +98,7 @@ export function Engines() {
         )}
 
         <ul className="mt-5 grid grid-cols-[minmax(0,1fr)] gap-5 md:grid-cols-2 lg:grid-cols-3">
-          {next.map((app) => (
+          {[...own, ...next].map((app) => (
             <li key={app.id} className="flex">
               <EngineCard app={app} large={false} />
             </li>
@@ -137,7 +139,7 @@ interface EngineCardProps {
 }
 
 /**
- * Renders an engine with its picture: a live one, or one coming next.
+ * Renders an engine with its picture: a live one, one on the person's own license, or one coming next.
  *
  * @param props The component's props.
  * @returns The card.

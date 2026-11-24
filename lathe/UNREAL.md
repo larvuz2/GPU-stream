@@ -69,3 +69,65 @@ it is offered to the public.
 4. With a GitHub token linked to Epic: build the real image, open the editor,
    stream it, send a mesh from Blender, and measure start time, frame rate, and
    latency.
+
+## What is built (2026-11-24)
+
+The parts that need no Unreal binary: nobody on the team has a GitHub account
+linked to Epic, so the editor cannot be pulled, and each part below is tested
+against stand-ins for it.
+
+- **The bridge** (`addons/modal/unreal`). Blender's add-on `send_to_unreal.py`
+  (3D viewport sidebar, tab Unreal) exports the selection into the project's
+  `bridge/` folder, as glTF binary for meshes and FBX for anything with an
+  armature, beside a manifest, and asks the editor to import it:
+  `PUT http://127.0.0.1:30010/remote/object/call` on
+  `/Script/PythonScriptPlugin.Default__PythonScriptLibrary`, function
+  `ExecutePythonCommandEx`, with a `PythonCommand` that runs `unreal_import.py`
+  (one `AssetImportTask` into `/Game/Blender/<name>`, placed in the open level
+  when asked). The way back, `send_to_blender.py` (Tools, Send to Blender, which
+  `init_unreal.py` adds), exports the selected actors or static meshes as FBX
+  and puts a request in Blender's spool. `DefaultRemoteControl.ini` is what the
+  editor's project needs for the call. Tested in Blender 5.2.4: real exports, a
+  stand-in for the Remote Control API that records the request and runs its
+  command against a stand-in `unreal` module, and the way back served by
+  `blender/session.py` itself (`pytest addons/modal/unreal`).
+- **The control plane.** GitHub's OAuth App asks for `read:packages` beside
+  `repo` and keeps the scopes it was granted. `epic_link` reads whether the
+  user's token sees `EpicGames/UnrealEngine` and the
+  `ghcr.io/epicgames/unreal-engine` package (`GET /v1/github`: `epic_linked`,
+  `null` without GitHub or the scope). Starting `unreal` (catalog status `byol`)
+  is refused until it is linked, with the steps that link it, and a start hands
+  the launcher that user's own login and token for that start alone
+  (`OwnCopy`), which `launcher.py` passes to `unreal_image` where the launcher
+  has one.
+- **The studio.** The catalog lists Unreal Engine 5.8 as `byol`, labeled "Your
+  Epic account" on the landing page. Choosing it in the Environment panel shows
+  the link: linked, not linked with the steps and Epic's page, or GitHub to
+  connect first or again; Start waits for the link. The Screen panel switches
+  an engine that reports `streams` between "Desktop" and each stream (the
+  Unreal Editor). The demo's Games project, Ember Ridge, has an Unreal engine
+  with both.
+
+## What is open
+
+- `unreal_image(registry_username, registry_token, version)` in
+  `addons/modal/sandbox.py`, and the session on it: the editor started off
+  screen with editor streaming, the TURN relay, Blender beside it with the
+  add-on, `selkies-modal-project` and this folder on the editor's Python path,
+  and `DefaultRemoteControl.ini` in the editor's project. Whether Modal shares
+  a layer pulled with one user's credential with another user's build has to be
+  checked there.
+- The control plane does not report a session's `streams` yet: the editor's
+  stream address comes with the transport (order of work, step 1).
+- Unverified against a running editor: the Remote Control body follows Epic's
+  HTTP reference and the function's names in Epic's Python reference (the C++
+  parameter names are from a third-party quote of its declaration); the two
+  settings that gate remote Python, and the errors each gives, are from a
+  third-party package's notes, since Epic's settings page renders only in a
+  browser. The add-on shows Unreal's own refusal either way.
+- Unverified against GitHub: whether the EpicGames organization restricts
+  third-party OAuth Apps. If it does, a linked user's token cannot see the
+  repository, so the check cannot show the link (it reads "not linked", or
+  unknown with GitHub's refusal), and Lathe needs Epic's approval of its OAuth
+  App or another way for a user to grant the pull.
+- An Unreal start on a tier without a GPU is not refused yet.

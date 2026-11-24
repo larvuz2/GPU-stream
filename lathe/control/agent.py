@@ -92,6 +92,7 @@ from service import (
     OPEN,
     PLAN_STATUSES,
     SIGNED_URL_SECONDS,
+    STARTABLE,
     Catalog,
     Refused,
     Sessions,
@@ -317,12 +318,13 @@ def system_prompt(catalog: Catalog, project: dict[str, Any], skills: list[Skill]
         status = {
             "available": "can be started",
             "team": "can be started by the team's accounts only, with the user's own license",
+            "byol": "can be started once the person has linked their own license for it; starting it says how if not",
         }.get(app["status"], "not available yet")
         engines.append(f"- `{app['id']}`, {app['name']}: {app['tagline']} ({status})")
     other = [
         f"- `{app['id']}`, {app['name']}: {app['tagline']}"
         for app in catalog.data["apps"]
-        if app["status"] in ("available", "team") and app["id"] not in discipline.get("engines", [])
+        if app["status"] in STARTABLE and app["id"] not in discipline.get("engines", [])
     ]
     machines = [
         f"- `{tier['id']}`, {tier['name']}: {tier['blurb']} {tier['credits_per_minute']} "

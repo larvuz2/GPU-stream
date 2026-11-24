@@ -33,6 +33,19 @@ const SESSION_STATUSES = ['queued', 'starting', 'running', 'ended', 'failed'] as
 /** One state of a session. */
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
+/**
+ * A picture an engine streams beside its desktop, such as the Unreal Editor's own stream.
+ *
+ * The session's desktop is reached through a link minted for each load ({@link ControlPlane.sessionLink});
+ * a stream like this one is served from its own address.
+ */
+export interface EngineStream {
+  /** What the stream shows, as the Screen panel names it, such as `Unreal Editor`. */
+  name: string;
+  /** The address its player is served from. */
+  url: string;
+}
+
 /** A workstation session, as the control plane reports it; a project's engine is one. */
 export interface Session {
   /** The session's identifier. */
@@ -59,6 +72,8 @@ export interface Session {
   queue_position: number | null;
   /** The project it is an engine of, absent or `null` for a session started outside one. */
   project_id?: string | null;
+  /** What the engine streams beside its desktop, absent for an engine that streams its desktop alone. */
+  streams?: EngineStream[];
 }
 
 /** An API key an agent authenticates with; the secret itself is only ever returned at creation. */
@@ -366,6 +381,12 @@ export interface GitHubStatus {
   login: string | null;
   /** Their GitHub avatar, once connected. */
   avatar_url: string | null;
+  /**
+   * Whether their GitHub account is linked to an Epic account, which Unreal Engine starts on: GitHub's
+   * answer, or `null` while it is unknown (GitHub not connected, connected before the studio asked
+   * to read packages, or a control plane that does not check).
+   */
+  epic_linked: boolean | null;
 }
 
 /** A repository of the person's that a project can be linked to. */
@@ -532,6 +553,10 @@ const isNullableNumber = nullable(isNumber);
 const isNullableBoolean = nullable(isBoolean);
 const isStrings = arrayOf(isString);
 
+/** Checks a value into an {@link EngineStream}. */
+const isEngineStream: Guard<EngineStream> = (value): value is EngineStream =>
+  isRecord(value) && isString(value.name) && isWebUrl(value.url);
+
 /** Checks a value into a {@link Session}. */
 const isSession: Guard<Session> = (value): value is Session =>
   isRecord(value) &&
@@ -546,7 +571,8 @@ const isSession: Guard<Session> = (value): value is Session =>
   isNullableString(value.end_reason) &&
   isNumber(value.credits_used) &&
   isNullableNumber(value.queue_position) &&
-  optional(isNullableString)(value.project_id);
+  optional(isNullableString)(value.project_id) &&
+  optional(arrayOf(isEngineStream))(value.streams);
 
 /** Checks a value into an {@link ApiKey}. */
 const isApiKey: Guard<ApiKey> = (value): value is ApiKey =>
@@ -742,6 +768,8 @@ interface GitHubReport {
   login?: string | null;
   /** Their avatar. */
   avatar_url?: string | null;
+  /** Whether the account is linked to Epic. */
+  epic_linked?: boolean | null;
 }
 
 /** Checks a value into a {@link GitHubReport}. */
@@ -750,7 +778,8 @@ const isGitHubReport: Guard<GitHubReport> = (value): value is GitHubReport =>
   isBoolean(value.configured) &&
   isBoolean(value.connected) &&
   optional(isNullableString)(value.login) &&
-  optional(nullable(isWebUrl))(value.avatar_url);
+  optional(nullable(isWebUrl))(value.avatar_url) &&
+  optional(isNullableBoolean)(value.epic_linked);
 
 /** Checks a value into a {@link GitHubRepo}. */
 const isGitHubRepo: Guard<GitHubRepo> = (value): value is GitHubRepo =>
@@ -950,6 +979,7 @@ export function createControlPlane(baseUrl: string, accessToken: () => Promise<s
         connected: report.connected,
         login: report.login ?? null,
         avatar_url: report.avatar_url ?? null,
+        epic_linked: report.epic_linked ?? null,
       };
     },
     connectGitHub: async (returnTo) =>
