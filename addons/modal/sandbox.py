@@ -38,7 +38,10 @@ bound to the Sandbox's loopback, for the session's own token only
 the Modal credentials that started it, as a link does. An Unreal session
 describes the projects cloned into its workspace the same way
 (`unreal_projects`), and has a second page beside its desktop on a port of its
-own, the Unreal view (`unreal_view_link`).
+own, the Unreal view (`unreal_view_link`). One started for a project linked to
+a GitHub repository, given it and a token for it in a Secret of the start's own
+(`start_session`'s `secrets`), clones it by itself and says how far it is
+(`clone_status`).
 
 This is Python because Modal's Python SDK is the interface the image
 definition, the Sandbox, and the connect token are reached through.
@@ -50,10 +53,10 @@ import argparse
 import base64
 import json
 import re
-import secrets
 import sys
 import time
 from pathlib import Path, PurePosixPath
+from secrets import token_hex, token_urlsafe
 from typing import Any
 
 import modal
@@ -105,6 +108,8 @@ PHOTOCRAFT_CONTROL_PORT = 7878
 TURN_PORT = 3478
 # The Unreal view, the Unreal session's second page beside the desktop (unreal/view/view.sh)
 UNREAL_VIEW_PORT = 8090
+# Where an Unreal session's clone of its repository says how far it is (unreal/clone.py)
+UNREAL_CLONE_STATUS = "/tmp/selkies-modal/unreal-clone.json"
 
 # What the session is, whoever starts it. Modal terminates TLS and its connect
 # token guards the address, so Selkies serves plain HTTP with no login of its
@@ -171,6 +176,7 @@ APP_ENV = {
         # settings, kept in the workspace (session.sh; unreal/github.sh names the client's folder)
         "SELKIES_MODAL_PERSIST": ".desktop-plus .local/share/keyrings .config/git",
         "SELKIES_MODAL_UNREAL_VIEW_PORT": str(UNREAL_VIEW_PORT),
+        "SELKIES_MODAL_UNREAL_CLONE_STATUS": UNREAL_CLONE_STATUS,
         # Blender beside the editor, as the blender app keeps it, so the editor's Send to Blender
         # reaches its spool
         "SELKIES_MODAL_BLENDER_SPOOL": BLENDER_SPOOL,
@@ -298,6 +304,17 @@ def unreal_desktop(image: modal.Image) -> modal.Image:
     - **The line of instructions.** At start, while that folder holds no
       Unreal project yet, one line over the client says to sign in and clone
       the game there (`unreal/autostart`).
+    - **The team's repository, cloned at start.** A session given a GitHub
+      repository and a token for it (`start_session`'s `secrets`) clones it
+      into the project folder in the background, Git LFS's files included, or
+      brings an earlier clone up to date where nothing local is in the way,
+      and opens it in the client when it is there (`unreal/clone.py`,
+      `clone_status`). The token reaches the session's Git through a credential
+      helper (`unreal/git-credential.sh`) and the client's through a header in
+      its environment (`unreal/github.sh`), and no file of the workspace keeps
+      it. The client's bundled code is changed to open that clone without
+      asking and without its welcome, and to ask to initialize Git LFS only
+      where the clone does not have it already (`unreal/desktop-plus.py`).
     - **Finding the project.** `selkies-modal-unreal-projects` describes every
       `.uproject` in the workspace (`unreal_projects`).
     - **The Unreal view.** A second page on its own port (`unreal_view_link`),
@@ -323,6 +340,8 @@ def unreal_desktop(image: modal.Image) -> modal.Image:
             # Git LFS's filters for every repository, whichever Git clones it
             "RUN git lfs install --system --skip-repo",
         )
+        .add_local_file(unreal / "desktop-plus.py", f"{SHARE}/unreal/desktop-plus.py", copy=True)
+        .dockerfile_commands(f"RUN python3 -I {SHARE}/unreal/desktop-plus.py /usr/lib/desktop-plus/resources/app/renderer.js")
         .add_local_file(unreal / "firefox-policies.json", "/etc/firefox/policies/policies.json", copy=True)
         .add_local_file(unreal / "mimeapps.list", "/etc/xdg/mimeapps.list", copy=True)
         .add_local_file(unreal / "desktop-config", "/etc/xdg/selkies-desktop/config", copy=True)
@@ -333,6 +352,8 @@ def unreal_desktop(image: modal.Image) -> modal.Image:
         .add_local_file(unreal / "github.sh", "/usr/local/bin/selkies-modal-unreal-github", copy=True)
         .add_local_file(unreal / "blender.sh", "/usr/local/bin/selkies-modal-unreal-blender", copy=True)
         .add_local_file(unreal / "projects.py", "/usr/local/bin/selkies-modal-unreal-projects", copy=True)
+        .add_local_file(unreal / "clone.py", "/usr/local/bin/selkies-modal-unreal-clone", copy=True)
+        .add_local_file(unreal / "git-credential.sh", "/usr/local/bin/selkies-modal-unreal-git-credential", copy=True)
         .add_local_file(unreal / "open.sh", "/usr/local/bin/selkies-modal-unreal-open", copy=True)
         .add_local_file(unreal / "view" / "view.sh", "/usr/local/bin/selkies-modal-unreal-view", copy=True)
         .add_local_file(unreal / "view" / "serve.py", f"{SHARE}/unreal/view/serve.py", copy=True)
@@ -491,6 +512,7 @@ def start_session(
     image: modal.Image | None = None,
     application: str = "blender",
     extra_secrets: tuple[str, ...] = (),
+    secrets: list[modal.Secret] | None = None,
     tcp_ports: tuple[int, ...] = (),
 ) -> modal.Sandbox:
     """Start a session's Sandbox and return it at once, before Selkies listens.
@@ -517,7 +539,10 @@ def start_session(
     one already built, which a service does so that no request waits on a build;
     otherwise it is `application`'s. `extra_secrets` names Modal Secrets whose
     variables the session gets too, such as the Google Drive access rclone
-    reads (`RCLONE_CONFIG_...`).
+    reads (`RCLONE_CONFIG_...`), and `secrets` are Secret objects to the same
+    end, made for this start, such as the repository an Unreal session clones
+    and the token it clones it with (`LATHE_GIT_REPO`, `LATHE_GIT_BRANCH`,
+    `LATHE_GIT_TOKEN`, `LATHE_GIT_NAME`, `LATHE_GIT_EMAIL`; `unreal/clone.py`).
 
     Raises:
         modal.exception.AlreadyExistsError: A session of that name is running.
@@ -527,11 +552,11 @@ def start_session(
         volume = volume.with_mount_options(sub_path=workspace)
     credentials = modal.Secret.from_dict(
         {
-            "SELKIES_MASTER_TOKEN": secrets.token_urlsafe(32),
-            "SELKIES_MODAL_SESSION_TOKEN": secrets.token_urlsafe(32),
-            "FILMCRAFT_CONTROL_TOKEN": secrets.token_hex(32),
-            "PHOTOCRAFT_CONTROL_TOKEN": secrets.token_hex(32),
-            "SELKIES_MODAL_TURN_SECRET": secrets.token_urlsafe(32),
+            "SELKIES_MASTER_TOKEN": token_urlsafe(32),
+            "SELKIES_MODAL_SESSION_TOKEN": token_urlsafe(32),
+            "FILMCRAFT_CONTROL_TOKEN": token_hex(32),
+            "PHOTOCRAFT_CONTROL_TOKEN": token_hex(32),
+            "SELKIES_MODAL_TURN_SECRET": token_urlsafe(32),
         }
     )
     return modal.Sandbox.create(
@@ -545,7 +570,7 @@ def start_session(
         region=region,
         timeout=lifetime_seconds,
         env={**(env or {}), "SELKIES_MODAL_IDLE_TIMEOUT": str(idle_seconds)},
-        secrets=[credentials, *(modal.Secret.from_name(name) for name in extra_secrets)],
+        secrets=[credentials, *(secrets or ()), *(modal.Secret.from_name(name) for name in extra_secrets)],
         volumes={WORKSPACE: volume},
         tags=tags or {},
         readiness_probe=modal.Probe.with_tcp(PORT),
@@ -668,6 +693,28 @@ def unreal_projects(sandbox: modal.Sandbox) -> list[dict[str, Any]]:
     output = process.stdout.read()
     if process.wait() != 0:
         raise RuntimeError(f"the session's Unreal projects could not be read: {process.stderr.read().strip()}")
+    return json.loads(output)
+
+
+def clone_status(sandbox: modal.Sandbox) -> dict[str, Any]:
+    """How far an Unreal session's clone of its GitHub repository is, as `selkies-modal-unreal-clone --status` says.
+
+    `state` is `cloning`, `done` (the clone is in `path`, a folder of the
+    workspace, whether or not it could be updated), or `failed`; `detail` is
+    one line saying what happened or is happening, with Git LFS's progress
+    while its files arrive, and why where the clone is not there or was left
+    as it was. `path` is null until the clone has started. Asking does not
+    count as use of the session, so a page polling it does not keep an
+    abandoned session running; the clone itself counts while it runs
+    (`unreal/clone.py`).
+
+    Raises:
+        RuntimeError: The session was given no repository, or has no such command (another application's).
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-unreal-clone", "--status")
+    output = process.stdout.read()
+    if process.wait() != 0:
+        raise RuntimeError(f"the session's clone status could not be read: {process.stderr.read().strip()}")
     return json.loads(output)
 
 

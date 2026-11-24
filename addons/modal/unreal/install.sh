@@ -26,12 +26,8 @@
 # - zenity for the session's line of instructions, and xdotool to wait for the
 #   client's window before it.
 #
-# Then the client's clone dialog is made to offer the session's folder
-# (SELKIES_MODAL_CLONE_DIR, which github.sh sets) before the folder the client
-# last cloned into: Desktop Plus otherwise offers that, or Documents/GitHub, and
-# keeps no setting for it outside its own browser storage. The change is to one
-# function of its bundled code, found by its shape: a version whose code is not
-# that shape fails the build here, rather than offering the wrong folder.
+# What the session changes in the client's bundled code is desktop-plus.py's,
+# a layer of its own above this one.
 set -eu
 
 version="$1"
@@ -56,21 +52,3 @@ apt-get install --no-install-recommends -y \
 apt-get clean
 rm -rf /var/lib/apt/lists/* "${download}"
 
-python3 - /usr/lib/desktop-plus/resources/app/renderer.js << 'EOF'
-import re
-import sys
-
-path = sys.argv[1]
-with open(path, encoding="utf-8") as file:
-    code = file.read()
-# async function uE(e){return(e?localStorage.getItem(hE(e)):null)||await lE()}: the folder the clone
-# dialog offers, the account's last one, else the last one, else Documents/GitHub
-shape = re.compile(
-    r"(async function \w+\((\w+)\)\{return)(\(\2\?localStorage\.getItem\(\w+\(\2\)\):null\)\|\|await \w+\(\)\})"
-)
-code, count = shape.subn(r"\1 process.env.SELKIES_MODAL_CLONE_DIR||\3", code)
-if count != 1:
-    sys.exit(f"install.sh: the clone dialog's default folder is not where this expects in {path} ({count} found)")
-with open(path, "w", encoding="utf-8") as file:
-    file.write(code)
-EOF
