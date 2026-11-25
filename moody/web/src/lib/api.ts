@@ -21,6 +21,14 @@
  * but still moves the cursor past it, so a newer control plane adds kinds without stalling an
  * older page.
  *
+ * The agent runs on Anthropic's loop (the contract's "the agent on Anthropic's loop"), which adds
+ * to the log what a person watches it do: its reasoning (`thinking`), an answer that grows while
+ * it is written (`text` with a `block`), a card per subagent (`agent`), a question before
+ * something costly (`approval`, answered through {@link ControlPlane.approve}), an interactive
+ * card (`ui`, whose `spec` stays `unknown` here: the card that renders it narrows it), and what
+ * the turn cost (`usage`). An event of a subagent names it (`agent_id`), on the event or in its
+ * data; both are read into {@link EventEnvelope.agent_id}.
+ *
  * {@link ControlPlane} is the interface the studio is written against; {@link createControlPlane}
  * is its HTTP implementation and the studio's demo (`studio/demo.ts`) its in-memory one.
  * @module
@@ -245,7 +253,15 @@ export interface Project {
   library_sections: string[];
   /** The agent's plan. */
   plan: PlanItem[];
+  /**
+   * What the person no longer wants to be asked about, by tool name: `always` for a tool the agent
+   * may run in this project without an approval. Absent from a control plane that asks for none.
+   */
+  permissions?: Record<string, string>;
 }
+
+/** The answer kept for a tool the person always allows. */
+export const ALWAYS = 'always';
 
 /** What a project is created with. */
 export interface NewProject {
@@ -267,6 +283,8 @@ export interface ProjectChanges {
   pinned?: boolean;
   /** The library's sections, in their new order. */
   library_sections?: string[];
+  /** Every tool the person always allows; one left out is asked about again. */
+  permissions?: Record<string, typeof ALWAYS>;
 }
 
 /** The kinds of media a library asset or a tool's result carries. */
@@ -342,18 +360,37 @@ interface EventEnvelope {
   turn_id: TurnId | null;
   /** When it was written, as an ISO 8601 timestamp. */
   created_at: string;
+  /** The subagent it belongs to, absent for an event of the agent itself. */
+  agent_id?: string;
+}
+
+/** What an interactive card was locked in with: the card, and its state as the person left it. */
+export interface UiLock {
+  /** The card's identifier, as its `ui` event names it. */
+  ui_id: string;
+  /** The card's state, as JSON; its shape is the card's own. */
+  value: unknown;
 }
 
 /** A message the person sent. */
 export interface UserMessageData {
   /** The message. */
   text: string;
+  /** The interactive card it locks in, for a message sent by a card's lock-in button. */
+  ui?: UiLock;
 }
 
-/** A piece of the agent's reply, in order. */
+/** A piece of the agent's reply or of its reasoning, in order. */
 export interface TextData {
   /** The text, in a small subset of Markdown. */
   text: string;
+  /**
+   * The block of the answer this is. A later event of the same kind with the same block replaces
+   * this one, which is how a block appears while it is written.
+   */
+  block?: string;
+  /** Whether the block is still being written. */
+  partial?: boolean;
 }
 
 /** The agent started calling a tool. */
@@ -364,6 +401,11 @@ export interface ToolStartData {
   tool: string;
   /** What the call does, in words for the person. */
   title: string;
+  /**
+   * What the tool looks like while it runs, one of the catalog's `activities`; absent from a
+   * control plane that does not say.
+   */
+  activity?: string;
 }
 
 /** A tool call finished. */
@@ -392,11 +434,16 @@ export interface PlanData {
   items: PlanItem[];
 }
 
-/** An asset of the library was added or changed. */
-export interface LibraryData {
-  /** The asset, as it now stands. */
-  asset: Asset;
-}
+/** The library changed: an asset was added or changed, or the agent set its sections. */
+export type LibraryData =
+  | {
+      /** The asset, as it now stands. */
+      asset: Asset;
+    }
+  | {
+      /** The library's sections, in the order they are shown. */
+      sections: string[];
+    };
 
 /** An engine of the project was started or changed state. */
 export interface EngineData {
@@ -442,11 +489,130 @@ export interface ErrorData {
   message: string;
 }
 
+/** Where a subagent stands; `completed`, `failed`, and `stopped` are final. */
+const AGENT_STATES = ['working', 'completed', 'failed', 'stopped'] as const;
+
+/** One state of a subagent. */
+export type AgentState = (typeof AGENT_STATES)[number];
+
+/**
+ * A subagent's card. Every event carries the whole card, and the latest one for an `agent_id` is
+ * its state.
+ */
+export interface AgentData {
+  /** The subagent's identifier, which its own events carry as their `agent_id`. */
+  agent_id: string;
+  /** What the subagents one step started together share: they are shown as one block. */
+  group: string;
+  /** The definition it runs, such as `research`. */
+  name: string;
+  /** What the page calls it, such as "Research agent". */
+  title: string;
+  /** The job it was handed, in a line. */
+  task: string;
+  /** Where it stands. */
+  state: AgentState;
+  /** What it is doing, one of the catalog's `activities`. */
+  activity: string;
+  /** What it is doing now, in a line. */
+  detail: string;
+  /** How long it has worked, in seconds, where the control plane says. */
+  seconds?: number;
+  /** The tokens it has used, where the control plane says. */
+  tokens?: number;
+}
+
+/** The agent waits for the person before a tool that costs or changes something. */
+export interface ApprovalData {
+  /** The approval's identifier, which the answer and its result name. */
+  approval_id: string;
+  /** The tool that waits. */
+  tool: string;
+  /** What it would do, in words for the person. */
+  title: string;
+  /** What that costs or changes, in a sentence or two. */
+  detail: string;
+}
+
+/** What a person answers an approval with: this once, for good in this project, or not now. */
+const APPROVAL_DECISIONS = ['once', 'always', 'deny'] as const;
+
+/** One answer to an approval. */
+export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];
+
+/** How an approval ended: with one of the person's answers, or unanswered when its turn did. */
+const APPROVAL_OUTCOMES = [...APPROVAL_DECISIONS, 'expired'] as const;
+
+/** One way an approval ended. */
+export type ApprovalOutcome = (typeof APPROVAL_OUTCOMES)[number];
+
+/** An approval ended. */
+export interface ApprovalResultData {
+  /** The approval. */
+  approval_id: string;
+  /** How it ended. */
+  decision: ApprovalOutcome;
+}
+
+/** How an interactive card is built: from the page's own components, or as a document of its own. */
+const UI_KINDS = ['components', 'html'] as const;
+
+/** A file an interactive card shows. */
+export interface UiMedia extends Media {
+  /** The name the card's content refers to it by. */
+  name: string;
+}
+
+/**
+ * An interactive card the agent put in the conversation, such as a slider over a picture or a
+ * form, which the person locks in to send its state back as their next message.
+ */
+export interface UiData {
+  /** The card's identifier, which the message that locks it in names. */
+  ui_id: string;
+  /** What the card is, as its heading. */
+  title: string;
+  /** How it is built. */
+  kind: (typeof UI_KINDS)[number];
+  /** A tree of the components `moody/ui.json` defines, for a card of kind `components`. */
+  spec?: unknown;
+  /** A document the page runs in a sandboxed frame, for a card of kind `html`. */
+  html?: string;
+  /** The height it asks for, in CSS pixels. */
+  height?: number;
+  /** The lock-in button's label, or `null` for a card with nothing to send back. */
+  submit: string | null;
+  /** Whether the agent's turn ended to wait for the card. */
+  waits: boolean;
+  /** The files the card shows, each signed for the reading of the log that returned it. */
+  media: UiMedia[];
+}
+
+/** What a turn cost, written once as it ends. */
+export interface UsageData {
+  /** The tokens the model read. */
+  input_tokens: number;
+  /** The tokens the model wrote. */
+  output_tokens: number;
+  /** What the model's work cost, in US dollars. */
+  cost_usd: number;
+  /** How long the turn took, in seconds. */
+  seconds: number;
+  /** How many subagents it ran. */
+  agents: number;
+}
+
 /** An event of a project's log, one of the kinds `moody/STUDIO.md` names. */
 export type StudioEvent = EventEnvelope &
   (
     | { kind: 'user_message'; data: UserMessageData }
     | { kind: 'text'; data: TextData }
+    | { kind: 'thinking'; data: TextData }
+    | { kind: 'agent'; data: AgentData }
+    | { kind: 'approval'; data: ApprovalData }
+    | { kind: 'approval_result'; data: ApprovalResultData }
+    | { kind: 'ui'; data: UiData }
+    | { kind: 'usage'; data: UsageData }
     | { kind: 'tool_start'; data: ToolStartData }
     | { kind: 'tool_end'; data: ToolEndData }
     | { kind: 'ask'; data: AskData }
@@ -525,6 +691,60 @@ export interface RepoLink {
   branch?: string;
 }
 
+/** What a connector is for. */
+const CONNECTOR_KINDS = ['generation', 'repository', 'search', 'license', 'mcp'] as const;
+
+/** One kind of connector. */
+export type ConnectorKind = (typeof CONNECTOR_KINDS)[number];
+
+/** Whether the agent can use a connector: it can, it could once the person connects it, or it is off here. */
+const CONNECTOR_STATES = ['connected', 'available', 'off'] as const;
+
+/** One state of a connector. */
+export type ConnectorState = (typeof CONNECTOR_STATES)[number];
+
+/** A service the project's agent can use, or could once the person connects it. */
+export interface Connector {
+  /** The connector's identifier. */
+  id: string;
+  /** Its name, such as "fal". */
+  name: string;
+  /** What it is for. */
+  kind: ConnectorKind;
+  /** Whether the agent can use it. */
+  state: ConnectorState;
+  /** What it gives the agent, or what connecting it takes, in a line. */
+  detail: string;
+}
+
+/** A subagent this project's agent can hand work to. */
+export interface AgentInfo {
+  /** Its identifier, which an `agent` event's `name` carries. */
+  name: string;
+  /** What the page calls it, such as "Research agent". */
+  title: string;
+  /** When the agent hands work to it. */
+  description: string;
+}
+
+/** A skill this project's agent reads when the work calls for it. */
+export interface SkillInfo {
+  /** Its name. */
+  name: string;
+  /** What it teaches, in a sentence or two. */
+  description: string;
+}
+
+/** What a project's agent works with, beside its engines and its repository. */
+export interface Environment {
+  /** The services it can use, or could. */
+  connectors: Connector[];
+  /** The subagents it can hand work to. */
+  agents: AgentInfo[];
+  /** The skills it reads. */
+  skills: SkillInfo[];
+}
+
 /**
  * The operations the studio performs, whatever answers them.
  *
@@ -565,10 +785,21 @@ export interface ControlPlane {
   unrealProjects(projectId: string, engineId: string): Promise<UnrealProject[]>;
   /** Reads a project's events after a cursor, and whether a turn is running. */
   listEvents(projectId: string, after: number): Promise<EventPage>;
-  /** Sends the person's message, which starts a turn; refused with 409 while one runs. */
-  sendMessage(projectId: string, text: string): Promise<TurnId>;
+  /**
+   * Sends the person's message, which starts a turn; refused with 409 while one runs. With `ui`,
+   * the message locks in an interactive card with its state.
+   */
+  sendMessage(projectId: string, text: string, ui?: UiLock): Promise<TurnId>;
   /** Stops the running turn. */
   stopTurn(projectId: string): Promise<void>;
+  /**
+   * Answers an approval the running turn waits on.
+   *
+   * @returns Whether the answer was recorded; `false` for an approval that had already ended.
+   */
+  approve(projectId: string, approvalId: string, decision: ApprovalDecision): Promise<boolean>;
+  /** Reads what a project's agent works with: its connectors, subagents, and skills. */
+  environment(projectId: string): Promise<Environment>;
   /** Reads a project's library. */
   getLibrary(projectId: string): Promise<Library>;
   /** Adds an asset to a project's library. */
@@ -783,6 +1014,10 @@ const isPlanItem: Guard<PlanItem> = (value): value is PlanItem =>
 
 const isPlan = arrayOf(isPlanItem);
 
+/** Checks a value into a project's kept answers: a word per tool name. */
+const isAnswers: Guard<Record<string, string>> = (value): value is Record<string, string> =>
+  isRecord(value) && Object.values(value).every(isString);
+
 /** Checks a value into a {@link Project}. */
 const isProject: Guard<Project> = (value): value is Project =>
   isRecord(value) &&
@@ -796,7 +1031,8 @@ const isProject: Guard<Project> = (value): value is Project =>
   isNullableString(value.github_repo) &&
   optional(isNullableString)(value.github_branch) &&
   isStrings(value.library_sections) &&
-  isPlan(value.plan);
+  isPlan(value.plan) &&
+  optional(isAnswers)(value.permissions);
 
 /** Checks a value into a {@link Media}. */
 const isMedia: Guard<Media> = (value): value is Media =>
@@ -851,15 +1087,79 @@ const isEnvelope: Guard<EventEnvelope & { kind: string; data: Record<string, unk
   isNumber(value.id) &&
   nullable(isTurnId)(value.turn_id) &&
   isString(value.created_at) &&
+  optional(isString)(value.agent_id) &&
   isString(value.kind) &&
   isRecord(value.data);
 
-/** Checks a value into the data of a message or a piece of text. */
-const isTextData: Guard<TextData> = (value): value is TextData => isRecord(value) && isString(value.text);
+/** Checks a value into a {@link UiLock}; its `value` is whatever the card kept, and is left unchecked. */
+const isUiLock: Guard<UiLock> = (value): value is UiLock => isRecord(value) && isString(value.ui_id);
+
+/** Checks a value into a {@link UserMessageData}. */
+const isUserMessage: Guard<UserMessageData> = (value): value is UserMessageData =>
+  isRecord(value) && isString(value.text) && optional(isUiLock)(value.ui);
+
+/** Checks a value into the data of a piece of the agent's reply or reasoning. */
+const isTextData: Guard<TextData> = (value): value is TextData =>
+  isRecord(value) && isString(value.text) && optional(isString)(value.block) && optional(isBoolean)(value.partial);
 
 /** Checks a value into a {@link ToolStartData}. */
 const isToolStart: Guard<ToolStartData> = (value): value is ToolStartData =>
-  isRecord(value) && isString(value.call_id) && isString(value.tool) && isString(value.title);
+  isRecord(value) &&
+  isString(value.call_id) &&
+  isString(value.tool) &&
+  isString(value.title) &&
+  optional(isString)(value.activity);
+
+/** Checks a value into an {@link AgentData}. */
+const isAgent: Guard<AgentData> = (value): value is AgentData =>
+  isRecord(value) &&
+  isString(value.agent_id) &&
+  isString(value.group) &&
+  isString(value.name) &&
+  isString(value.title) &&
+  isString(value.task) &&
+  oneOf(AGENT_STATES)(value.state) &&
+  isString(value.activity) &&
+  isString(value.detail) &&
+  optional(isNumber)(value.seconds) &&
+  optional(isNumber)(value.tokens);
+
+/** Checks a value into an {@link ApprovalData}. */
+const isApproval: Guard<ApprovalData> = (value): value is ApprovalData =>
+  isRecord(value) &&
+  isString(value.approval_id) &&
+  isString(value.tool) &&
+  isString(value.title) &&
+  isString(value.detail);
+
+/** Checks a value into an {@link ApprovalResultData}. */
+const isApprovalResult: Guard<ApprovalResultData> = (value): value is ApprovalResultData =>
+  isRecord(value) && isString(value.approval_id) && oneOf(APPROVAL_OUTCOMES)(value.decision);
+
+/** Checks a value into a {@link UiMedia}. */
+const isUiMedia: Guard<UiMedia> = (value): value is UiMedia =>
+  isRecord(value) && oneOf(MEDIA_KINDS)(value.kind) && isWebUrl(value.url) && isString(value.name);
+
+/** Checks a value into a {@link UiData}; its `spec` is left for the card to check. */
+const isUi: Guard<UiData> = (value): value is UiData =>
+  isRecord(value) &&
+  isString(value.ui_id) &&
+  isString(value.title) &&
+  oneOf(UI_KINDS)(value.kind) &&
+  optional(isString)(value.html) &&
+  optional(isNumber)(value.height) &&
+  isNullableString(value.submit) &&
+  isBoolean(value.waits) &&
+  arrayOf(isUiMedia)(value.media);
+
+/** Checks a value into a {@link UsageData}. */
+const isUsage: Guard<UsageData> = (value): value is UsageData =>
+  isRecord(value) &&
+  isNumber(value.input_tokens) &&
+  isNumber(value.output_tokens) &&
+  isNumber(value.cost_usd) &&
+  isNumber(value.seconds) &&
+  isNumber(value.agents);
 
 /** Checks a value into a {@link ToolEndData}. */
 const isToolEnd: Guard<ToolEndData> = (value): value is ToolEndData =>
@@ -884,13 +1184,32 @@ function parseEvent(value: unknown): StudioEvent | null {
   if (!isEnvelope(value)) {
     return null;
   }
-  const envelope: EventEnvelope = { id: value.id, turn_id: value.turn_id, created_at: value.created_at };
   const { data } = value;
+  // A subagent is named on the event or in its data; an `agent` event's own data names its card.
+  const agentId = value.agent_id ?? (value.kind !== 'agent' && isString(data.agent_id) ? data.agent_id : undefined);
+  const envelope: EventEnvelope = {
+    id: value.id,
+    turn_id: value.turn_id,
+    created_at: value.created_at,
+    ...(agentId === undefined ? {} : { agent_id: agentId }),
+  };
   switch (value.kind) {
     case 'user_message':
-      return isTextData(data) ? { ...envelope, kind: 'user_message', data } : null;
+      return isUserMessage(data) ? { ...envelope, kind: 'user_message', data } : null;
     case 'text':
       return isTextData(data) ? { ...envelope, kind: 'text', data } : null;
+    case 'thinking':
+      return isTextData(data) ? { ...envelope, kind: 'thinking', data } : null;
+    case 'agent':
+      return isAgent(data) ? { ...envelope, kind: 'agent', data } : null;
+    case 'approval':
+      return isApproval(data) ? { ...envelope, kind: 'approval', data } : null;
+    case 'approval_result':
+      return isApprovalResult(data) ? { ...envelope, kind: 'approval_result', data } : null;
+    case 'ui':
+      return isUi(data) ? { ...envelope, kind: 'ui', data } : null;
+    case 'usage':
+      return isUsage(data) ? { ...envelope, kind: 'usage', data } : null;
     case 'tool_start':
       return isToolStart(data) ? { ...envelope, kind: 'tool_start', data } : null;
     case 'tool_end':
@@ -900,7 +1219,10 @@ function parseEvent(value: unknown): StudioEvent | null {
     case 'plan':
       return isPlan(data.items) ? { ...envelope, kind: 'plan', data: { items: data.items } } : null;
     case 'library':
-      return isAsset(data.asset) ? { ...envelope, kind: 'library', data: { asset: data.asset } } : null;
+      if (isAsset(data.asset)) {
+        return { ...envelope, kind: 'library', data: { asset: data.asset } };
+      }
+      return isStrings(data.sections) ? { ...envelope, kind: 'library', data: { sections: data.sections } } : null;
     case 'engine':
       return isSession(data.engine) ? { ...envelope, kind: 'engine', data: { engine: data.engine } } : null;
     case 'screen':
@@ -991,6 +1313,44 @@ const isGitHubRepo: Guard<GitHubRepo> = (value): value is GitHubRepo =>
   isBoolean(value.private) &&
   isWebUrl(value.html_url) &&
   isString(value.updated_at);
+
+/** Checks a value into a {@link Connector}. */
+const isConnector: Guard<Connector> = (value): value is Connector =>
+  isRecord(value) &&
+  isString(value.id) &&
+  isString(value.name) &&
+  oneOf(CONNECTOR_KINDS)(value.kind) &&
+  oneOf(CONNECTOR_STATES)(value.state) &&
+  isString(value.detail);
+
+/** Checks a value into an {@link AgentInfo}. */
+const isAgentInfo: Guard<AgentInfo> = (value): value is AgentInfo =>
+  isRecord(value) && isString(value.name) && isString(value.title) && isString(value.description);
+
+/** Checks a value into a {@link SkillInfo}. */
+const isSkillInfo: Guard<SkillInfo> = (value): value is SkillInfo =>
+  isRecord(value) && isString(value.name) && isString(value.description);
+
+/**
+ * Reads a project's environment.
+ *
+ * A connector of a kind or a state this page does not know is left out, as an event of an unknown
+ * kind is, so a newer control plane adds one without emptying the panel of an older page.
+ *
+ * @param body The response body.
+ * @returns The environment.
+ * @throws ApiError With status 502 when the body is not an environment.
+ */
+function parseEnvironment(body: unknown): Environment {
+  if (!isRecord(body) || !Array.isArray(body.connectors)) {
+    throw new ApiError(502, 'The control plane sent a response this page does not understand.');
+  }
+  return {
+    connectors: body.connectors.filter(isConnector),
+    agents: field(body, 'agents', arrayOf(isAgentInfo)),
+    skills: field(body, 'skills', arrayOf(isSkillInfo)),
+  };
+}
 
 /**
  * Checks a whole response body into a type.
@@ -1174,11 +1534,22 @@ export function createControlPlane(baseUrl: string, accessToken: () => Promise<s
       ),
     listEvents: async (projectId, after) =>
       parseEventPage(await request('GET', projectPath(projectId, `/events?after=${after}`))),
-    sendMessage: async (projectId, text) =>
-      field(await request('POST', projectPath(projectId, '/messages'), { text }), 'turn_id', isTurnId),
+    sendMessage: async (projectId, text, ui) =>
+      field(
+        await request('POST', projectPath(projectId, '/messages'), ui === undefined ? { text } : { text, ui }),
+        'turn_id',
+        isTurnId,
+      ),
     stopTurn: async (projectId) => {
       await request('POST', projectPath(projectId, '/stop'));
     },
+    approve: async (projectId, approvalId, decision) =>
+      field(
+        await request('POST', projectPath(projectId, `/approvals/${encodeURIComponent(approvalId)}`), { decision }),
+        'recorded',
+        isBoolean,
+      ),
+    environment: async (projectId) => parseEnvironment(await request('GET', projectPath(projectId, '/environment'))),
     getLibrary: async (projectId) => expect(await request('GET', projectPath(projectId, '/library')), isLibrary),
     createAsset: async (projectId, asset) =>
       field(await request('POST', projectPath(projectId, '/library'), asset), 'asset', isAsset),

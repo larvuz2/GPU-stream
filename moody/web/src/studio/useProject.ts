@@ -17,8 +17,10 @@
  *
  * The first page replays the whole log, which the conversation is folded from. Events that arrive
  * after it are live, and also update what they describe: a `library` event puts its asset in the
- * library, an `engine` event re-reads the engines, and the end of a turn marks the project as
- * just changed and re-reads the balance the turn may have spent. The plan is the latest `plan`
+ * library or sets the library's sections, an `engine` event re-reads the engines, an approval
+ * answered "always" re-reads the project, whose permissions it changed, and the end of a turn
+ * marks the project as just changed, re-reads the balance the turn may have spent, and re-reads
+ * the environment, whose connectors it may have changed. The plan is the latest `plan`
  * event's, or the project's own before any. The latest `screen` event, live or replayed, is what
  * the agent last put on the screen ({@link ScreenRequest}), which the workspace shows until the
  * person picks something else, and a live one is also handed to the workspace as it arrives, so it
@@ -35,11 +37,14 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ALWAYS,
   isMissing,
   TURN_RUNNING,
   ApiError,
   type Asset,
+  type ApprovalDecision,
   type ControlPlane,
+  type Environment,
   type LaunchRequest,
   type Library,
   type NewAsset,
@@ -48,6 +53,7 @@ import {
   type Session,
   type StudioEvent,
   type TurnId,
+  type UiLock,
   type UnrealProject,
 } from '../lib/api';
 import { connected, type Availability } from './useAccount';
@@ -71,6 +77,8 @@ export interface PendingMessage {
   turn: TurnId;
   /** The message. */
   text: string;
+  /** The interactive card it locks in, for a message a card's lock-in button sent. */
+  ui?: UiLock;
   /** When it was sent, in milliseconds since the epoch. */
   at: number;
 }
@@ -97,10 +105,19 @@ export interface ProjectData {
   running: boolean;
   /** The message just sent, until the log has it. */
   pending: PendingMessage | null;
-  /** Sends a message, starting a turn. Rejects with an `ApiError`, 409 while a turn runs. */
-  send: (text: string) => Promise<void>;
+  /**
+   * Sends a message, starting a turn; with `ui`, the message locks in an interactive card.
+   * Rejects with an `ApiError`, 409 while a turn runs.
+   */
+  send: (text: string, ui?: UiLock) => Promise<void>;
   /** Stops the running turn. Rejects with an `ApiError`. */
   stop: () => Promise<void>;
+  /** Answers an approval the running turn waits on. Rejects with an `ApiError`. */
+  approve: (approvalId: string, decision: ApprovalDecision) => Promise<void>;
+  /** What the agent works with (connectors, subagents, skills), or `null` until it has loaded. */
+  environment: Environment | null;
+  /** How far the environment has come. */
+  environmentStatus: Availability;
   /** The agent's plan. */
   plan: PlanItem[];
   /** The project's engines, as last read. */
@@ -193,6 +210,8 @@ export function useProject(client: ControlPlane | null, project: Project, callba
   const [library, setLibrary] = useState<Library | null>(null);
   const [libraryStatus, setLibraryStatus] = useState<Availability>(client === null ? 'offline' : 'loading');
   const [screenRequest, setScreenRequest] = useState<ScreenRequest | null>(null);
+  const [environment, setEnvironment] = useState<Environment | null>(null);
+  const [environmentStatus, setEnvironmentStatus] = useState<Availability>(client === null ? 'offline' : 'loading');
 
   const cursor = useRef(0);
   const pendingRef = useRef<PendingMessage | null>(null);
@@ -215,29 +234,58 @@ export function useProject(client: ControlPlane | null, project: Project, callba
     }
   }, [client, projectId]);
 
+  const refreshEnvironment = useCallback(async (): Promise<void> => {
+    if (client === null) {
+      return;
+    }
+    try {
+      const read = await client.environment(projectId);
+      setEnvironment(read);
+      setEnvironmentStatus('ready');
+    } catch (failure) {
+      // What was read before stays on screen; only a first read that fails says so.
+      setEnvironmentStatus((previous) => (isMissing(failure) ? 'missing' : previous === 'ready' ? previous : 'failed'));
+    }
+  }, [client, projectId]);
+
   /** Applies what live events describe to the data they describe. */
   const applyLive = useCallback(
     (live: StudioEvent[]): void => {
       let reread = false;
       for (const event of live) {
         if (event.kind === 'library') {
-          const { asset } = event.data;
-          setLibrary((previous) =>
-            previous === null ? previous : { ...previous, assets: upsert(previous.assets, asset) },
-          );
+          const { data } = event;
+          setLibrary((previous) => {
+            if (previous === null) {
+              return previous;
+            }
+            return 'asset' in data
+              ? { ...previous, assets: upsert(previous.assets, data.asset) }
+              : { ...previous, sections: data.sections };
+          });
         } else if (event.kind === 'engine') {
           setEngines((previous) => upsert(previous, withStreams(previous, event.data.engine)));
           reread = true;
+        } else if (event.kind === 'approval_result' && event.data.decision === ALWAYS) {
+          client
+            ?.getProject(projectId)
+            .then((fresh) => {
+              latest.current.onProject(fresh);
+            })
+            .catch(() => {
+              // The Environment panel lists the permission once the project is next read.
+            });
         } else if (event.kind === 'turn_end') {
           latest.current.onTouched();
           latest.current.onSpent();
+          void refreshEnvironment();
         }
       }
       if (reread) {
         void refreshEngines();
       }
     },
-    [refreshEngines],
+    [client, projectId, refreshEngines, refreshEnvironment],
   );
 
   useEffect(() => {
@@ -395,6 +443,19 @@ export function useProject(client: ControlPlane | null, project: Project, callba
       .catch(() => {
         // The list's copy of the project stands in until the next change returns a fresh one.
       });
+    client
+      .environment(projectId)
+      .then((read) => {
+        if (current) {
+          setEnvironment(read);
+          setEnvironmentStatus('ready');
+        }
+      })
+      .catch((failure: unknown) => {
+        if (current) {
+          setEnvironmentStatus(isMissing(failure) ? 'missing' : 'failed');
+        }
+      });
     return () => {
       current = false;
     };
@@ -419,13 +480,25 @@ export function useProject(client: ControlPlane | null, project: Project, callba
   }, [comingUp, refreshEngines]);
 
   const send = useCallback(
-    async (text: string): Promise<void> => {
-      const turn = await connected(client).sendMessage(projectId, text);
-      const message = { turn, text, at: Date.now() };
+    async (text: string, ui?: UiLock): Promise<void> => {
+      const turn = await connected(client).sendMessage(projectId, text, ui);
+      const message: PendingMessage = { turn, text, at: Date.now(), ...(ui === undefined ? {} : { ui }) };
       pendingRef.current = message;
       setPending(message);
       latest.current.onTouched();
       wake.current();
+    },
+    [client, projectId],
+  );
+
+  const approve = useCallback(
+    async (approvalId: string, decision: ApprovalDecision): Promise<void> => {
+      try {
+        await connected(client).approve(projectId, approvalId, decision);
+      } finally {
+        // Recorded or not, the log says how the approval ended.
+        wake.current();
+      }
     },
     [client, projectId],
   );
@@ -547,6 +620,9 @@ export function useProject(client: ControlPlane | null, project: Project, callba
     pending,
     send,
     stop,
+    approve,
+    environment,
+    environmentStatus,
     plan,
     engines,
     enginesStatus,
