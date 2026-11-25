@@ -6,7 +6,7 @@
 
 /**
  * The studio's left sidebar: the brand, "New project", search, the **Pinned** and **Recent**
- * projects, and the account with its credits at the foot.
+ * projects, and the account with its credits and the limits of its turns at the foot.
  *
  * Each project row has a menu to pin, rename, or delete it; a rename is edited in the row itself,
  * and a delete asks first. Search narrows both lists by name, discipline, or format. Folded, the
@@ -18,6 +18,7 @@ import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   Coins,
   Ellipsis,
+  Gauge,
   KeyRound,
   LogOut,
   PanelLeftClose,
@@ -41,7 +42,7 @@ import { useNow } from './hooks';
 import { Menu } from './Menu';
 import { ErrorNotice } from './Notice';
 import { DisciplineIcon } from '../components/DisciplineIcon';
-import { ago, disciplineName } from './present';
+import { ago, disciplineName, limitText } from './present';
 import type { Projects } from './useAccount';
 
 /** Props of {@link Sidebar}. */
@@ -68,6 +69,8 @@ interface SidebarProps {
   onAddCredits: () => void;
   /** Opens the Connect Claude dialog. */
   onConnectClaude: () => void;
+  /** Opens the dialog of a turn's limits. */
+  onLimits: () => void;
   /** Signs the person out. */
   onSignOut: () => void;
   /** Whether the region is hidden behind another tab on a narrow screen. */
@@ -558,12 +561,14 @@ interface AccountMenuProps extends SidebarProps {
 
 /**
  * Renders the account button at the sidebar's foot and the menu it opens: the balance, adding
- * credits, Connect Claude, and signing out.
+ * credits, a turn's limits where the control plane has them (with the two that apply beside the
+ * item), Connect Claude, and signing out.
  *
  * @param props The component's props.
  * @returns The account button and its menu.
  */
-function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onSignOut }: AccountMenuProps) {
+function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onLimits, onSignOut }: AccountMenuProps) {
+  const limits = me?.limits;
   const initial = email.charAt(0) || '?';
   const balance = me === null ? '—' : creditCount(me.credits);
   const avatar = (
@@ -622,6 +627,15 @@ function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onSign
               Add
             </button>
           </div>
+          {limits === undefined ? null : (
+            <button type="button" role="menuitem" className="menu-item" onClick={onLimits}>
+              <Gauge aria-hidden="true" />
+              <span className="flex-none">Turn limits</span>
+              <span className="min-w-0 flex-1 truncate text-right text-xs text-faint tabular-nums">
+                {limitText('budget', limits.turn_budget_usd)} · {limitText('steps', limits.turn_limit)}
+              </span>
+            </button>
+          )}
           <button type="button" role="menuitem" className="menu-item" onClick={onConnectClaude}>
             <KeyRound aria-hidden="true" />
             Connect Claude

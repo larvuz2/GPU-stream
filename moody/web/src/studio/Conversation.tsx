@@ -10,15 +10,18 @@
  * The person's messages sit on the right; the agent's entries share a gutter on the left, its mark
  * beside the first of each run: its prose, a compact card per tool call that unfolds to what the
  * call came to (`ToolCard.tsx`), a block of cards for the subagents it handed work to
- * (`AgentsBlock.tsx`), its questions as buttons that answer by sending the choice, and the media
- * its tools produced, inline. A change the agent made to the plan, the library, or an engine reads
+ * (`AgentsBlock.tsx`), its questions as buttons that answer by sending the choice, the one the
+ * agent recommends marked as such, and the media its tools produced, inline. A change the agent made to the plan, the library, or an engine reads
  * as a line that leads to it. A message just sent shows at once, dimmed until the log has it.
  *
  * What the agent reasons is a quiet note that unfolds (`ThinkingNote.tsx`), with the eyes beside
  * it in the gutter while it is being written, and its answer grows while it is written, ending
  * in a caret until it is whole. Before a tool that costs or changes something it asks, as a card
  * with three answers (`ApprovalCard.tsx`), and a turn ends on one small line of what it took:
- * time, tokens, cost, and subagents.
+ * time, tokens, cost, and subagents. A turn that stopped at one of the person's own limits (an
+ * `error` that names the `limit`) is no failure: its line is a caution, not an error, and offers
+ * the dialog where that limit is set, beside the message where both fit on a line and under it on
+ * a phone.
  *
  * An interactive card (`ui`) is drawn by `ui/UiCard.tsx`. This module decides when it can be
  * answered (it is the newest thing the agent showed, no turn is running, and it is not locked
@@ -39,9 +42,9 @@
  * The view follows the newest entry while the person is at the bottom, and stays where they are
  * when they have scrolled up to read, offering a way back down instead. It also stays where it is
  * when the person unfolds something (a subagent's card, a tool call): what they opened grows under
- * their pointer rather than being pushed out of view by a jump to the end. An approval is the
- * exception: the agent's turn waits on it, so it comes into view when it arrives, wherever the
- * person is reading.
+ * their pointer rather than being pushed out of view by a jump to the end. Two things bring the
+ * end back into view wherever the person is reading: an approval, since the agent's turn waits on
+ * it, and a message the person sends, since it and the answer to it are what they look for next.
  *
  * Another part of the page can lead to an entry (`reveal`, from a file under the library's
  * Process tab): the entry is unfolded where it was folded away, scrolled to, and lit for a moment.
@@ -55,7 +58,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { ArrowDown, Check, ChevronRight, CircleAlert, ListChecks, Lock, MonitorPlay } from 'lucide-react';
 import { MoodyFace } from '../components/Moody';
 import { MoodyEyes } from '../components/MoodyEyes';
-import type { ApprovalDecision, Asset, PlanItem, Project, Session, UiData } from '../lib/api';
+import type { ApprovalDecision, Asset, PlanItem, Project, Session, TurnLimit, UiData } from '../lib/api';
 import { findApp, findTier } from '../lib/catalog';
 import { cx } from '../lib/cx';
 import { price, spanText, tokenCount } from '../lib/format';
@@ -74,6 +77,7 @@ import {
   agentActivity,
   foldPreviews,
   openQuestion,
+  sameAnswer,
   type Activity,
   type Locked,
   type Reveal,
@@ -118,6 +122,8 @@ interface ConversationProps {
   onChoose: (text: string) => Promise<void>;
   /** Answers an approval the running turn waits on. */
   onApprove: (approvalId: string, decision: ApprovalDecision) => Promise<void>;
+  /** Opens the dialog of a turn's limits on the one a turn reached, or `null` where there are none to set. */
+  onLimits: ((reached: TurnLimit) => void) | null;
   /** Locks an interactive card in with its state, as the person's next message. */
   onLock: (ui: UiData, value: unknown) => Promise<void>;
   /** Puts a suggestion in the composer. */
@@ -158,6 +164,14 @@ export function Conversation(props: ConversationProps) {
     setShownWaiting(waiting);
     if (waiting !== null) {
       // Following again brings the conversation's end, where the approval is, into view.
+      setFollowing(true);
+    }
+  }
+  const sending = data.pending !== null;
+  const [wasSending, setWasSending] = useState(false);
+  if (sending !== wasSending) {
+    setWasSending(sending);
+    if (sending) {
       setFollowing(true);
     }
   }
@@ -538,6 +552,7 @@ function Entry({
   onShowPlan,
   onChoose,
   onApprove,
+  onLimits,
   onLock,
   reveal,
 }: EntryProps) {
@@ -614,6 +629,7 @@ function Entry({
           <AskCard
             question={item.question}
             options={item.options}
+            recommended={item.recommended}
             answer={item.answer}
             live={open && canSend && !data.running}
             onChoose={onChoose}
@@ -639,12 +655,33 @@ function Entry({
       return <LibraryLine asset={item.asset} onOpenAsset={onOpenAsset} />;
     case 'engine':
       return <EngineLine engine={item.engine} onShowEngine={onShowEngine} />;
-    case 'error':
-      return (
+    case 'error': {
+      const { limit } = item;
+      return limit === null ? (
         <li className="pl-10">
           <Notice tone="bad">{item.message}</Notice>
         </li>
+      ) : (
+        <li className="pl-10" data-limit={limit}>
+          <Notice tone="warn">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+              <span className="min-w-56 flex-1">{item.message}</span>
+              {onLimits === null ? null : (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm -my-1 flex-none"
+                  onClick={() => {
+                    onLimits(limit);
+                  }}
+                >
+                  Change limits
+                </button>
+              )}
+            </div>
+          </Notice>
+        </li>
       );
+    }
   }
 }
 
@@ -691,6 +728,8 @@ interface AskCardProps {
   question: string;
   /** The answers offered. */
   options: string[];
+  /** The answer the agent would give, one of the options, or `null`. */
+  recommended: string | null;
   /** The person's answer, once given. */
   answer: string | null;
   /** Whether the choices can be sent now. */
@@ -702,10 +741,16 @@ interface AskCardProps {
 /**
  * Renders the agent's question with its answers as buttons.
  *
+ * The option the agent would choose says so after its text, as a quiet "(recommended)" in the
+ * agent's lavender: it is the agent's word, not an action, so it never takes the lime of what the
+ * person does, and it stays on the option once the question is answered, whichever answer was
+ * given. Agreeing is one click on that option, or Enter in the empty composer (`Composer.tsx`),
+ * which the line under the options says while the question is open.
+ *
  * @param props The component's props.
  * @returns The card.
  */
-function AskCard({ question, options, answer, live, onChoose }: AskCardProps) {
+function AskCard({ question, options, recommended, answer, live, onChoose }: AskCardProps) {
   const [sending, setSending] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
 
@@ -733,13 +778,14 @@ function AskCard({ question, options, answer, live, onChoose }: AskCardProps) {
       <p className="mt-2 font-medium text-fg">{question}</p>
       <ul className="mt-3 grid grid-cols-1 gap-2">
         {options.map((option, index) => {
-          const chosen = answered && answer.trim().toLowerCase() === option.trim().toLowerCase();
+          const chosen = answered && sameAnswer(option, answer);
           return (
             <li key={option}>
               <button
                 type="button"
                 className="ask-option"
                 data-chosen={answered ? chosen : undefined}
+                data-recommended={option === recommended ? true : undefined}
                 disabled={!live || answered || sending !== null}
                 onClick={() => {
                   void choose(option);
@@ -748,14 +794,23 @@ function AskCard({ question, options, answer, live, onChoose }: AskCardProps) {
                 <span className="ask-key" aria-hidden="true">
                   {chosen ? <Check className="size-3 text-fg" /> : index + 1}
                 </span>
-                <span className="min-w-0 flex-1">{option}</span>
+                <span className="min-w-0 flex-1">
+                  {option}
+                  {option === recommended ? <span className="ask-recommended"> (recommended)</span> : null}
+                </span>
                 {sending === option ? <span className="spinner size-3.5" aria-hidden="true" /> : null}
               </button>
             </li>
           );
         })}
       </ul>
-      {answered || !live ? null : <p className="mt-3 text-xs text-faint">Or answer in your own words below.</p>}
+      {answered || !live ? null : (
+        <p className="mt-3 text-xs text-faint">
+          {recommended === null
+            ? 'Or answer in your own words below.'
+            : 'Press Enter in the empty message box to go with the recommendation, or answer in your own words.'}
+        </p>
+      )}
       {error === null ? null : (
         <div className="mt-3">
           <ErrorNotice error={error} />

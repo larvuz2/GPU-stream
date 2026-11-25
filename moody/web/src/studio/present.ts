@@ -6,12 +6,13 @@
 
 /**
  * How the studio presents what the catalog and the control plane name: a discipline's name, an
- * app's status, the plan's progress, how long ago something happened, what an interactive card
- * was locked in with, and opening a stream in a new tab.
+ * app's status, the plan's progress, a limit of a turn, how long ago something happened, and
+ * opening a stream in a new tab.
  * @module
  */
-import type { PlanItem } from '../lib/api';
+import type { PlanItem, TurnLimit } from '../lib/api';
 import { brand, findDiscipline, isOwnLicense, ownLicenseLabel, type CatalogApp } from '../lib/catalog';
+import { creditCount, usd } from '../lib/format';
 
 /**
  * The name of a discipline.
@@ -64,6 +65,17 @@ export function appStatusLabel(app: CatalogApp): string {
  */
 export function planProgress(items: PlanItem[]): string | undefined {
   return items.length === 0 ? undefined : `${items.filter((item) => item.status === 'done').length} of ${items.length}`;
+}
+
+/**
+ * A limit of a turn, as a person reads it.
+ *
+ * @param limit Which limit it is.
+ * @param value Its value.
+ * @returns Text such as `$15` or `200 steps`.
+ */
+export function limitText(limit: TurnLimit, value: number): string {
+  return limit === 'budget' ? usd(value) : `${creditCount(value)} ${value === 1 ? 'step' : 'steps'}`;
 }
 
 const MINUTE = 60_000;

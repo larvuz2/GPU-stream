@@ -19,6 +19,9 @@
  * here starts a turn whose events arrive over a few seconds, under the studio's own polling, and
  * an engine started here queues, starts, and runs. The images are the site's own artwork.
  *
+ * Every question the demo's agents ask names the answer they would give (`recommended`), as the
+ * agent on Anthropic's loop does.
+ *
  * The film's agent shows its work before it asks: four previews of every kind a card takes (a
  * file, a frame, a before and after pair of a grade, and a six-second animatic), one more than a
  * turn keeps in view, so the earliest is folded. A third project, Lighthouse theme, is a score in
@@ -47,9 +50,14 @@
  * server with no integrations configured, `empty` for an account with no projects, `legacy` for a
  * control plane from before the studio, which answers its routes with 404, `no-epic` for an
  * Epic connection whose GitHub account is not linked to Epic, where opening the game in Unreal
- * answers with the steps that link it, and `movie` for a new film that starts from its first
+ * answers with the steps that link it, `movie` for a new film that starts from its first
  * message with no engine, which plays the agent thinking, asking, delegating to subagents, and
- * asking before it starts one (`demoMovie.ts`).
+ * asking before it starts one (`demoMovie.ts`), and `limit` for that film further on, on an
+ * account that set its spend for a turn low, where a long job has stopped at it.
+ *
+ * The account has the limits of a turn as settings ({@link DEFAULT_LIMITS}, {@link MAX_LIMITS}),
+ * which `updateMe` changes and refuses as the control plane does, and which the film's long job
+ * keeps to.
  * @module
  */
 import {
@@ -66,6 +74,7 @@ import {
   type GitHubRepo,
   type GitHubStatus,
   type Health,
+  type Limits,
   type Media,
   type Me,
   type PlanItem,
@@ -75,9 +84,11 @@ import {
   type SkillInfo,
   type StudioEvent,
   type TurnId,
+  type TurnLimits,
   type UnrealProject,
 } from '../lib/api';
 import { catalog, findApp, findDiscipline } from '../lib/catalog';
+import { creditCount, usd } from '../lib/format';
 import { appImage } from '../lib/media';
 import {
   asset,
@@ -93,10 +104,27 @@ import {
   type Script,
   type Simulation,
 } from './demoKit';
-import { FILM_DISCIPLINES, MOVIE_AGENTS, MOVIE_PROJECT, movieOpening, movieProject, movieTurn } from './demoMovie';
+import {
+  FILM_DISCIPLINES,
+  MOVIE_AGENTS,
+  MOVIE_PROJECT,
+  movieOpening,
+  movieProject,
+  movieSoFar,
+  movieTurn,
+} from './demoMovie';
 
 /** The address the demo's account is shown under. */
 export const DEMO_EMAIL = 'you@example.com';
+
+/** What a turn may spend and take on the demo's deployment, for an account that set neither. */
+const DEFAULT_LIMITS: TurnLimits = { turn_budget_usd: 15, turn_limit: 200 };
+
+/** The demo deployment's ceilings, which no account sets a limit above. */
+const MAX_LIMITS: TurnLimits = { turn_budget_usd: 100, turn_limit: 1000 };
+
+/** The spend for a turn the account of the `limit` scene set itself, low enough for a long job to reach. */
+const LOW_BUDGET_USD = 1;
 
 /** The status a refusal of the demo carries: a feature it does not have. */
 const NOT_CONFIGURED = 503;
@@ -509,6 +537,7 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
         'Wide on the violet flats at dusk, then cut to the city',
         'Title card over the beacon’s last glow',
       ],
+      recommended: 'Cold open on Pip in the workshop as the lights die',
     },
   });
   add({ turn_id: t2, kind: 'turn_end', data: {} }, SECOND);
@@ -594,7 +623,11 @@ function gameEvents(start: number, cloned: number, engine: Session): Scheduled[]
     later(6, {
       turn_id: second,
       kind: 'ask',
-      data: { question: 'Shall I open EmberRidge in Unreal?', options: ['Open it in Unreal', 'Not yet'] },
+      data: {
+        question: 'Shall I open EmberRidge in Unreal?',
+        options: ['Open it in Unreal', 'Not yet'],
+        recommended: 'Open it in Unreal',
+      },
     }),
     later(6.5, { turn_id: second, kind: 'turn_end', data: {} }),
   ];
@@ -771,6 +804,7 @@ function scoreEvents(start: number, engine: Session): Scheduled[] {
           'A second, brighter section in C major',
           'Keep it piano alone and let it breathe',
         ],
+        recommended: 'Repeat it with strings under the piano',
       },
     }),
     step(87, { turn_id: turn, kind: 'turn_end', data: {} }),
@@ -920,7 +954,8 @@ const ENGINE_SKILLS: Readonly<Record<string, string | undefined>> = {
  * @param turn The turn it starts.
  * @param start When the turn starts.
  * @param epicLinked Whether the demo's Epic connection is linked to Epic.
- * @param said How many messages the person had sent in the project before this one.
+ * @param history What was written in the project before this message.
+ * @param limits The account's limits for a turn.
  * @returns The turn.
  */
 function reply(
@@ -929,11 +964,12 @@ function reply(
   turn: TurnId,
   start: number,
   epicLinked: boolean,
-  said: number,
+  history: readonly Scheduled[],
+  limits: TurnLimits,
 ): Script {
   const at = (seconds: number): number => start + seconds * SECOND;
   if (project.id === MOVIE_PROJECT) {
-    return movieTurn(said, turn, start);
+    return movieTurn(history, turn, start, limits);
   }
   if (project.id === 'demo-game' && /\bopen\b.*\bunreal\b/i.test(text)) {
     return { events: openInUnreal(turn, at, epicLinked) };
@@ -1020,7 +1056,8 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   const legacy = scene === 'legacy';
   const offline = scene === 'offline';
   const epicLinked = scene !== 'no-epic';
-  const movie = scene === 'movie';
+  const atLimit = scene === 'limit';
+  const movie = scene === 'movie' || atLimit;
   let projects = scene === 'empty' ? [] : [...(movie ? [movieProject(opened)] : []), ...demoProjects(opened)];
   const libraries = new Map<string, Asset[]>([['demo-film', filmLibrary(opened)]]);
   const filmSimulation: Simulation = {
@@ -1085,7 +1122,32 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   ];
   let counter = 100;
   let reads = 0;
-  const me: Me = { id: 'demo-user', email: DEMO_EMAIL, credits: 412, max_sessions: 3 };
+  /** What the account set of a turn's limits itself. */
+  let own: Limits['own'] = { turn_budget_usd: atLimit ? LOW_BUDGET_USD : null, turn_limit: null };
+  /**
+   * The account's limits for a turn: what it set, and the deployment's default where it set nothing.
+   *
+   * @returns The limits, as the control plane reports them.
+   */
+  const limits = (): Limits => ({
+    turn_budget_usd: own.turn_budget_usd ?? DEFAULT_LIMITS.turn_budget_usd,
+    turn_limit: own.turn_limit ?? DEFAULT_LIMITS.turn_limit,
+    own,
+    default: DEFAULT_LIMITS,
+    max: MAX_LIMITS,
+  });
+  /**
+   * The account, with its limits unless the control plane is one from before the studio.
+   *
+   * @returns The account.
+   */
+  const me = (): Me => ({
+    id: 'demo-user',
+    email: DEMO_EMAIL,
+    credits: 412,
+    max_sessions: 3,
+    ...(legacy ? {} : { limits: limits() }),
+  });
   const health: Health = {
     ok: true,
     agent: !offline,
@@ -1262,7 +1324,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   }
 
   if (movie) {
-    play(MOVIE_PROJECT, movieOpening(opened));
+    play(MOVIE_PROJECT, atLimit ? movieSoFar(opened, limits()) : movieOpening(opened));
   }
 
   /**
@@ -1329,7 +1391,33 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
 
   return {
     health: () => Promise.resolve(health),
-    me: () => Promise.resolve(me),
+    me: () => Promise.resolve(me()),
+    updateMe: (changes) =>
+      legacy
+        ? missing()
+        : soon(() => {
+            const budget = changes.turn_budget_usd;
+            const steps = changes.turn_limit;
+            for (const value of [budget, steps]) {
+              if (typeof value === 'number' && !(value > 0)) {
+                throw new ApiError(400, 'A limit is a positive number, or null for the default.');
+              }
+            }
+            if (typeof budget === 'number' && budget > MAX_LIMITS.turn_budget_usd) {
+              throw new ApiError(400, `A turn may spend at most ${usd(MAX_LIMITS.turn_budget_usd)} here.`);
+            }
+            if (typeof steps === 'number' && !Number.isInteger(steps)) {
+              throw new ApiError(400, 'A turn’s steps are a whole number.');
+            }
+            if (typeof steps === 'number' && steps > MAX_LIMITS.turn_limit) {
+              throw new ApiError(400, `A turn may take at most ${creditCount(MAX_LIMITS.turn_limit)} steps here.`);
+            }
+            own = {
+              turn_budget_usd: budget === undefined ? own.turn_budget_usd : budget,
+              turn_limit: steps === undefined ? own.turn_limit : steps,
+            };
+            return me();
+          }),
     sessionLink: () => Promise.reject(new ApiError(NOT_CONFIGURED, 'The demo has no stream to open.')),
     stopSession: (id) =>
       soon(() => {
@@ -1466,12 +1554,11 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
         }
         counter += 1;
         const turn = `turn-${counter}`;
-        const said = entries.filter((scheduled) => scheduled.event.kind === 'user_message').length;
         const message: Scheduled = {
           at: now,
           event: { turn_id: turn, kind: 'user_message', data: ui === undefined ? { text } : { text, ui } },
         };
-        const answer = reply(project, text, turn, now, epicLinked, said);
+        const answer = reply(project, text, turn, now, epicLinked, entries, limits());
         play(projectId, { ...answer, events: [message, ...answer.events] });
         change(projectId, { updated_at: new Date(now).toISOString() });
         return turn;
