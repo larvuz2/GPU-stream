@@ -230,6 +230,8 @@
       "props": {
         "id": { "kind": "id" },
         "src": { "kind": "media", "kinds": ["model"], "required": true },
+        "azimuth": { "kind": "number", "min": -180, "max": 180, "default": 35, "doc": "Where the view starts: degrees around the model." },
+        "elevation": { "kind": "number", "min": -85, "max": 85, "default": 15, "doc": "And degrees above it." },
         "finish": { "kind": "enum", "values": "finishes", "default": "original", "bind": true },
         "color": { "kind": "color", "bind": true, "doc": "The finish's color; the original finish ignores it." },
         "spin": { "kind": "boolean", "default": false, "bind": true, "doc": "Turn slowly until the person takes over." }
@@ -337,7 +339,7 @@
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
-        "value": { "kind": "color" },
+        "value": { "kind": "color", "default": "#808080" },
         "suggest": { "kind": "list", "of": { "kind": "color" } }
       }
     },

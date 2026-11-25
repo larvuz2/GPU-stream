@@ -758,7 +758,10 @@ def test_the_tools_reference_is_written_from_the_catalog():
         "- slider(id*, label, min=0, max=100, step=1, value, unit): A number the person drags. Answer: a number."
         in reference
     )
-    assert '- model(id, src*, finish~="original", color~, spin~=false)' in reference
+    assert (
+        '- model(id, src*, azimuth=35, elevation=15, finish~="original", color~, spin~=false)'
+        in reference
+    )
     assert "- option {value*, label, image, note}" in reference
     for name, spec in CATALOG.adjustments.items():
         assert f"{name} {spec['min']}..{spec['max']}" in reference
