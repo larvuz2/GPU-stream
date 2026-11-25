@@ -32,9 +32,9 @@ do: `no such layer 99999; the document's layers are 17 "Date", 16 "Credits", …
 right now: no document open`.
 
 **What PhotoCraft does not tell you.** A parameter key it does not know is ignored without an
-error (`{"opacty": 0.3}` answered `null` and changed nothing), and so is a blend mode it does
-not know. A font family that is not installed is accepted and drawn in another face. Read back
-what you set.
+error (`{"opacty": 0.3}` answered `null` and the opacity stayed where it was). A blend mode it
+does not know is stored as you wrote it (`"blend": "Glow"` read back as `Glow`), and a font
+family that is not installed is accepted and drawn in another face. Read back what you set.
 
 **Files.** Paths are relative to the project folder (`exports/poster.png`), or absolute inside
 it. Anything outside is refused (`parent traversal is not allowed`), and so is every `file.*`
@@ -75,7 +75,7 @@ Ids follow the menus a photo editor has: `filter.blur.gaussianBlur`,
   point is a pixel.
 - **Bounds come in two shapes.** `layer.list` and `shape.create` answer `[x, y, width, height]`;
   `type.create`, `type.info`, and `edit.transform`'s `rect` answer `[x0, y0, x1, y1]`.
-- **Opacity has three scales.** `layer.setProps`, `layer.new.layer`, an adjustment layer's
+- **Opacity has two scales.** `layer.setProps`, `layer.new.layer`, an adjustment layer's
   `opacity`, and brush strokes take 0 to 1. Layer styles, `edit.fill`, `layer.new.group`, and
   the retouching tools take 0 to 100. A value on the wrong scale is refused for `layer.setProps`
   and may simply be wrong elsewhere.
@@ -87,8 +87,10 @@ Ids follow the menus a photo editor has: `filter.blur.gaussianBlur`,
   name the layer and leave the person's selection alone.
 - **Documents** by zero-based `index` from `session.inspect`. A newly opened or duplicated
   document becomes the active one, and commands go to the active one.
-- **Blend modes** by their panel name: `"Multiply"`, `"Screen"`, `"Overlay"`, `"Soft Light"`
-  (also accepted as `softLight`).
+- **Blend modes** by their panel name: `"Multiply"`, `"Screen"`, `"Overlay"`, `"Soft Light"`,
+  `"Linear Light"`. `softLight` and `soft light` are taken for the same mode, and
+  `document.inspect` reads every known mode back as its panel name: a `blend` that reads back
+  any other way is not a mode.
 
 ## The recipe: a poster from a picture
 

@@ -140,8 +140,8 @@ These are rules, each with its reason. Break one only when the person asks, and 
   Background, Finish. The person will open this file after you.
 - **Decide in versions, not in memory.** Two treatments of one design are two layer comps
   (`layerComp.new`), and a risky stage starts with `history.newSnapshot`.
-- **Read back after every step.** PhotoCraft ignores a misspelled parameter and an unknown blend
-  mode without an error. `layer.list {"flat": true}` after structure changes, `type.info` after
+- **Read back after every step.** PhotoCraft takes a misspelled parameter, an unknown blend
+  mode, and a font it does not have without an error. `layer.list {"flat": true}` after structure changes, `type.info` after
   type, `document.inspect` when it matters.
 
 ## Saving and coming back
@@ -209,8 +209,9 @@ Offer the alternative; never present one of these as working.
   other file command but `app.open` and `app.save`. Open the picture as its own document, copy
   its layer across with `layer.copyToDocument`, close it (the recipe is in
   photocraft-commands.md).
-- **Linked files.** Smart objects are embedded; a changed source file does not update the
-  poster. Re-import and replace.
+- **Linked files.** The channel refuses the commands that link a smart object to a file or
+  replace its contents from one, so a smart object is an embedded copy: when the source
+  changes, bring the new file in and replace the layer.
 - **Press-ready CMYK.** The channel converts to one built-in synthetic coated CMYK profile only;
   it cannot load a printer's ICC profile, soft-proof, or change the color mode with a chosen
   profile. Deliver RGB with its profile embedded and let the printer convert (most ask for
