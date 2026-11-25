@@ -139,7 +139,7 @@ reuse it.
 Without its window, `nuke-run` runs Nuke with the interactive license, which a
 login license for one person carries where it has no render license, and
 `selkies-modal-job` runs a long command in the background, counting as use of
-the session while it runs (`lathe/hermes/gpu-studio/SKILL.md` has the
+the session while it runs (`moody/hermes/gpu-studio/SKILL.md` has the
 commands).
 
 `--workspace` keeps a session's files in one directory of the Volume, so a
@@ -262,7 +262,7 @@ launcher has no verb for it yet.
 game lives in a GitHub repository. Epic hands the Linux editor only to people
 whose GitHub account is linked to Epic, so the image `up` builds is that desktop
 without the editor; the editor is in `unreal_image(registry_secret, version)`,
-which pulls it with the user's own credential ([`lathe/UNREAL.md`](../../lathe/UNREAL.md)).
+which pulls it with the user's own credential ([`moody/UNREAL.md`](../../moody/UNREAL.md)).
 
 ```bash
 addons/modal/selkies-modal up --app unreal --name ue --gpu L4 --env SELKIES_MODAL_PROJECT=projects/capyverse
@@ -321,9 +321,9 @@ Modal Secret of that start, and the session clones it by itself.
 
 ```python
 start_session(..., application="unreal", secrets=[modal.Secret.from_dict({
-    "LATHE_GIT_REPO": "studio/capyverse", "LATHE_GIT_BRANCH": "main",
-    "LATHE_GIT_TOKEN": token,  # a GitHub App user token for that repository, 8 hours
-    "LATHE_GIT_NAME": "Dev Eloper", "LATHE_GIT_EMAIL": "dev@example.com",
+    "MOODY_GIT_REPO": "studio/capyverse", "MOODY_GIT_BRANCH": "main",
+    "MOODY_GIT_TOKEN": token,  # a GitHub App user token for that repository, 8 hours
+    "MOODY_GIT_NAME": "Dev Eloper", "MOODY_GIT_EMAIL": "dev@example.com",
 })])
 ```
 
@@ -334,8 +334,8 @@ start_session(..., application="unreal", secrets=[modal.Secret.from_dict({
   an earlier session on the workspace, is fetched, and fast-forwarded only when
   it is on that branch with no tracked file changed: local changes, local
   commits, and another branch are left as they are, and the status says so
-  ("has local changes, not updated"). The commits carry `LATHE_GIT_NAME` and
-  `LATHE_GIT_EMAIL`. The clone counts as use of the session while it runs.
+  ("has local changes, not updated"). The commits carry `MOODY_GIT_NAME` and
+  `MOODY_GIT_EMAIL`. The clone counts as use of the session while it runs.
 - **The client.** When the clone is there the client opens it, added to its
   list with no question and no "Initialize Git LFS" (Git LFS is installed
   system-wide and the clone has its hooks), and with no welcome to sign in
@@ -467,7 +467,7 @@ addons/modal/selkies-modal up --gpu L4 --env SELKIES_DESKTOP=true --env SELKIES_
 a window of it. The transport is WebSockets, the one Modal's proxy carries;
 WebRTC needs a UDP path that proxy does not offer, so Selkies' own WebRTC is
 not offered here. A WebRTC stream an application sends, such as the Unreal
-Editor's ([`lathe/UNREAL.md`](../../lathe/UNREAL.md)), leaves through a TURN
+Editor's ([`moody/UNREAL.md`](../../moody/UNREAL.md)), leaves through a TURN
 relay instead.
 
 ## A WebRTC stream

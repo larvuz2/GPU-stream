@@ -1,0 +1,39 @@
+<!doctype html>
+<!--
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+-->
+
+<!-- The landing page. The brand and live-app tokens are filled from the catalog at build time (vite.config.ts), so
+     the product's name is written in one place. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>%BRAND% — Make whatever you imagine.</title>
+    <meta
+      name="description"
+      content="One creative agent. An entire production studio. Say what you want to make, and %BRAND% builds it with you in real creative software, %LIVE_APPS% today, on cloud GPUs streamed to your browser."
+    />
+    <meta name="theme-color" content="#080808" />
+    <meta name="color-scheme" content="dark" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="%BRAND%" />
+    <meta property="og:title" content="%BRAND% — Make whatever you imagine." />
+    <meta
+      property="og:description"
+      content="One creative agent. An entire production studio. Create films, games, music and worlds with the power of cloud computing."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <p style="padding: 2rem; font-family: system-ui, sans-serif; color: #ffffff; background: #080808">
+        %BRAND% is one creative agent with an entire production studio behind it, and this page needs JavaScript to run.
+      </p>
+    </noscript>
+    <script type="module" src="/src/landing/main.tsx"></script>
+  </body>
+</html>

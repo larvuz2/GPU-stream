@@ -29,8 +29,8 @@
 #   session has one (SELKIES_MODAL_PROJECT, `selkies-modal-project`), else the
 #   workspace's `projects`. `--clone-folder` prints it, made if missing.
 # - A session started for a project linked to a GitHub repository has the
-#   repository (LATHE_GIT_REPO) and a token that reads and writes it
-#   (LATHE_GIT_TOKEN) in its environment, and clones it (clone.py). The client
+#   repository (MOODY_GIT_REPO) and a token that reads and writes it
+#   (MOODY_GIT_TOKEN) in its environment, and clones it (clone.py). The client
 #   fetches and pushes it with that token, without its own sign-in, through an
 #   `Authorization` header Git sends to that repository's address alone
 #   (`http.<url>.extraHeader`), given in the client's environment
@@ -59,15 +59,15 @@ clone_folder() {
 # addresses, with and without `.git`, to the Git configuration in the
 # environment.
 token_header() {
-  case "${LATHE_GIT_REPO-}" in
+  case "${MOODY_GIT_REPO-}" in
     */*/* | *[!A-Za-z0-9._/-]*) return 0 ;;
     ?*/?*) ;;
     *) return 0 ;;
   esac
-  [ -n "${LATHE_GIT_TOKEN-}" ] || return 0
-  header="Authorization: Basic $(printf 'x-access-token:%s' "${LATHE_GIT_TOKEN}" | base64 -w0)"
+  [ -n "${MOODY_GIT_TOKEN-}" ] || return 0
+  header="Authorization: Basic $(printf 'x-access-token:%s' "${MOODY_GIT_TOKEN}" | base64 -w0)"
   count="${GIT_CONFIG_COUNT:-0}"
-  for url in "https://github.com/${LATHE_GIT_REPO}.git" "https://github.com/${LATHE_GIT_REPO}"; do
+  for url in "https://github.com/${MOODY_GIT_REPO}.git" "https://github.com/${MOODY_GIT_REPO}"; do
     export "GIT_CONFIG_KEY_${count}=http.${url}.extraHeader" "GIT_CONFIG_VALUE_${count}=${header}"
     count=$((count + 1))
   done

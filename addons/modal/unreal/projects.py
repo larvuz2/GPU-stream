@@ -8,7 +8,7 @@
 
 A developer clones their team's repository into the workspace with the GitHub
 client, wherever they choose, so the session finds the `.uproject` files
-rather than being told where they are: Lathe's agent reads this
+rather than being told where they are: Moody's agent reads this
 (`unreal_projects` in `addons/modal/sandbox.py`) to say which project it found
 and what opening it will take. FOLDER is the workspace
 (`SELKIES_MODAL_WORKSPACE`) unless given.

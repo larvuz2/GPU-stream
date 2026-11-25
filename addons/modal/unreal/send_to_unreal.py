@@ -43,7 +43,7 @@ and the report says which: nothing listening and no editor process is the
 editor not running; nothing listening with an editor running is the web server
 off; Unreal's own refusal is shown with the setting it points at.
 
-**Where.** The endpoint is loopback only (`LATHE_UNREAL_REMOTE_CONTROL` may move
+**Where.** The endpoint is loopback only (`MOODY_UNREAL_REMOTE_CONTROL` may move
 its port, never its host): the Remote Control API has no authentication, and a
 request that runs Python is not sent anywhere else. The project folder is the
 session's, as `selkies-modal-project` (`addons/modal/craft/project.sh`) prints
@@ -71,8 +71,8 @@ from urllib.parse import urlsplit
 import bpy
 
 bl_info = {
-    "name": "Send to Unreal (Lathe)",
-    "author": "Lathe",
+    "name": "Send to Unreal (Moody)",
+    "author": "Moody",
     "version": (1, 0, 0),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar > Unreal",
@@ -81,14 +81,14 @@ bl_info = {
 }
 
 IMPORT_SCRIPT = Path(__file__).resolve().parent / "unreal_import.py"
-ENDPOINT_VARIABLE = "LATHE_UNREAL_REMOTE_CONTROL"
+ENDPOINT_VARIABLE = "MOODY_UNREAL_REMOTE_CONTROL"
 DEFAULT_ENDPOINT = "http://127.0.0.1:30010"
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 CALL_ROUTE = "/remote/object/call"
 # The class default object of UPythonScriptLibrary, in the PythonScriptPlugin module
 PYTHON_LIBRARY = "/Script/PythonScriptPlugin.Default__PythonScriptLibrary"
 EXECUTE = "ExecutePythonCommandEx"
-RESULT_PREFIX = "LATHE_BRIDGE "
+RESULT_PREFIX = "MOODY_BRIDGE "
 BRIDGE_FOLDER = "bridge"
 MANIFEST_VERSION = 1
 # How long the editor may take over an import; a rig with its actions takes a while
@@ -103,7 +103,7 @@ def endpoint() -> str:
     """The editor's Remote Control address, which has to be on this machine.
 
     Raises:
-        BridgeError: `LATHE_UNREAL_REMOTE_CONTROL` names another host.
+        BridgeError: `MOODY_UNREAL_REMOTE_CONTROL` names another host.
     """
     url = os.environ.get(ENDPOINT_VARIABLE, DEFAULT_ENDPOINT).rstrip("/")
     parts = urlsplit(url)
@@ -315,10 +315,10 @@ def send(context: bpy.types.Context, place: bool) -> str:
     return outcome(name, call_editor(url, import_command(manifest_path)))
 
 
-class LATHE_OT_send_to_unreal(bpy.types.Operator):
+class MOODY_OT_send_to_unreal(bpy.types.Operator):
     """Export the selection to the project's bridge folder and import it into the Unreal Editor"""
 
-    bl_idname = "lathe.send_to_unreal"
+    bl_idname = "moody.send_to_unreal"
     bl_label = "Send to Unreal"
     bl_options = {"REGISTER"}
 
@@ -328,14 +328,14 @@ class LATHE_OT_send_to_unreal(bpy.types.Operator):
 
     def execute(self, context: bpy.types.Context) -> set[str]:
         try:
-            self.report({"INFO"}, send(context, context.scene.lathe_unreal_place))
+            self.report({"INFO"}, send(context, context.scene.moody_unreal_place))
         except BridgeError as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
         return {"FINISHED"}
 
 
-class LATHE_PT_send_to_unreal(bpy.types.Panel):
+class MOODY_PT_send_to_unreal(bpy.types.Panel):
     """The sidebar tab that holds the button."""
 
     bl_label = "Send to Unreal"
@@ -345,17 +345,17 @@ class LATHE_PT_send_to_unreal(bpy.types.Panel):
 
     def draw(self, context: bpy.types.Context) -> None:
         layout = self.layout
-        layout.prop(context.scene, "lathe_unreal_place")
-        layout.operator(LATHE_OT_send_to_unreal.bl_idname, icon="EXPORT")
+        layout.prop(context.scene, "moody_unreal_place")
+        layout.operator(MOODY_OT_send_to_unreal.bl_idname, icon="EXPORT")
         selected = len(context.selected_objects)
         layout.label(text=f"{selected} selected" if selected else "Nothing selected")
 
 
-CLASSES = (LATHE_OT_send_to_unreal, LATHE_PT_send_to_unreal)
+CLASSES = (MOODY_OT_send_to_unreal, MOODY_PT_send_to_unreal)
 
 
 def register() -> None:
-    bpy.types.Scene.lathe_unreal_place = bpy.props.BoolProperty(
+    bpy.types.Scene.moody_unreal_place = bpy.props.BoolProperty(
         name="Place in level", description="Also place what is sent in the level open in the editor", default=False
     )
     for cls in CLASSES:
@@ -365,7 +365,7 @@ def register() -> None:
 def unregister() -> None:
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)
-    del bpy.types.Scene.lathe_unreal_place
+    del bpy.types.Scene.moody_unreal_place
 
 
 # `blender --python send_to_unreal.py` installs it for that Blender, as enabling the add-on does

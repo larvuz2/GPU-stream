@@ -360,10 +360,10 @@ def rig():
     bpy.context.view_layer.objects.active = armature
 
 def send(endpoint, place):
-    os.environ["LATHE_UNREAL_REMOTE_CONTROL"] = endpoint
-    bpy.context.scene.lathe_unreal_place = place
+    os.environ["MOODY_UNREAL_REMOTE_CONTROL"] = endpoint
+    bpy.context.scene.moody_unreal_place = place
     try:
-        return {"result": sorted(bpy.ops.lathe.send_to_unreal()), "error": None}
+        return {"result": sorted(bpy.ops.moody.send_to_unreal()), "error": None}
     except RuntimeError as error:
         return {"result": None, "error": str(error)}
 
@@ -444,7 +444,7 @@ def test_blender_sends_meshes_as_gltf_and_rigs_as_fbx_and_the_editor_imports_the
     assert not options.automated_import_should_detect_type and options.skeletal_mesh_import_data.import_morph_targets
     assert all(data.convert_scene and data.convert_scene_unit for data in (options.skeletal_mesh_import_data, options.anim_sequence_import_data))
     assert [(actor.label, list(actor.tags)) for actor in unreal.level] == [
-        ("Suzanne", ["lathe-bridge:/Game/Blender/Suzanne/Suzanne.Suzanne"])
+        ("Suzanne", ["moody-bridge:/Game/Blender/Suzanne/Suzanne.Suzanne"])
     ]
 
 

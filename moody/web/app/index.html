@@ -1,0 +1,36 @@
+<!doctype html>
+<!--
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+-->
+
+<!-- The signed-in studio, served at /app/: the projects a person and the agent make together. The
+     brand token is filled from the catalog at build time (vite.config.ts). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Studio — %BRAND%</title>
+    <meta name="description" content="The %BRAND% studio: make creative projects with one agent that opens creative engines on cloud GPUs and streams them to you." />
+    <!-- An account page has nothing for a search engine. -->
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#080808" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <!-- Shown while the entry script checks who is signed in. -->
+    <div id="root">
+      <div class="grid min-h-dvh place-items-center text-muted" role="status" aria-label="Loading">
+        <span class="spinner size-6"></span>
+      </div>
+    </div>
+    <noscript>
+      <p style="padding: 2rem; font-family: system-ui, sans-serif; color: #ffffff; background: #080808">
+        The %BRAND% studio needs JavaScript to run.
+      </p>
+    </noscript>
+    <script type="module" src="/src/studio/main.tsx"></script>
+  </body>
+</html>

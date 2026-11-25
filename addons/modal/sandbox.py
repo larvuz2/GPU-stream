@@ -406,7 +406,7 @@ def unreal_image(registry_secret: modal.Secret, version: str) -> modal.Image:
     (`ghcr.io/epicgames/unreal-engine:dev-slim-<version>`), pulled with the
     user's own registry credential, `registry_secret`, a GitHub login and token
     of an account linked to Epic: Epic's license keeps each user on their own
-    copy (`lathe/UNREAL.md`). It is the image's first layer above the base,
+    copy (`moody/UNREAL.md`). It is the image's first layer above the base,
     about 40 GB, so the desktop and the scripts over it change without fetching
     it again.
 
@@ -541,8 +541,8 @@ def start_session(
     variables the session gets too, such as the Google Drive access rclone
     reads (`RCLONE_CONFIG_...`), and `secrets` are Secret objects to the same
     end, made for this start, such as the repository an Unreal session clones
-    and the token it clones it with (`LATHE_GIT_REPO`, `LATHE_GIT_BRANCH`,
-    `LATHE_GIT_TOKEN`, `LATHE_GIT_NAME`, `LATHE_GIT_EMAIL`; `unreal/clone.py`).
+    and the token it clones it with (`MOODY_GIT_REPO`, `MOODY_GIT_BRANCH`,
+    `MOODY_GIT_TOKEN`, `MOODY_GIT_NAME`, `MOODY_GIT_EMAIL`; `unreal/clone.py`).
 
     Raises:
         modal.exception.AlreadyExistsError: A session of that name is running.

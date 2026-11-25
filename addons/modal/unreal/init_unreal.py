@@ -13,10 +13,10 @@ import unreal
 
 menus = unreal.ToolMenus.get()
 tools = menus.extend_menu("LevelEditor.MainMenu.Tools")
-tools.add_section("Lathe", "Lathe")
-entry = unreal.ToolMenuEntry(name="LatheSendToBlender", type=unreal.MultiBlockType.MENU_ENTRY)
+tools.add_section("Moody", "Moody")
+entry = unreal.ToolMenuEntry(name="MoodySendToBlender", type=unreal.MultiBlockType.MENU_ENTRY)
 entry.set_label("Send to Blender")
 entry.set_tool_tip("Export the selected actors, or the static meshes selected in the Content Browser, and import them into Blender.")
 entry.set_string_command(unreal.ToolMenuStringCommandType.PYTHON, "", "import send_to_blender; send_to_blender.menu_action()")
-tools.add_menu_entry("Lathe", entry)
+tools.add_menu_entry("Moody", entry)
 menus.refresh_all_widgets()

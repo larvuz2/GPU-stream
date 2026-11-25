@@ -23,7 +23,7 @@ import pytest
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "clone.py"
 HELPER = HERE / "git-credential.sh"
-TOKEN = "ghu_LatheTestToken0123456789abcdefABCDEF"
+TOKEN = "ghu_MoodyTestToken0123456789abcdefABCDEF"
 
 
 def git(folder: Path, *arguments: str) -> str:
@@ -56,10 +56,10 @@ class Session:
             "GIT_CONFIG_KEY_0": f"url.{self.github.as_uri()}/.insteadOf",
             "GIT_CONFIG_VALUE_0": "https://github.com/",
             "SELKIES_MODAL_UNREAL_CLONE_STATUS": str(self.status),
-            "LATHE_GIT_REPO": "studio/Capyverse",
-            "LATHE_GIT_TOKEN": TOKEN,
-            "LATHE_GIT_NAME": "Dev Eloper",
-            "LATHE_GIT_EMAIL": "dev@example.com",
+            "MOODY_GIT_REPO": "studio/Capyverse",
+            "MOODY_GIT_TOKEN": TOKEN,
+            "MOODY_GIT_NAME": "Dev Eloper",
+            "MOODY_GIT_EMAIL": "dev@example.com",
         }
 
     def upstream(self, name: str = "studio/Capyverse") -> Path:
@@ -184,7 +184,7 @@ def test_a_folder_holding_something_else_is_left_alone_and_the_clone_fails(sessi
 
 
 def test_a_repository_that_is_not_there_fails_and_leaves_no_folder(session: Session) -> None:
-    code, status = session.run(LATHE_GIT_REPO="studio/Missing")
+    code, status = session.run(MOODY_GIT_REPO="studio/Missing")
     assert code == 1
     assert status["state"] == "failed"
     assert status["detail"]
@@ -194,13 +194,13 @@ def test_a_repository_that_is_not_there_fails_and_leaves_no_folder(session: Sess
 
 def test_a_branch_that_is_not_there_fails_naming_it(session: Session) -> None:
     session.upstream()
-    code, status = session.run(LATHE_GIT_BRANCH="release")
+    code, status = session.run(MOODY_GIT_BRANCH="release")
     assert code == 1
     assert "has no branch release" in status["detail"]
 
 
 def test_a_repository_name_that_could_leave_the_folder_is_refused(session: Session) -> None:
-    code, status = session.run(LATHE_GIT_REPO="studio/..")
+    code, status = session.run(MOODY_GIT_REPO="studio/..")
     assert code == 1
     assert "is not a GitHub repository" in status["detail"]
 
@@ -209,7 +209,7 @@ def test_the_status_before_the_clone_starts_says_it_is_coming(session: Session) 
     done = subprocess.run([sys.executable, "-I", str(SCRIPT), "--status"], env=session.environment, capture_output=True, text=True)
     assert done.returncode == 0
     assert json.loads(done.stdout)["state"] == "cloning"
-    without = {key: value for key, value in session.environment.items() if key != "LATHE_GIT_REPO"}
+    without = {key: value for key, value in session.environment.items() if key != "MOODY_GIT_REPO"}
     done = subprocess.run([sys.executable, "-I", str(SCRIPT), "--status"], env=without, capture_output=True, text=True)
     assert done.returncode == 2
 
@@ -224,7 +224,7 @@ def test_the_status_before_the_clone_starts_says_it_is_coming(session: Session) 
     ],
 )
 def test_the_credential_helper_gives_the_token_to_github_over_https_only(request_lines: str, answered: bool) -> None:
-    environment = {"PATH": os.environ["PATH"], "LATHE_GIT_TOKEN": TOKEN}
+    environment = {"PATH": os.environ["PATH"], "MOODY_GIT_TOKEN": TOKEN}
     done = subprocess.run(["sh", str(HELPER), "get"], input=request_lines, env=environment, capture_output=True, text=True)
     assert done.returncode == 0
     assert (done.stdout == f"username=x-access-token\npassword={TOKEN}\n") is answered
@@ -247,7 +247,7 @@ def test_git_reaches_the_token_through_the_helper_alone_and_no_other_helper_keep
         "PATH": f"{programs}:{os.environ['PATH']}",
         "HOME": str(home),
         "GIT_CONFIG_NOSYSTEM": "1",
-        "LATHE_GIT_TOKEN": TOKEN,
+        "MOODY_GIT_TOKEN": TOKEN,
     }.items():
         monkeypatch.setenv(name, value)
     monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)

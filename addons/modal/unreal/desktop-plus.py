@@ -31,7 +31,7 @@ than doing what the session does not expect.
    question comes only where the repository's `pre-push` hook does not run Git
    LFS yet.
 4. **No welcome for a session that cloned the repository.** Where the session
-   was given a repository (`LATHE_GIT_REPO`), the client opens on it rather
+   was given a repository (`MOODY_GIT_REPO`), the client opens on it rather
    than on its first-start welcome, whose steps, signing in and Git's name and
    address, the session has taken for the developer: the token and the
    identity come with the repository (`clone.py`, `github.sh`). The welcome is
@@ -75,7 +75,7 @@ CHANGES = (
         "the decision to show the welcome",
         # this.showWelcomeFlow=!Oa(): the welcome until it has been seen once
         re.compile(r"(this\.showWelcomeFlow=!\w+\(\))"),
-        r"\1&&!process.env.LATHE_GIT_REPO",
+        r"\1&&!process.env.MOODY_GIT_REPO",
     ),
 )
 
