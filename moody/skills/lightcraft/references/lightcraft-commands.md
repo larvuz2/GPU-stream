@@ -47,7 +47,7 @@ engine_call(engine_id, "ui.inspect")                                            
 | `photo.virtualCopy` makes the copy the active photo. | Edits after it land on the copy. Select the original again if that is what you meant. |
 | `crop.aspect` then `crop.set {rect}` does not hold the ratio: the rect wins. | Compute the rect for the ratio yourself (see [Crop](#crop-and-geometry)). |
 | `photo.inspect` returns every saved version's full settings, tens of kilobytes. | Use `develop.get {id}` for settings; `photo.inspect` once for metadata. |
-| `app.export` without a size exports full size; without a color space, the last one used. | Pass `format`, a size, `colorSpace`, and `conflict` every time. |
+| An `app.export` that names no size exports at full size, and one that names no format wrote a JPEG. | Pass `format`, a size, `colorSpace`, and `conflict` every time. |
 | `photo.editExternal` writes beside the original whatever `dir` says. | Use `app.export` with `path` for a hand-off folder. |
 | An imported LUT's id comes from the title inside the file, not its file name. | Take the id from `profile.import`'s answer. |
 | White balance numbers mean different things on raw and on JPEG. | See [White balance](#white-balance). |
@@ -58,10 +58,10 @@ engine_call(engine_id, "ui.inspect")                                            
 |---|---|---|
 | `ui.inspect` | none | Large. Useful keys: `active`, `selection`, `loupe {photo, pending, source, failed}`, `export {running: {current, done, total} or null, last: {files, cancelled}}`, `activity`, `import`, `notices`, `libraryProblem` (null when the library opened) |
 | `ui.set` | `{"view": "detail"}` | The interface's state. Detail is the single-photo view with the Edit panel |
-| `ui.render` | `{id?, size?, path?}` | `{width, height, path}`: the photo with its current settings as a PNG, long edge `size` (default 1024), crop and masks included. This is your way to look at an edit and to measure it |
+| `ui.render` | `{id?, size?, path?}` | `{width, height, path}`: the photo with its current settings as a PNG, long edge `size` (1600 unless given), crop and masks included. This is your way to look at an edit and to measure it |
 | `ui.widgets` | `{filter?}` | `[{id, rect}]` on screen now |
 | `ui.clickWidget` | `{id}` | Clicks it; fails if it is not on screen |
-| `ui.dialog.confirm` / `ui.dialog.cancel` | none | Answers the open dialog |
+| `ui.dialog.confirm` / `ui.dialog.cancel` | none | Answers the open dialog; with none open, `{"result": null}` |
 
 View commands (through `engine.execute`, all `{}`): `view.detail`, `view.compare` ->
 `{select, candidate}` (two photos side by side), `view.survey` -> `{photos}` (the selection
@@ -87,7 +87,7 @@ The database stays in the project folder; later sessions have it.
 |---|---|---|
 | `library.info` | `{}` | `{path, photos, albums, unsavedOps, unsavedError, ...}`. `unsavedOps` above 0 means the catalog could not be written: stop and say so |
 | `library.importPreview` | `{paths: [file or folder]}` | `{candidates: [{path, name, format, kind: "raw"/"image", width, height, captured, duplicate, error, previewOnly}], duplicates, scanned}`. Adds nothing. `previewOnly` says why a raw can only be shown from its camera preview |
-| `library.import` | `{paths: [..], mode: "add", albumName?, album?, keywords?, preset?}` | `{imported: [ids], duplicates: [{path, existing, reason}], failed, album}`. `mode: "add"` references the files where they are, which is what a project wants. Folders are read recursively. Importing a path twice reports it under `duplicates` and changes nothing |
+| `library.import` | `{paths: [..], mode: "add", albumName?, keywords?}` | `{imported: [ids], duplicates: [{path, existing, reason}], failed, album}`. `mode: "add"` references the files where they are, which is what a project wants. Folders are read recursively. A file the library already has is reported under `duplicates` and not added, whether by its `path` or, for a copy under another name, by its `content` |
 | `catalog.query` | `{filter?, sort?, offset?, limit?}` | `{photos: [{id, fileName, format, kind, width, height, camera, captured, rating, flag, label, edited, keywords, copyOf, copyName, previewOnly}]}`. Without `filter`: the current view. `filter` keys used: `text`, `flag`, `kind`, `edited`, `rating` with `ratingOp` |
 | `catalog.stats` | `{}` | `{photos, picks, rejects, edited, albums, keywords, byDate}` |
 | `library.state` | `{}` | `{selection: {ids, active}, filter, sort, source, sourceLabel, visibleCount, undo, redo}` |
@@ -99,14 +99,14 @@ The database stays in the project folder; later sessions have it.
 | `photo.rate` | `{rating: 0..5, ids?}` | `{changed}` |
 | `photo.flag` | `{flag: "pick"/"reject"/"none", ids?}` | `{changed}` |
 | `photo.label` | `{label: "red"/"yellow"/"green"/"blue"/"purple"/"none", ids?}` | `{changed}` |
-| `photo.analyze` | `{ids?, burstGap?: seconds, similarity?, pickBest?, rejectBelow?}` | `{photos: [{id, sharpness: 0..100, clipped: fraction, group, best}], groups}`. Scores focus and clipping, groups look-alike frames, marks the sharpest of each group. With `pickBest` or `rejectBelow` it also flags, so leave those off until the person agreed |
+| `photo.analyze` | `{ids?, burstGap?: seconds, similarity?: 0..1}` | `{photos: [{id, sharpness: 0..100, clipped: fraction, group, best}], groups}`. Scores focus and clipping, groups look-alike frames taken within `burstGap` (10 s unless given), and marks the sharpest of each group. It changes no flag as called here. Its `pickBest` and `rejectBelow` options, which flag by themselves, were not run: flag with `photo.flag` after the person agreed |
 | `stack.auto` | `{gap?: seconds, preview?: true}` | `{stacks, photos}`. With `preview` it only counts |
 | `album.create` | `{name, addSelected?: false}` | `{id}` |
 | `album.addPhotos` | `{id, ids: [..]}` | `{added, skipped}` |
 | `album.createSmart` | `{name, rules: {rating: 4, ratingOp: "atLeast"}}` | `{id, count}` |
 | `photo.setMeta` | `{ids?, title?, caption?, copyright?, creator?, keywords?, addKeywords?, removeKeywords?}` | `{changed}` |
 | `metadata.savePreset` / `metadata.applyPreset` | `{name, fields: {copyright, copyrightStatus, creator}}` / `{name, ids}` | The credit line for a whole shoot in one call |
-| `photo.virtualCopy` | `{ids, name?}` | `{ids: [new]}`. A second set of settings on the same file, stacked with the original. The copy becomes active |
+| `photo.virtualCopy` | `{ids, name?}` | `{ids: [new]}`. A second set of settings on the same file, stacked with the original. The copy becomes active, and it carries the original's rating, flag, and keywords, so it counts in every filter the original matches |
 | `photo.delete` / `photo.restore` | `{ids}` | To and from Recently Deleted. No file is touched. Ask before deleting |
 
 ## Develop
@@ -182,7 +182,8 @@ geometry.upright {"mode": "auto"}     -> {mode, transform}; modes off|auto|level
 ```text
 develop.wb {"mode": "asShot"}                           -> {"temp": 4519, "tint": 41}
 develop.wb {"mode": "auto"}                             -> {"temp": 4470, "tint": 52}
-develop.wb {"mode": "daylight"}                         -> {"temp": 5500, "tint": 10}   also cloudy|shade|tungsten|fluorescent|flash
+develop.wb {"mode": "daylight"}                         -> {"temp": 5500, "tint": 10}
+                                                           cloudy 6500/10, shade 7500/10, tungsten 2850/0, fluorescent 3800/21, flash 5500/0
 develop.wb {"mode": "custom", "temp": 5150, "tint": 10}
 develop.wbPick {"x": 0.639, "y": 0.60}                  -> {"temp": 5049, "tint": 37}   a point that should be neutral
 ```
@@ -280,8 +281,9 @@ history.previous {}    history.next {}    edit.undo {}    edit.redo {}
 ```
 
 Make a version before a change of direction (color to black and white, a heavier grade) so the
-person can go back. Versions are listed in `photo.inspect` -> `versions`, oldest first; a virtual
-copy starts with an automatic one at index 0.
+person can go back. Versions are listed in `photo.inspect` -> `versions` as `{name, auto, created,
+settings}`, oldest first. LightCraft sometimes adds one of its own, marked `auto`, so read the
+index there rather than counting the ones you made.
 
 ## Presets and consistency
 
@@ -339,7 +341,7 @@ app.export {"ids": [1], "path": "<project>/exports/master/CZP_0299.tif", "format
 | `ids` | The photos. Without it, the selection |
 | `dir` or `path` | A folder (names from `naming`), or one file's full path. Folders are made |
 | `format` | `jpeg`, `png`, `tiff`, `psd` (flat), `webp`, `avif`, `jxl`, `dng` (a raw, with its edits embedded), `original` (the file copied, with an `.xmp` beside it) |
-| Size: one of | `longEdge` (0 = full size), `shortEdge`, `width` + `height`, `megapixels`, `percent`. `dontEnlarge` is true unless you say otherwise |
+| Size: one of | `longEdge` (0 = full size), `shortEdge`, `width` + `height`, `megapixels`, `percent`. A size larger than the photo is not reached unless `dontEnlarge: false` (`longEdge: 8000` left a 4288 px photo at 4288) |
 | `fit` | With `width` + `height`: `dimensions` (fits either orientation: 2400 x 3000 gave 3000 x 2000 from a landscape) or `widthHeight` (width and height as the photo stands) |
 | `quality` | 1 to 100, for `jpeg`, `avif`, lossy `jxl`, `webp` |
 | `limitKb` | A file-size ceiling for JPEG: `limitKb: 500` gave 504 kB at 2560 px |
@@ -349,7 +351,7 @@ app.export {"ids": [1], "path": "<project>/exports/master/CZP_0299.tif", "format
 | `ppi` | The print resolution written into the file (240 unless given). It does not resize |
 | `sharpen` | `none`, `screen`, `matte`, `glossy`: sharpening for the output size and medium |
 | `metadata` | `all`, `allExceptCamera`, `copyright` (credit only; camera data removed), `none`; `removeLocation: true` |
-| `naming` | A template: `{name}`, `{seq}`, `{seq:2}`, `{date:%Y%m%d}`, `{camera}`, `{rating}`, `{title}`. `photo.renameTokens {}` lists them |
+| `naming` | A template: `{name}`, `{seq}`, `{seq:2}`, `{date:%Y%m%d}`, `{rating}`, `{title}` (`"{date:%Y%m%d}-{name}-{seq:2}"` gave `20261125-landscape-manapouri-01.jpg`; a photo without a capture date uses its import date). `photo.renameTokens {}` lists them all |
 | `conflict` | `unique` (adds a number), `overwrite`, `skip` |
 | `preset` | A saved export preset's name; other options override it |
 | `background` | `true` answers `{"background": true, "total": n}` at once |

@@ -30,7 +30,7 @@ All values are 0 to 255 in the rendered picture.
 | What you read | What it means | What to do |
 |---|---|---|
 | `luma.p50` 100 to 135 | An average scene sits here | Leave exposure alone unless the scene is meant to be dark or bright |
-| `luma.p50` under 80 | Dark | Low-key on purpose (night, stage, a black backdrop)? Keep it. Otherwise raise `light.exposure`: about +0.3 stops lifts the median by 15 to 20 |
+| `luma.p50` under 80 | Dark | Low-key on purpose (night, stage, a black backdrop)? Keep it. Otherwise raise `light.exposure`. Measured, +0.3 stops took a median of 62 to 69 and one of 205 to 224: expect 7 to 20 levels, more the brighter the tones |
 | `luma.p50` over 160 | Bright | High-key on purpose (snow, a white studio, backlit haze)? Keep it. Otherwise lower exposure |
 | `luma.p1` over 25 | No true black: the picture looks flat or hazy | Lower `light.blacks` (-10 to -30) until `p1` is 5 to 15, unless a matte look was asked for |
 | `luma.p99` under 225 | No bright white: dull | Raise `light.whites` until `p99` is 240 to 250 |
