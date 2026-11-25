@@ -54,11 +54,12 @@ engines and their skills; offer one when the film calls for it.
 | 7. Shots | Takes | `animation`, one per scene | Which takes |
 | 8. Edit | Assembly, cut, sound, color, titles, delivery | You with the `filmcraft` skill, or the editor's operator | Each edit stage |
 
-Stages 2, 3, and 4 start together once the brief is settled. The main characters and the look are
-designed from the story's idea, so the person sees pictures in the first session, while the script
-is still being written. The shot list waits for the locked script, because a shot generated for a
-scene that is later cut is money spent on nothing. Characters, places, and props the breakdown
-adds later join the library the same way.
+The look is settled inside the brief, by its third question. Once the brief is settled, stages 2
+and 4 run together: the main characters are designed from the story's idea and the style line, so
+the person sees pictures in the first session, while the script is still being written. The shot
+list waits for the locked script, because a shot generated for a scene that is later cut is money
+spent on nothing. Characters, places, and props the breakdown adds later join the library the
+same way.
 
 Keep `update_plan(items)` current from the first turn, one item per stage: Brief, Story, Look,
 Library, Animation tests, Shot list, Shots, Assembly, Rough cut, Sound, Color, Titles and
@@ -111,7 +112,8 @@ one, what it costs, and when to stop it are in the `studio` skill.
 - Going from tests to shots, and locking the shot list with its total cost.
 - Spending: see [Cost and time](#cost-and-time) for what a stage's budget covers.
 - Choosing takes: present them, recommend one, let them pick.
-- Starting the edit, which starts the first engine.
+- Moving from shots to the edit: whether to assemble now or shoot more scenes first. The start
+  of the engine is then approved on the page; do not ask for it a second time.
 - Anything that replaces work: a new reference image for an approved entry, a changed
   description that prompts already use.
 
@@ -134,12 +136,16 @@ skip what they already told you:
    else". Each sentence becomes that character's description in the library, so settle it here.
 3. **The art style.** Offer to show it: "Show me three directions as pictures (recommended)",
    with what the three style frames cost, "I know the style (I'll describe it or name
-   references)", "You choose and show me one", "Something else". For pictures, hand
-   `art-direction` the story, the cast, and the audience, and present its style frames as a
-   gallery card to pick from. To tune the chosen direction (warmer, more contrast, more grain),
-   show its frame in a card with those controls; write the values they lock in into the style
-   line as words, and generate one frame to confirm it. The result is the film's **style line**:
-   one sentence that every later prompt repeats word for word, kept in the library as `@look`.
+   references)", "You choose and show me one", "Something else".
+   - Pictures: hand `art-direction` the story, the cast, the audience, and the format's aspect
+     ratio, and present its style frames as a gallery card to pick from.
+   - Words: write their style as one sentence and confirm it with one style frame.
+   - To tune a direction (warmer, more contrast, more grain), show its frame in a card with
+     those controls, write the values they lock in into the sentence as words, and generate one
+     frame to confirm it.
+
+   The result is the film's **style line**: one sentence that every later prompt repeats word
+   for word, kept in the library as `@look`. With it, stage 3 is done.
 
 Then settle what the format implies, asking only what is still open, one at a time, each with a
 recommendation:
@@ -160,8 +166,7 @@ recommendation:
 
 Close the brief by writing it back in six lines or fewer (story, cast, style line, format and
 length, audience, budget), then set the plan and the library's sections, and save the brief
-([Saving the work](#saving-the-work)). From here the story, the look, and the library run
-together.
+([Saving the work](#saving-the-work)). From here the story and the library run together.
 
 ## The library
 
@@ -170,9 +175,9 @@ finds everything the project made. library.md has the recipes; these rules hold 
 
 - **Sections.** `set_library_sections(sections)` as soon as the brief is settled. A film starts
   with Characters, Environments, Props, Logos, Look (style frames and the style line), Tests
-  (animation tests), Shots (takes), and Process (candidates that were not chosen, kept so the
-  person can find them again). A commercial puts Products and Brand first. Add a section when the
-  work needs one (Wardrobe, Music, References).
+  (animation tests), Shots (takes), and Process (the candidates and the looks that were
+  replaced, kept so the person can find them again). A commercial puts Products and Brand first.
+  Add a section when the work needs one (Wardrobe, Music, References).
 - **Tags.** `@` and a short lowercase name of letters, digits, and dashes: `@mara`,
   `@kitchen-night`, `@locket`, `@logo-title`, `@look`, `@test-mara-kitchen`, `@s01-sh20-t2`.
   A tag is unique in the project, is never reused for something else, and cannot be changed once
@@ -217,17 +222,15 @@ names and descriptions yours to set before you hand them out.
 
 ## Keeping the person informed
 
-A subagent works out of sight of the conversation, and you cannot speak while several run. So
-speak before and after:
+You cannot speak while subagents or generations run, so speak before and after (the `studio`
+skill has the rule). For a film:
 
-- **Before** you hand out work, say in two or three lines who is doing what, what the person
-  will see when it is done, what it costs, and that it takes a few minutes. The page shows each
-  subagent working.
-- **After** the reports return, check them against the library (`library_list`), then show the
-  results where the person decides: one card or one question per decision, not a recap of every
-  report. Say what failed in the same message.
-- At the end of every turn, say what was made, what it cost so far against the budget, and the
-  one decision or step that comes next.
+- **Before** a batch, say who designs or generates what, what it costs, and that it takes a few
+  minutes. The page shows each subagent working.
+- **After**, check the reports against the library (`library_list`), then show the results where
+  the person decides: one card or one question per decision, never a recap of every report.
+- **At the end of every turn**, say what was made, what has been spent against the budget, and
+  the one decision or step that comes next.
 
 ## Cost and time
 
@@ -258,12 +261,13 @@ billed with the seconds generated. 1 credit is $0.01 where the studio bills in c
   the total ("Generate all 6 shots ($17.03)", "Generate the first ($2.84) and review", "Change
   something"), and say that "always allow" on the first approval lets the batch run through. A
   declined approval comes back as a refusal: do not make that call again; ask what to change.
-- Keep the running total in the plan's titles or the brief. Warn at half and at four fifths of
-  the budget. At the budget, stop and ask.
+- Keep the running total in the brief and say it at the end of each turn. Warn at half and at
+  four fifths of the budget. At the budget, stop and ask.
 - Save money by settling every look as a still first, testing at the lowest resolution, cutting
   several beats from one take, and keeping each take to its cut plus handles.
-- **Time.** An image takes up to a few minutes and a video longer; the tools give up after 5 and
-  20 minutes. Say so before you start, and start a batch through subagents so it runs together.
+- **Time.** An image takes seconds to minutes and a video takes minutes; the tools give up
+  after 5 minutes for an image and 20 for a video. Say so before you start, and hand a batch to
+  subagents so its generations run at the same time.
 
 ## Saving the work
 
