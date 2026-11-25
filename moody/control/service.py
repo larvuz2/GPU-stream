@@ -83,7 +83,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import httpx
@@ -122,7 +122,10 @@ API_KEY_PREFIX = "moody_"
 TURN_STALE_SECONDS = 120
 LIBRARY_BUCKET = "library"
 SIGNED_URL_SECONDS = 3600
-MEDIA_LIMIT_BYTES = 200 * 1024 * 1024
+MEGABYTE = 1024 * 1024
+MEDIA_LIMIT_BYTES = 200 * MEGABYTE
+# The folder of a project's files in the bucket that holds the agent's previews, which are not library entries
+PREVIEWS = "previews"
 MESSAGE_LIMIT = 20000
 PROJECT_FIELDS = (
     "id",
@@ -247,6 +250,14 @@ class Config:
     nuke_seats: int = 2
     # The API's own address, where it differs from the one a request arrives at
     api_url: str = ""
+    # The largest copy of a file the agent's `preview` puts in the conversation; a larger one is refused
+    preview_limit_bytes: int = 50 * MEGABYTE
+    # A file over this, or in a format browsers do not play, is shown as a lighter copy the engine encodes
+    preview_original_bytes: int = 8 * MEGABYTE
+    # The files one preview may show
+    preview_files: int = 12
+    # The largest file or folder `engine_send` carries from one running engine to another
+    transfer_limit_bytes: int = 4096 * MEGABYTE
 
     @property
     def supabase(self) -> bool:
@@ -491,6 +502,23 @@ class Launcher(Protocol):
 
     def exec(self, sandbox_id: str, command: str, timeout: int) -> tuple[int, str]:
         """Run a shell command in the session's environment, as its user, and return its status and output."""
+
+    def read_file(self, sandbox_id: str, path: str, limit: int) -> bytes:
+        """A file of the session, whole.
+
+        Raises:
+            ValueError: The file is larger than `limit` bytes.
+            RuntimeError: It could not be read, with why.
+        """
+
+    def send(self, sandbox_id: str, path: str, to_sandbox_id: str, to_path: str, keep_going: Callable[[], bool]) -> int:
+        """Copy a file or a folder of one running session to a path of another, and return the bytes carried.
+
+        Raises:
+            FileNotFoundError: The session has nothing at `path`.
+            InterruptedError: `keep_going` said to stop; nothing is left at `to_path`.
+            RuntimeError: Either session refused, with why.
+        """
 
     def has_channel(self, app: str) -> bool:
         """Whether engines of this app have a command channel, which `engine_call` reaches."""
@@ -1336,7 +1364,30 @@ class Sessions:
         rows = self.store.rows(
             "project_events", project_id=f"eq.{project['id']}", id=f"gt.{int(after)}", order="id.asc", limit="500"
         )
-        return {"events": [self.public_event(row) for row in rows], "running": self.turn_running(project)}
+        return {"events": self.shown_events(rows), "running": self.turn_running(project)}
+
+    def shown_events(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Events as the API shows them, each `preview`'s files under links signed for this reading.
+
+        A preview is kept in the log by its files' paths in the bucket, never by a link: a link
+        expires within the hour, and work in progress is what a person scrolls back to the next
+        day. So each page of events is signed as it is read, in one request for all of its
+        previews, and a file that is gone is left out of its preview.
+        """
+        paths = [item["path"] for row in rows if row["kind"] == "preview" for item in row["data"].get("items", [])]
+        links = self.store.sign(LIBRARY_BUCKET, paths, SIGNED_URL_SECONDS) if paths else {}
+        shown = []
+        for row in rows:
+            event = self.public_event(row)
+            if row["kind"] == "preview":
+                items = [
+                    {**{key: value for key, value in item.items() if key != "path"}, "url": links[item["path"]]}
+                    for item in row["data"].get("items", [])
+                    if item["path"] in links
+                ]
+                event["data"] = {**row["data"], "items": items}
+            shown.append(event)
+        return shown
 
     def add_event(self, project_id: str, turn_id: str | None, kind: str, data: dict[str, Any]) -> dict[str, Any]:
         """Append an event to a project's log."""

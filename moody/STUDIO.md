@@ -57,13 +57,17 @@ session on a Modal Sandbox (`addons/modal`). Status: `available` (anyone),
 such as Nuke), `byol` (anyone, with the part of it on the user's own license
 coming once they have linked that license, which the app's `license` names with
 the steps that link it: Unreal Engine's editor on the user's Epic account,
-`UNREAL.md`), `next` (being built: PhotoCraft), `soon`.
+`UNREAL.md`), `next` (being built), `soon`.
 
 - **FilmCraft** is built from the release the fork tracks
   (`github.com/larvuz2/filmcraft`, a fork of `storytold/filmcraft`), pinned by
   version and checksum in `addons/modal/sandbox.py`; updating is a version bump
   after the fork syncs with upstream. The agent drives it through its control
   channel from the control plane (`filmcraft_call` in `addons/modal/sandbox.py`).
+- **PhotoCraft** is installed the same way from `storytold/photocraft`'s release
+  and driven the same way (`photocraft_call`). It keeps a project's open work
+  in the project folder, saved and unsaved, so an engine started later opens
+  on it; its skill is `moody/skills/photocraft`.
 - **Nuke** runs from the image `selkies-modal` builds from a workspace's own
   install (`nuke_image`). Foundry licenses Nuke per person: a user signs in with
   their own Foundry account in the session, and serving the team's install to
@@ -90,6 +94,44 @@ the steps that link it: Unreal Engine's editor on the user's Epic account,
   Hand-offs are kept in `handoff/<from app id>-to-<to app id>/`. Each turn
   starts with the project folder's path and, for each open engine, its app and
   whether it has a command channel.
+- **Engines that run at the same time exchange files through the control
+  plane.** An engine's machine sees the project's folder as it was when the
+  machine started, plus what it wrote itself: what it writes is on the Volume
+  within seconds, for every engine started later, but a running engine never
+  sees another's new file, and Modal refuses to reload the Volume under an
+  application with files open (measured on SoundCraft, FilmCraft, PhotoCraft,
+  and CADCraft). `engine_send(from_engine_id, path, to_engine_id, to_path?)`
+  carries a file or a folder from one running engine of the project into the
+  other's folder, at the same path unless `to_path` says otherwise: the bytes
+  stream from a command of the one machine to a command of the other, 8 MiB in
+  hand at a time (`send_file` in `addons/modal/sandbox.py`), the file appears
+  only once whole, and the result is its entry as the receiving engine lists
+  it. It is on the Volume from both machines. From a machine outside Modal,
+  between two CPU engines: 1 MB in 1.7 s, 100 MB in 5.6 s, 1 GB in 42.7 s. The
+  largest transfer is configuration (`MOODY_TRANSFER_MAX_MB`, 4096 by
+  default); beyond it the agent is told to send less or to restart the
+  receiver, which then opens on everything the folder holds.
+- **The agent shows its work.** `preview(engine_id, path | paths, caption,
+  kind?, compare?, look?)` brings files an engine wrote in the project's
+  folder into the conversation as a work-in-progress card: a frame, a range
+  the agent bounced or exported, a render, a document, of whatever length the
+  agent chose with that engine's own commands. Nothing in the tool is about
+  one engine or one length. A file is shown as it is where a browser plays it
+  and it is light; otherwise the engine's own ffmpeg, which every session
+  image carries, encodes a lighter copy outside the project's folder (sound to
+  AAC, video to H.264 no wider than 1280 pixels, a picture to WebP no wider
+  than 2048), the original untouched. What bounds a preview is configuration:
+  the largest copy shown (`MOODY_PREVIEW_MAX_MB`, 50), the size over which a
+  lighter copy is encoded (`MOODY_PREVIEW_ORIGINAL_MAX_MB`, 8), and the files
+  in one preview (`MOODY_PREVIEW_MAX_FILES`, 12); a preview over the first is
+  refused with what to render instead. `compare` shows two files of one kind
+  as before and after. The model is told each file's facts (length,
+  dimensions, size, and for sound its integrated loudness and true peak, read
+  by ffmpeg), not the picture or the sound; `look` also hands it one small
+  picture of each file (the image, four frames of a video, a sound's
+  waveform). `engine_screenshot` shows its picture as the same card. Previews
+  are files of the bucket under `<user id>/<project id>/previews/`, never
+  library entries, and go when the project does.
 
 ## GitHub
 
@@ -203,6 +245,13 @@ Event    {id, turn_id, kind, data, created_at}, kind one of
            engine        {engine: Session}
            screen        {engine_id, stream}  the agent puts an engine, in one of its
                                               streams ("Desktop", "Unreal"), on the Screen
+           preview       {engine_id, caption, compare, items: [{kind: "image" | "audio" | "video"
+                         | "file", url, name, seconds?, width?, height?}]}  work in progress the
+                                              agent shows: files an engine wrote, or its screen;
+                                              `compare` makes two items a before and after pair.
+                                              Each `url` is signed for the reading of the log
+                                              that returned it, and an item whose file is gone
+                                              is left out
            turn_end      {}
            error         {message}
 ```
@@ -225,5 +274,9 @@ private); `url` fields are signed and expire.
 6. The agent driving any engine with a command channel through one tool, and
    moving work between engines through the project's folder (`engine_call`,
    `engine_files`, the `studio` skill).
-7. Next: PhotoCraft engine, Unreal Engine, engines exchanging files beyond the
-   shared folder, billing the agent's model and generation use.
+7. PhotoCraft engine, driven through its command channel, with its skill, and
+   work passing between it, FilmCraft, and Blender as files of the project's
+   folder.
+8. The agent showing its work in the conversation (`preview`), and engines
+   that run at the same time exchanging files (`engine_send`).
+9. Next: Unreal Engine, billing the agent's model and generation use.

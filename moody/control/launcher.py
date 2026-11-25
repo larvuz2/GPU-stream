@@ -49,6 +49,11 @@ gains a channel by the launcher module gaining its function, with nothing to
 change here or in the agent, and an app without one is simply an engine the
 agent drives through its shell and its screen.
 
+Two running engines of a project do not see what the other writes to the
+folder they share, since each mounts the Volume as it was when it started, so
+a file passes between them through here (`send`, the launcher's `send_file`),
+and a file on its way to the person's conversation is read whole (`read_file`).
+
 Modal is imported where it is used, so the service's tests can stand in for
 the launcher module and run without Modal installed. The command channels and
 Unreal Engine's parts (`unreal_image`, the Unreal view's link
@@ -60,7 +65,7 @@ when they are needed, so a launcher without them still starts every other app.
 from __future__ import annotations
 
 import sys
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from service import IDLE_SECONDS, LIFETIME_SECONDS, READY_SECONDS, Clone, OwnCopy
@@ -269,6 +274,14 @@ class ModalLauncher:
         output = process.stdout.read()
         status = process.wait()
         return status, output + process.stderr.read()
+
+    def read_file(self, sandbox_id: str, path: str, limit: int) -> bytes:
+        """A file of the session, whole (`read_file`); `ValueError` for one over `limit` bytes."""
+        return self.launcher.read_file(self.sandbox(sandbox_id), path, limit)
+
+    def send(self, sandbox_id: str, path: str, to_sandbox_id: str, to_path: str, keep_going: Callable[[], bool]) -> int:
+        """Copy a file or a folder of one running session to a path of another (`send_file`); the bytes carried."""
+        return self.launcher.send_file(self.sandbox(sandbox_id), path, self.sandbox(to_sandbox_id), to_path, keep_going)
 
     def channel(self, app: str) -> Any:
         """The launcher module's command channel for an app, `<app id>_call`, or nothing where it has none."""

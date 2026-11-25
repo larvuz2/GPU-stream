@@ -1,0 +1,56 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Run by the Selkies window manager once it is up, as the session's
+# application, installed as /etc/xdg/openbox/autostart, which both backends
+# read: CADCraft, on the drawing of the session's project folder
+# (`craft/project.sh`).
+#
+# CADCraft starts in that folder, so its dialogs and relative paths land
+# beside the drawing, and opens the newest drawing there, DXF or DWG; a folder
+# with none gets a new `drawing.dxf`, written by CADCraft's own command-line
+# tool before the window opens, so the drawing has a path from the start and
+# Save and the control channel's `app.save` write where the next session
+# looks. DXF is the format CADCraft reads and writes in full, where a DWG it
+# saves keeps less. The new drawing is metric, millimeters with the ISO-25
+# dimension style, the drafting default of most of the world; CADCraft's own
+# default is imperial, and a project in feet and inches starts another
+# drawing with its `new` command (`{"metric": false}`).
+#
+# CADCraft's settings folder, which holds its preferences, logs, plotter
+# configurations, and the autosaves of unsaved changes, is `.cadcraft` in the
+# project folder rather than one for the whole workspace: CADCraft offers to
+# recover every autosave the folder holds that its last run left behind, and a
+# folder shared by every project would offer one project's drawings in
+# another.
+#
+# What a person drew is there when they come back, two ways. A session that
+# ends by the idle timeout or `down` saves every drawing with unsaved changes
+# first (`cadcraft/keep.sh`). One that ends with no chance to, at the Sandbox's
+# lifetime or a crash, leaves CADCraft's autosaves, which the next start offers
+# in its Drawing Recovery window (the `drawingrecovery` command); CADCraft
+# writes them every SAVETIME minutes of changes, ten by its default and kept
+# only in a home that goes with the Sandbox, so each start sets it to one, the
+# least it takes.
+#
+# The control channel listens on the Sandbox's loopback only, on
+# CADCRAFT_CONTROL_PORT, for requests carrying the token CADCraft makes each
+# time it starts and writes for the session's user alone
+# (`cadcraft/control.sh`).
+folder="$(selkies-modal-project)" || exit 1
+mkdir -p "${folder}/.cadcraft"
+cd "${folder}" || exit 1
+export CADCRAFT_CONFIG_DIR="${folder}/.cadcraft"
+
+file="$(find . -maxdepth 1 \( -name '*.dxf' -o -name '*.dwg' \) -type f -printf '%T@ %p\n' 2> /dev/null | sort -rn | head -n 1 | cut -d ' ' -f 2-)"
+if [ -z "${file}" ]; then
+  file="./drawing.dxf"
+  cadcraft-cli run --metric --save "${file}" > /dev/null
+fi
+
+# Its token is ready as its window opens, which the client waits for
+echo '{"method": "engine.execute", "params": {"command": "setvar", "params": {"name": "SAVETIME", "value": 1}}}' |
+  selkies-modal-cadcraft 120 > /dev/null 2>&1 &
+exec cadcraft "${folder}/${file#./}"

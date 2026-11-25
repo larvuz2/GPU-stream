@@ -1,0 +1,88 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Run by the Selkies window manager once it is up, as the session's
+# application, installed as /etc/xdg/openbox/autostart, which both backends
+# read: SoundCraft, on the session of the session's project folder
+# (`craft/project.sh`).
+#
+# SoundCraft starts in that folder, so its dialogs and relative paths land
+# beside the session, and opens the newest session file there; a folder with
+# none gets a new `project.scraft`, written by SoundCraft's own command-line
+# tool before the window opens, so the session has a path from the start and
+# Save and the control channel's `session.save` write where the next session
+# of the project looks. A session keeps the audio it records and imports in
+# `Audio Files` beside its file, and its earlier saves in `Backups`.
+#
+# SoundCraft's settings folder, which holds its preferences, presets, logs, and
+# the autosaved copies of unsaved work, is `.soundcraft` in the project folder
+# rather than one for the whole workspace: SoundCraft offers to recover what
+# an earlier run left unsaved as it opens, and a folder shared by every
+# project would offer one project's work in another. A session that ended with
+# changes unsaved, by the idle timeout or `down`, so reopens with them, unsaved,
+# days later as well.
+#
+# SoundCraft has no flag that takes that offer, only the question it shows over
+# its window, "Recover Unsaved Work", with Discard and Recover. So where the
+# autosave folder holds a copy of this session newer than its file, which is
+# when SoundCraft asks, `recover` below presses Recover through the control
+# channel once the window is up: the question sits at a fixed place from the
+# window's center, and SoundCraft's status line says "Recovered" when the press
+# landed. Where it does not say so, the question stays for the person.
+#
+# The control channel listens on the Sandbox's loopback only, on
+# SOUNDCRAFT_CONTROL_PORT, which SoundCraft reads from the environment the
+# image sets (sandbox.py). Sound goes to the default ALSA device, which the
+# base container's PipeWire provides and Selkies streams.
+folder="$(selkies-modal-project)" || exit 1
+mkdir -p "${folder}/.soundcraft"
+cd "${folder}" || exit 1
+
+file="$(find . -maxdepth 1 -name '*.scraft' -type f -printf '%T@ %p\n' 2> /dev/null | sort -rn | head -n 1 | cut -d ' ' -f 2-)"
+if [ -z "${file}" ]; then
+  file="./project.scraft"
+  soundcraft-cli run --save "${file}" > /dev/null
+fi
+session="${folder}/${file#./}"
+
+# Whether the autosave folder holds unsaved work of this session: a copy that names it as where
+# it came from and was written after it.
+unsaved() {
+  for copy in "${folder}"/.soundcraft/Autosave/*/; do
+    [ -f "${copy}session.scraft" ] && [ "$(cat "${copy}origin" 2> /dev/null)" = "${session}" ] &&
+      [ "${copy}session.scraft" -nt "${session}" ] && return 0
+  done
+  return 1
+}
+
+# Presses Recover on SoundCraft's question, which is centered 80 points above the window's
+# center with Recover right of Discard, and says what became of it. The window opens at one size
+# and the window manager then fills the screen with it, so the place is worked out from a size
+# that has stopped changing, and pressed again where the status line does not say "Recovered".
+recover() {
+  size=""
+  for attempt in 1 2 3 4 5; do
+    sleep 1
+    last="${size}"
+    size="$(echo '{"method": "ui.inspect"}' | selkies-modal-soundcraft 60 | jq -r '.result.window_size | "\(.[0]) \(.[1])"')" || return
+    [ "${size}" = "${last}" ] || continue
+    x="$(echo "${size}" | awk '{print $1 / 2 - 70}')"
+    y="$(echo "${size}" | awk '{print $2 / 2 - 36}')"
+    echo "{\"method\": \"ui.click\", \"params\": {\"x\": ${x}, \"y\": ${y}}}" | selkies-modal-soundcraft 20 > /dev/null
+    status="$(echo '{"method": "ui.inspect"}' | selkies-modal-soundcraft 20 | jq -r '.result.status')"
+    case "${status}" in
+      Recovered*)
+        echo "selkies-modal: SoundCraft reopened with the unsaved changes of ${session}" >&2
+        return
+        ;;
+    esac
+  done
+  echo "selkies-modal: SoundCraft still asks whether to recover the unsaved changes of ${session}" >&2
+}
+
+if unsaved; then
+  recover &
+fi
+SOUNDCRAFT_CONFIG_DIR="${folder}/.soundcraft" exec soundcraft "${session}"

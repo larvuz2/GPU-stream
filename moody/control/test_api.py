@@ -28,11 +28,13 @@ from __future__ import annotations
 
 import base64
 import copy
+from dataclasses import replace
 import hashlib
 import hmac
 import itertools
 import json
 import re
+import shlex
 import sys
 import time
 import uuid
@@ -360,6 +362,12 @@ class FakeLauncher:
         self.links: list[tuple[str, str]] = []
         # What a command containing each text answers, where it is not the default success
         self.answers: list[tuple[str, tuple[int, str]]] = []
+        # The files a Sandbox holds, by path, where one's bytes matter; the reads made, and what was carried between two
+        self.files: dict[str, bytes] = {}
+        self.reads: list[tuple[str, str]] = []
+        self.sent: list[tuple[str, str, str, str]] = []
+        # Paths a Sandbox asked to send does not have
+        self.absent: set[str] = set()
 
     def start(
         self, session: dict[str, Any], tier: dict[str, Any], region: str | None, own_copy: OwnCopy | None = None,
@@ -409,6 +417,21 @@ class FakeLauncher:
     def exec(self, sandbox_id: str, command: str, timeout: int) -> tuple[int, str]:
         self.commands.append((sandbox_id, command))
         return next((answer for text, answer in self.answers if text in command), (0, f"ran in {sandbox_id}\n"))
+
+    def read_file(self, sandbox_id: str, path: str, limit: int) -> bytes:
+        self.reads.append((sandbox_id, path))
+        data = self.files.get(path, f"bytes of {PurePosixPath(path).name}".encode())
+        if len(data) > limit:
+            raise ValueError(f"{path} is larger than {limit} bytes")
+        return data
+
+    def send(self, sandbox_id: str, path: str, to_sandbox_id: str, to_path: str, keep_going: Callable[[], bool]) -> int:
+        if path in self.absent:
+            raise FileNotFoundError(path)
+        if not keep_going():
+            raise InterruptedError("stopped")
+        self.sent.append((sandbox_id, path, to_sandbox_id, to_path))
+        return 2048
 
     def has_channel(self, app: str) -> bool:
         return app in self.channels
@@ -858,7 +881,7 @@ def test_a_session_starts_in_the_users_own_workspace_and_hands_back_a_link(world
 def test_what_is_not_on_offer_is_refused(world):
     client = world[0]
     post = lambda body: client.post("/v1/sessions", headers=auth("alice-token"), json=body).status_code
-    assert post({"app": "photocraft", "tier": "cpu"}) == 400, "an app that is coming next"
+    assert post({"app": "effectcraft", "tier": "cpu"}) == 400, "an app that is announced, not offered"
     assert post({"app": "godot", "tier": "cpu"}) == 400, "an app that is coming soon"
     assert post({"app": "blender", "tier": "nope"}) == 400
     assert post({"app": "blender", "tier": "cpu", "region": "mars"}) == 400
@@ -1171,7 +1194,7 @@ def test_an_engine_starts_in_its_projects_folder_on_the_users_credits(studio):
     assert client.post(f"/v1/projects/{other['id']}/engines", headers=auth("alice-token"),
                        json={"app": "blender", "tier": "cpu"}).status_code == 409, "one open session per user, as before"
     assert client.post(f"/v1/projects/{other['id']}/engines", headers=auth("alice-token"),
-                       json={"app": "photocraft", "tier": "cpu"}).status_code == 400, "an engine that is coming next"
+                       json={"app": "effectcraft", "tier": "cpu"}).status_code == 400, "an engine that is announced, not offered"
     assert client.post(f"/v1/sessions/{engine['id']}/link", headers=auth("alice-token")).json()["url"].startswith("https://sb-1.")
     client.delete(f"/v1/sessions/{engine['id']}", headers=auth("alice-token"))
     assert launcher.stopped == ["sb-1"]
@@ -1575,6 +1598,418 @@ def test_engine_files_lists_the_project_folder_as_an_engine_sees_it(studio):
     assert all(command.startswith(f"cd {folder} ") for command in commands)
     assert "find ./handoff/cadcraft-to-blender -mindepth 1 -maxdepth 1" in commands[0] and "find ./ -mindepth 1" in commands[1]
     assert tools_shown(client, film["id"])[0] == ("Listing handoff/cadcraft-to-blender", "3 entries in handoff/cadcraft-to-blender", True)
+
+
+# How a probe's ffprobe line ends, after the path of the file it reads
+PROBED = " 2>/dev/null || true"
+MB = 1024 * 1024
+PNG = {"streams": [{"codec_type": "video", "codec_name": "png", "width": 1920, "height": 1080}], "format": {"format_name": "png_pipe"}}
+WAV = {
+    "streams": [{"codec_type": "audio", "codec_name": "pcm_s24le", "sample_rate": "48000", "channels": 2}],
+    "format": {"format_name": "wav", "duration": "5.000000"},
+}
+H264 = {
+    "streams": [
+        {"codec_type": "video", "codec_name": "h264", "pix_fmt": "yuv420p", "width": 1280, "height": 720},
+        {"codec_type": "audio", "codec_name": "aac", "sample_rate": "48000", "channels": 2},
+    ],
+    "format": {"format_name": "mov,mp4,m4a,3gp,3g2,mj2", "duration": "12.480000"},
+}
+PRORES = {
+    "streams": [{"codec_type": "video", "codec_name": "prores", "pix_fmt": "yuv422p10le", "width": 3840, "height": 2160}],
+    "format": {"format_name": "mov,mp4,m4a,3gp,3g2,mj2", "duration": "2.000000"},
+}
+
+
+def probe(path: str, size: int, answer: dict[str, Any] | None) -> tuple[str, tuple[int, str]]:
+    """What an engine answers a preview's probe of a file: its size, and ffprobe's words or that it has no ffmpeg."""
+    return f"{shlex.quote('./' + path)}{PROBED}", (0, f"{size}\n{'NO-FFMPEG' if answer is None else json.dumps(answer)}\n")
+
+
+def previews(client: TestClient, project_id: str) -> list[dict[str, Any]]:
+    """The previews the page was shown, in order."""
+    return [event["data"] for event in events(client, project_id)["events"] if event["kind"] == "preview"]
+
+
+def stored_previews(studio: SimpleNamespace, project_id: str) -> dict[str, tuple[bytes, str]]:
+    """The files the bucket holds under the project's previews folder, by their names without the random start."""
+    prefix = f"{ALICE.id}/{project_id}/previews/"
+    return {path[len(prefix) + 13 :]: kept for path, kept in studio.store.files.items() if path.startswith(prefix)}
+
+
+def with_config(studio: SimpleNamespace, **changes: Any) -> None:
+    studio.sessions.config = replace(studio.sessions.config, **changes)
+
+
+def test_a_preview_shows_each_kind_of_file_as_a_card_and_tells_the_model_only_its_facts(studio):
+    client, model, launcher = studio.client, studio.model, studio.launcher
+    film = new_project(client)
+    eid = start_engine(studio, film["id"])["id"]
+    folder = f"/home/ubuntu/workspace/projects/{film['id']}"
+    launcher.answers += [
+        probe("previews/frame.png", 240_000, PNG),
+        probe("previews/chorus.wav", 1_440_078, WAV),
+        probe("previews/cut.mp4", 3 * MB, H264),
+        probe("previews/plan.pdf", 88_000, {"streams": [{"codec_type": "video", "codec_name": "ansi"}]}),
+        ("ebur128", (1, "    I:         -14.2 LUFS\n    Peak:       -1.1 dBFS\n")),
+    ]
+    model.script(
+        reply(
+            use("preview", engine_id=eid, path="previews/frame.png", caption="Shot 3 after the grade"),
+            use("preview", engine_id=eid, path="previews/chorus.wav", caption="The chorus with the new bass"),
+            use("preview", engine_id=eid, path=f"{folder}/previews/cut.mp4", caption="The first twelve seconds of the cut"),
+            use("preview", engine_id=eid, paths=["previews/plan.pdf", "previews/frame.png"], caption="The plan and the frame it is for"),
+        ),
+        reply(say("Shown.")),
+    )
+    message(client, film["id"], "Show me where it is")
+
+    results = list(tool_results(model.requests[1]).values())
+    assert not any(r.get("is_error") for r in results), results
+    assert all(isinstance(r["content"], str) for r in results), "the model is given no pixels and no sound unless it asks to look"
+    frame, chorus, cut, pair = (json.loads(r["content"]) for r in results)
+    assert frame["shown"] == "Shot 3 after the grade" and "look: true" in frame["note"]
+    assert frame["files"] == [{"path": "previews/frame.png", "kind": "image", "size": "234 KB", "width": 1920, "height": 1080, "codec": "png"}]
+    assert chorus["files"] == [{
+        "path": "previews/chorus.wav", "kind": "audio", "size": "1.4 MB", "seconds": 5.0, "codec": "pcm_s24le",
+        "sample_rate": 48000, "channels": 2, "loudness_lufs": -14.2, "true_peak_dbfs": -1.1,
+    }]
+    assert cut["files"][0]["seconds"] == 12.48 and cut["files"][0]["width"] == 1280 and "shown_as" not in cut["files"][0]
+    assert [f["kind"] for f in pair["files"]] == ["file", "image"], "a PDF is a file whatever ffprobe makes of it"
+
+    shown = previews(client, film["id"])
+    link = f"https://storage.example.test/{ALICE.id}/{film['id']}/previews/"
+    assert [(p["caption"], p["engine_id"], p["compare"]) for p in shown] == [
+        ("Shot 3 after the grade", eid, False), ("The chorus with the new bass", eid, False),
+        ("The first twelve seconds of the cut", eid, False), ("The plan and the frame it is for", eid, False),
+    ]
+    items = [item for p in shown for item in p["items"]]
+    assert all(item["url"].startswith(link) and "path" not in item for item in items)
+    assert [{k: v for k, v in item.items() if k != "url"} for item in items] == [
+        {"kind": "image", "name": "frame.png", "width": 1920, "height": 1080},
+        {"kind": "audio", "name": "chorus.wav", "seconds": 5.0},
+        {"kind": "video", "name": "cut.mp4", "seconds": 12.48, "width": 1280, "height": 720},
+        {"kind": "file", "name": "plan.pdf"},
+        {"kind": "image", "name": "frame.png", "width": 1920, "height": 1080},
+    ]
+    kept = stored_previews(studio, film["id"])
+    assert {name: kind for name, (_, kind) in kept.items()} == {
+        "frame.png": "image/png", "chorus.wav": "audio/x-wav", "cut.mp4": "video/mp4", "plan.pdf": "application/pdf",
+    }
+    assert kept["cut.mp4"][0] == b"bytes of cut.mp4" and (launcher.reads[2] == ("sb-1", f"{folder}/previews/cut.mp4"))
+    commands = [command for _, command in launcher.commands]
+    assert not any(" -c:v " in command or " -c:a " in command for command in commands), "light files browsers play are shown as they are"
+    assert client.get(f"/v1/projects/{film['id']}/library", headers=auth("alice-token")).json()["assets"] == []
+    assert not studio.store.tables["assets"], "a preview is never a library entry"
+    kinds = [event["kind"] for event in events(client, film["id"])["events"]]
+    assert kinds[1:4] == ["tool_start", "preview", "tool_end"] and "library" not in kinds
+    assert tools_shown(client, film["id"])[1] == ("Preparing a preview", "Showed 1 audio: The chorus with the new bass", True)
+    assert tools_shown(client, film["id"])[3][1] == "Showed 1 file, 1 image: The plan and the frame it is for"
+
+
+def test_a_before_and_after_pair_is_two_files_of_one_kind(studio):
+    client, model, launcher = studio.client, studio.model, studio.launcher
+    film = new_project(client)
+    eid = start_engine(studio, film["id"])["id"]
+    launcher.answers += [probe(f"previews/{name}", 200_000, answer) for name, answer in (("before.png", PNG), ("after.png", PNG), ("mix.wav", WAV))]
+    model.script(
+        reply(
+            use("preview", engine_id=eid, paths=["previews/before.png", "previews/after.png"], caption="The sky, before and after the grade", compare=True),
+            use("preview", engine_id=eid, path="previews/after.png", caption="Only one", compare=True),
+            use("preview", engine_id=eid, paths=["previews/before.png", "previews/mix.wav"], caption="Two kinds", compare=True),
+            use("preview", engine_id=eid, caption="Nothing named"),
+            use("preview", engine_id=eid, paths=["previews/after.png"] * 13, caption="Too many"),
+        ),
+        reply(say("Shown.")),
+    )
+    message(client, film["id"], "Compare them")
+
+    results = list(tool_results(model.requests[1]).values())
+    assert [r.get("is_error", False) for r in results] == [False, True, True, True, True]
+    assert "exactly two files" in results[1]["content"] and "of one kind" in results[2]["content"]
+    assert "Name the file" in results[3]["content"] and "at most 12 files" in results[4]["content"]
+    (pair,) = previews(client, film["id"])
+    assert pair["compare"] is True and [item["name"] for item in pair["items"]] == ["before.png", "after.png"]
+    assert len(stored_previews(studio, film["id"])) == 2, "a refused preview stores nothing"
+    assert tools_shown(client, film["id"])[0][1] == "Showed 2 images as before and after: The sky, before and after the grade"
+
+
+def test_a_heavy_file_is_shown_as_a_lighter_copy_the_engine_encodes_and_the_original_is_left_alone(studio):
+    client, model, launcher = studio.client, studio.model, studio.launcher
+    film = new_project(client)
+    eid = start_engine(studio, film["id"])["id"]
+    folder = f"/home/ubuntu/workspace/projects/{film['id']}"
+    launcher.answers += [
+        probe("bounces/full mix.wav", 310 * MB, WAV),
+        probe("exports/shot 3.mov", 5 * MB, PRORES),
+        probe("renders/hero.exr", 60 * MB, {"streams": [{"codec_type": "video", "codec_name": "exr", "width": 4096, "height": 2160}]}),
+        probe("renders/broken.mov", 5 * MB, PRORES | {"format": {"duration": "9"}}),
+        ("-c:a aac -b:a 160k", (0, "6200000\n")),
+        ("ebur128", (1, "    I:         -9.8 LUFS\n    Peak:       0.3 dBFS\n")),
+        ("broken.mov -vf", (1, "Invalid data found when processing input\n")),
+        ("-c:v libx264", (0, "480000\n")),
+        ("-c:v libwebp", (0, "350000\n")),
+    ]
+    model.script(
+        reply(
+            use("preview", engine_id=eid, path="bounces/full mix.wav", caption="The whole track, mastered"),
+            use("preview", engine_id=eid, path="exports/shot 3.mov", caption="The dissolve into shot 3"),
+            use("preview", engine_id=eid, path="renders/hero.exr", caption="The hero render"),
+            use("preview", engine_id=eid, path="renders/broken.mov", caption="A file ffmpeg cannot read"),
+        ),
+        reply(say("Shown.")),
+    )
+    message(client, film["id"], "Play me the master")
+
+    results = list(tool_results(model.requests[1]).values())
+    assert [r.get("is_error", False) for r in results] == [False, False, False, True]
+    mix, shot, hero = (json.loads(r["content"])["files"][0] for r in results[:3])
+    assert mix["size"] == "310.0 MB" and mix["shown_as"] == "an AAC copy of 5.9 MB; the original is untouched"
+    assert mix["loudness_lufs"] == -9.8 and mix["true_peak_dbfs"] == 0.3, "measured on the original, not the copy"
+    assert shot["codec"] == "prores" and "H.264 copy of 469 KB" in shot["shown_as"], "light, but no browser plays ProRes"
+    assert "WebP copy" in hero["shown_as"]
+    assert "ffmpeg could not encode a preview copy of renders/broken.mov: Invalid data" in results[3]["content"]
+    kept = stored_previews(studio, film["id"])
+    assert {name: kind for name, (_, kind) in kept.items()} == {"full-mix.m4a": "audio/mp4", "shot-3.mp4": "video/mp4", "hero.webp": "image/webp"}
+    assert [item["name"] for p in previews(client, film["id"]) for item in p["items"]] == ["full mix.wav", "shot 3.mov", "hero.exr"]
+    commands = [command for sandbox, command in launcher.commands if sandbox == "sb-1"]
+    encodes = [command for command in commands if " -c:v " in command or " -c:a " in command]
+    assert len(encodes) == 4 and all(command.startswith(f"cd {folder} && mkdir -p /tmp/moody-preview/") for command in encodes)
+    assert "-i './bounces/full mix.wav' -vn -c:a aac" in encodes[0] and ".m4a 2>&1 && stat -c %s /tmp/moody-preview/" in encodes[0]
+    assert "scale=trunc(min(1280\\,iw)/2)*2:-2" in encodes[1] and "-pix_fmt yuv420p" in encodes[1]
+    scratch = [path for _, path in launcher.reads]
+    assert all(path.startswith("/tmp/moody-preview/") for path in scratch), "the copy is what is read, from outside the project's folder"
+    removed = [command for command in commands if command.startswith("rm -rf /tmp/moody-preview/")]
+    assert len(removed) == 4, "the copies are removed from the engine whether the preview was shown or refused"
+    assert not any(command.startswith("rm") and folder in command for command in commands)
+
+
+def test_a_preview_over_the_limit_is_refused_with_what_to_render_instead(studio):
+    client, model, launcher = studio.client, studio.model, studio.launcher
+    with_config(studio, preview_limit_bytes=20 * MB, preview_original_bytes=4 * MB)
+    film = new_project(client)
+    eid = start_engine(studio, film["id"])["id"]
+    launcher.answers += [
+        probe("exports/film.mp4", 900 * MB, H264),
+        probe("exports/trailer.mp4", 6 * MB, H264),
+        probe("handoff/scene.blend", 64 * MB, {}),
+        ("film.mp4 -vf", (0, f"{31 * MB}\n")),
+        ("trailer.mp4 -vf", (0, f"{2 * MB}\n")),
+    ]
+    model.script(
+        reply(
+            use("preview", engine_id=eid, path="exports/film.mp4", caption="The whole film"),
+            use("preview", engine_id=eid, path="handoff/scene.blend", caption="The scene file"),
+            use("preview", engine_id=eid, paths=["exports/trailer.mp4", "exports/film.mp4"], caption="The trailer and the film"),
+            use("preview", engine_id=eid, path="exports/trailer.mp4", caption="The trailer"),
+        ),
+        reply(say("The film is too long to show whole.")),
+    )
+    message(client, film["id"], "Show me the film")
+
+    results = list(tool_results(model.requests[1]).values())
+    assert [r.get("is_error", False) for r in results] == [True, True, True, False]
+    assert results[0]["content"] == (
+        "exports/film.mp4 is 31.0 MB as a preview, over the 20.0 MB a preview may be. Render or export something lighter "
+        "and preview that: a shorter range, a lower resolution, or a lower bitrate. The file itself stays where it is."
+    )
+    assert "handoff/scene.blend is 64.0 MB as a preview" in results[1]["content"]
+    (trailer,) = previews(client, film["id"])
+    assert trailer["caption"] == "The trailer", "a preview with one file refused shows none of its files"
+    assert list(stored_previews(studio, film["id"])) == ["trailer.mp4"]
+    assert "copy of 2.0 MB" in json.loads(results[3]["content"])["files"][0]["shown_as"], "over what is shown as it is, under the limit"
+
+
+def test_look_hands_the_model_a_small_picture_of_what_it_previews(studio):
+    client, model, launcher = studio.client, studio.model, studio.launcher
+    film = new_project(client)
+    eid = start_engine(studio, film["id"])["id"]
+    launcher.answers += [
+        probe("previews/frame.png", 240_000, PNG), probe("previews/cut.mp4", 3 * MB, H264), probe("previews/chorus.wav", 900_000, WAV),
+        probe("notes/plan.md", 900, {}),
+    ]
+    model.script(
+        reply(
+            use("preview", engine_id=eid, paths=["previews/frame.png", "previews/cut.mp4", "previews/chorus.wav"], caption="Where the scene is", look=True),
+            use("preview", engine_id=eid, path="notes/plan.md", caption="The plan", look=True),
+        ),
+        reply(say("The frame is too dark.")),
+    )
+    message(client, film["id"], "Is it right?")
+
+    looked, plain = tool_results(model.requests[1]).values()
+    assert [block["type"] for block in looked["content"]] == ["image", "image", "image", "text"]
+    assert [base64.b64decode(block["source"]["data"]) for block in looked["content"][:3]] == [b"bytes of 0-look.jpg", b"bytes of 1-look.jpg", b"bytes of 2-look.jpg"]
+    assert "yours to judge by" in json.loads(looked["content"][3]["text"])["note"]
+    looks = [command for _, command in launcher.commands if "-look.jpg" in command]
+    assert "scale=min(1280\\,iw):-2" in looks[0] and "fps=4/12.480,scale=640:-2,tile=2x2" in looks[1] and "showwavespic" in looks[2]
+    assert isinstance(plain["content"], str) and "not an image, a video, or a sound" in json.loads(plain["content"])["files"][0]["look"]
+    assert len(previews(client, film["id"])) == 2 and len(stored_previews(studio, film["id"])) == 4, "the person is shown the files, not the model's pictures"
+
+
+def test_an_engine_without_ffmpeg_shows_the_file_as_it_is_and_says_so(studio):
+    client, model, launcher = studio.client, studio.model, studio.launcher
+    film = new_project(client)
+    eid = start_engine(studio, film["id"])["id"]
+    launcher.answers += [
+        probe("bounces/mix.wav", 30 * MB, None), probe("exports/shot.mov", 5 * MB, None), probe("previews/frame.png", 240_000, None),
+        probe("bounces/master.wav", 300 * MB, None), probe("logo/mark.svg", 4_000, {}),
+    ]
+    model.script(
+        reply(
+            use("preview", engine_id=eid, paths=["bounces/mix.wav", "exports/shot.mov", "previews/frame.png", "logo/mark.svg"], caption="What there is", look=True),
+            use("preview", engine_id=eid, path="bounces/master.wav", caption="The master"),
+        ),
+        reply(say("Shown as they are.")),
+    )
+    message(client, film["id"], "Show me")
+
+    shown, master = tool_results(model.requests[1]).values()
+    mix, shot, frame, mark = json.loads(shown["content"])["files"]
+    assert "This engine has no ffmpeg, so no lighter copy was encoded and nothing was measured: it is shown as it is." == mix["note"]
+    assert shot["note"].endswith("as a file to open, since browsers do not play it.") and "note" not in frame
+    assert "seconds" not in mix and "loudness_lufs" not in mix
+    assert [item["kind"] for item in previews(client, film["id"])[0]["items"]] == ["audio", "file", "image", "image"]
+    assert mark["kind"] == "image" and "ffmpeg does not read it" in mark["look"], "a browser draws an SVG whatever ffmpeg reads"
+    assert master["is_error"] and "300.0 MB as a preview, over the 50.0 MB" in master["content"]
+    assert not any("ffmpeg -nostdin" in command for _, command in launcher.commands)
+
+
+def test_a_preview_reaches_only_the_projects_own_running_engine_and_its_folder(studio):
+    client, model, launcher, store = studio.client, studio.model, studio.launcher, studio.store
+    for user in (ALICE, BOB):
+        store.moody_ensure_profile(user.id, user.email, 60)["max_sessions"] = 5
+    film = new_project(client)
+    eid = start_engine(studio, film["id"])["id"]
+    other = start_engine(studio, new_project(client, name="Other")["id"], app="blender")
+    bobs = start_engine(studio, new_project(client, "bob-token")["id"], token="bob-token")
+    ended = start_engine(studio, film["id"], app="blender")
+    client.delete(f"/v1/sessions/{ended['id']}", headers=auth("alice-token"))
+    launcher.answers += [("./previews/missing.png ] || exit 44", (44, "")), ("[ -f ./previews ] || exit 45", (45, ""))]
+    model.script(
+        reply(
+            use("preview", engine_id=bobs["id"], path="previews/frame.png", caption="Another user's engine"),
+            use("preview", engine_id=other["id"], path="previews/frame.png", caption="Another project's engine"),
+            use("preview", engine_id=ended["id"], path="previews/frame.png", caption="An engine that stopped"),
+            use("preview", engine_id=eid, path="../../other/secret.png", caption="Outside the folder"),
+            use("preview", engine_id=eid, path="/etc/passwd", caption="Outside the folder"),
+            use("preview", engine_id=eid, path="previews/missing.png", caption="Not there"),
+            use("preview", engine_id=eid, path="previews", caption="A folder"),
+            use("preview", engine_id=eid, path="previews/frame.png", caption="A sound that is a picture", kind="audio"),
+        ),
+        reply(say("None of those can be shown.")),
+    )
+    launcher.answers.append(probe("previews/frame.png", 240_000, PNG))
+    message(client, film["id"], "Show me Bob's frame")
+
+    results = list(tool_results(model.requests[1]).values())
+    assert all(r.get("is_error") for r in results)
+    assert "No such session" in results[0]["content"] and "No such engine in this project" in results[1]["content"]
+    assert "not running" in results[2]["content"]
+    assert "outside the project's folder" in results[3]["content"] and "outside the project's folder" in results[4]["content"]
+    assert "There is no previews/missing.png" in results[5]["content"] and "previews is a folder" in results[6]["content"]
+    assert results[7]["content"] == "previews/frame.png is not an audio file, as far as ffprobe reads it."
+    assert previews(client, film["id"]) == [] and not launcher.reads and not store.files
+    assert {sandbox for sandbox, _ in launcher.commands} == {"sb-1"}, "no other engine was asked anything"
+
+
+def test_a_screenshot_is_shown_as_a_preview_card_and_previews_are_signed_at_each_reading(studio):
+    client, model, store = studio.client, studio.model, studio.store
+    film = new_project(client)
+    eid = start_engine(studio, film["id"])["id"]
+    studio.launcher.answers.append(probe("previews/frame.png", 240_000, PNG))
+    model.script(
+        reply(use("engine_screenshot", engine_id=eid), use("preview", engine_id=eid, paths=["previews/frame.png", "previews/frame.png"], caption="Twice")),
+        reply(say("Seen.")),
+    )
+    message(client, film["id"], "What is on screen?")
+
+    screen, twice = previews(client, film["id"])
+    assert screen["caption"] == "FilmCraft's screen" and [(i["kind"], i["name"]) for i in screen["items"]] == [("image", "screen.jpg")]
+    ended = [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "tool_end"]
+    assert not any("media" in end for end in ended), "the card is the preview, not a second picture under the call"
+    assert tool_results(model.requests[1])[model.requests[1]["messages"][-2]["content"][0]["id"]]["content"][0]["type"] == "image"
+    rows = [row["data"] for row in store.tables["project_events"].values() if row["kind"] == "preview"]
+    assert all("url" not in item and item["path"].startswith(f"{ALICE.id}/{film['id']}/previews/") for row in rows for item in row["items"]), (
+        "the log keeps where a file is, never a link that expires"
+    )
+    del store.files[rows[1]["items"][0]["path"]]
+    assert [len(p["items"]) for p in previews(client, film["id"])] == [1, 1], "a file that is gone is left out of its preview"
+    client.delete(f"/v1/projects/{film['id']}", headers=auth("alice-token"))
+    assert not store.files, "a project's previews go with it"
+
+
+def test_engine_send_carries_a_file_between_two_running_engines_of_one_project(studio):
+    client, model, launcher, store = studio.client, studio.model, studio.launcher, studio.store
+    for user in (ALICE, BOB):
+        store.moody_ensure_profile(user.id, user.email, 60)["max_sessions"] = 5
+    film = new_project(client)
+    cut = start_engine(studio, film["id"])
+    score = start_engine(studio, film["id"], runs="soundcraft")
+    other = start_engine(studio, new_project(client, name="Other")["id"], app="blender")
+    bobs = start_engine(studio, new_project(client, "bob-token")["id"], token="bob-token")
+    folder = f"/home/ubuntu/workspace/projects/{film['id']}"
+    mix = "handoff/soundcraft-to-filmcraft/mix.wav"
+    launcher.absent.add(f"{folder}/handoff/gone.wav")
+    launcher.answers += [
+        ("./handoff/missing.wav ] || exit 44", (44, "")),
+        ("stat -c %s ./handoff/stems; fi", (0, f"{5 * 1024 * MB}\n")),
+        ("; fi", (0, "2048\n")),
+        (f"find ./{mix} -maxdepth 0", (0, "f\t2048\t1795582875.75\tmix.wav\n")),
+        ("find ./audio/score.wav -maxdepth 0", (0, "f\t2048\t1795582875.75\tscore.wav\n")),
+    ]
+    model.script(
+        reply(
+            use("engine_send", from_engine_id=score["id"], path=mix, to_engine_id=cut["id"]),
+            use("engine_send", from_engine_id=score["id"], path=f"{folder}/{mix}", to_engine_id=cut["id"], to_path="audio/score.wav"),
+            use("engine_send", from_engine_id=score["id"], path=mix, to_engine_id=other["id"]),
+            use("engine_send", from_engine_id=score["id"], path=mix, to_engine_id=bobs["id"]),
+            use("engine_send", from_engine_id=bobs["id"], path=mix, to_engine_id=cut["id"]),
+            use("engine_send", from_engine_id=score["id"], path="handoff/stems", to_engine_id=cut["id"]),
+            use("engine_send", from_engine_id=score["id"], path="handoff/missing.wav", to_engine_id=cut["id"]),
+            use("engine_send", from_engine_id=score["id"], path="handoff/gone.wav", to_engine_id=cut["id"]),
+            use("engine_send", from_engine_id=score["id"], path=mix, to_engine_id=score["id"]),
+            use("engine_send", from_engine_id=score["id"], path=mix, to_engine_id=cut["id"], to_path="../../elsewhere/mix.wav"),
+            use("engine_send", from_engine_id=score["id"], path="", to_engine_id=cut["id"]),
+        ),
+        reply(say("The mix is in FilmCraft.")),
+    )
+    message(client, film["id"], "Bring the mix into the cut")
+
+    results = list(tool_results(model.requests[1]).values())
+    assert [r.get("is_error", False) for r in results] == [False, False, True, True, True, True, True, True, True, True, True]
+    assert launcher.sent == [
+        ("sb-2", f"{folder}/{mix}", "sb-1", f"{folder}/{mix}"),
+        ("sb-2", f"{folder}/{mix}", "sb-1", f"{folder}/audio/score.wav"),
+    ], "only between the project's own two engines, and to the same path unless another is given"
+    sent = json.loads(results[0]["content"])
+    assert sent["to"] == {"engine_id": cut["id"], "app": "filmcraft", "path": mix} and sent["bytes"] == 2048
+    assert sent["entry"] == {"name": mix, "kind": "file", "size": 2048, "modified": "2026-11-25T05:01:15+00:00"}, (
+        "the entry is the receiving engine's own listing of it"
+    )
+    assert json.loads(results[1]["content"])["entry"]["name"] == "audio/score.wav"
+    assert "No such engine in this project" in results[2]["content"] and all("No such session" in results[index]["content"] for index in (3, 4))
+    assert results[5]["content"].startswith("handoff/stems is 5.0 GB, over the 4.0 GB that passes between running engines.")
+    assert "stop the FilmCraft engine and start it again" in results[5]["content"]
+    assert "There is no handoff/missing.wav in the project's folder on the SoundCraft engine" in results[6]["content"]
+    assert "There is no handoff/gone.wav" in results[7]["content"]
+    assert "one engine" in results[8]["content"] and "outside the project's folder" in results[9]["content"]
+    assert "not the folder itself" in results[10]["content"]
+    assert {sandbox for sandbox, _ in launcher.commands} == {"sb-1", "sb-2"}, "no other project's or user's engine was asked anything"
+    shown = tools_shown(client, film["id"])[0]
+    assert shown[0] == "Sending mix.wav to another engine" and shown[1].startswith("mix.wav is in FilmCraft's folder: 2 KB in ")
+
+
+def test_the_launcher_reads_a_file_and_carries_one_between_two_sandboxes_through_its_module():
+    module = FakeSandboxModule()
+    launcher = ModalLauncher(module, app="modal-app")
+    launcher.sandbox = lambda sandbox_id: f"sandbox:{sandbox_id}"
+    carried = []
+    module.read_file = lambda sandbox, path, limit: f"{sandbox} {path} {limit}".encode()
+    module.send_file = lambda source, path, target, to_path, keep_going: carried.append((source, path, target, to_path, keep_going())) or 7
+    assert launcher.read_file("sb-1", "/tmp/a.m4a", 99) == b"sandbox:sb-1 /tmp/a.m4a 99"
+    assert launcher.send("sb-1", "/w/a.wav", "sb-2", "/w/b.wav", lambda: True) == 7
+    assert carried == [("sandbox:sb-1", "/w/a.wav", "sandbox:sb-2", "/w/b.wav", True)]
 
 
 def test_a_turn_starts_knowing_each_engines_app_its_command_channel_and_the_shared_folder(studio):

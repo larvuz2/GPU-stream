@@ -34,7 +34,8 @@ An application's own interface is reached from inside the Sandbox, the one
 place it listens: Blender runs the Python it finds in a spool directory
 (`blender_python`), and FilmCraft answers JSON requests on a control channel
 bound to the Sandbox's loopback, for the session's own token only
-(`filmcraft_call`). Neither is exposed beyond the Sandbox, so driving one takes
+(`filmcraft_call`), as SoundCraft does on its own, which takes no token
+(`soundcraft_call`). None is exposed beyond the Sandbox, so driving one takes
 the Modal credentials that started it, as a link does. An Unreal session
 describes the projects cloned into its workspace the same way
 (`unreal_projects`), and has a second page beside its desktop on a port of its
@@ -57,7 +58,7 @@ import sys
 import time
 from pathlib import Path, PurePosixPath
 from secrets import token_hex, token_urlsafe
-from typing import Any
+from typing import Any, Callable
 
 import modal
 from modal.stream_type import StreamType
@@ -75,15 +76,29 @@ BASE_IMAGE = (
 )
 BLENDER_VERSION = "5.2.4"
 BLENDER_SHA256 = "2fd14c50987426897ba60237ee996edf2b4151f4b1a72a460ca20be58c1d2d86"
-# FilmCraft's and PhotoCraft's Debian packages from their GitHub releases, and the hash each
-# release's SHA256SUMS.txt lists for it
+# FilmCraft's, PhotoCraft's, and SoundCraft's Debian packages from their GitHub releases, and the
+# hash each release's SHA256SUMS.txt lists for it
 FILMCRAFT_VERSION = "0.20.1"
 FILMCRAFT_SHA256 = "5667c7505c91d2ad9de3c4acb15cb02fc9f138fae74dce9c7c5f08bc29edb3a8"
 PHOTOCRAFT_VERSION = "0.23.1"
 PHOTOCRAFT_SHA256 = "baabdcdbe46df2f72ccf6ecc2e98be00fbc33dbd4c1cd9426362a89a4b95f673"
+SOUNDCRAFT_VERSION = "0.20.1"
+SOUNDCRAFT_SHA256 = "a217c7f65bb55ef4d7417f1c204244d974f25d6b779477727c440800d8256081"
+# CADCraft's Debian package, by the same rule
+CADCRAFT_VERSION = "0.20.1"
+CADCRAFT_SHA256 = "8e6ad1f487d6cd44dbcb73cd88ef1efb52252a2071094f2c23a468a641a06faa"
+VECTORCRAFT_VERSION = "0.24.1"
+VECTORCRAFT_SHA256 = "ae6733083d2819efe980d76d41d1908d40fe487bb9a5e7679292b53fd8dc49d7"
+# LightCraft's, from its release's SHA256SUMS.txt as theirs are
+LIGHTCRAFT_VERSION = "0.21.1"
+LIGHTCRAFT_SHA256 = "c91ef47bec44995d99ce58e6c748af9fa6ab1ff1c11de9e290e0b8231176dad1"
 CRAFT_RELEASES = {
     "filmcraft": (FILMCRAFT_VERSION, FILMCRAFT_SHA256),
     "photocraft": (PHOTOCRAFT_VERSION, PHOTOCRAFT_SHA256),
+    "soundcraft": (SOUNDCRAFT_VERSION, SOUNDCRAFT_SHA256),
+    "cadcraft": (CADCRAFT_VERSION, CADCRAFT_SHA256),
+    "vectorcraft": (VECTORCRAFT_VERSION, VECTORCRAFT_SHA256),
+    "lightcraft": (LIGHTCRAFT_VERSION, LIGHTCRAFT_SHA256),
 }
 # The Unreal session's GitHub client: Desktop Plus, a fork of GitHub Desktop kept current with it
 # that publishes Linux packages; its Debian package and the SHA-256 its GitHub release lists for it
@@ -104,12 +119,25 @@ SHARE = "/usr/local/share/selkies-modal"
 # FilmCraft's and PhotoCraft's control channels, which each binds on the Sandbox's loopback only
 FILMCRAFT_CONTROL_PORT = 9876
 PHOTOCRAFT_CONTROL_PORT = 7878
+# SoundCraft's control channel, loopback only as well; it takes no token (`soundcraft_call`)
+SOUNDCRAFT_CONTROL_PORT = 7801
 # The TCP port a session's TURN relay listens on (webrtc/turnserver.sh), exposed with `tcp_ports`
 TURN_PORT = 3478
 # The Unreal view, the Unreal session's second page beside the desktop (unreal/view/view.sh)
 UNREAL_VIEW_PORT = 8090
 # Where an Unreal session's clone of its repository says how far it is (unreal/clone.py)
 UNREAL_CLONE_STATUS = "/tmp/selkies-modal/unreal-clone.json"
+
+# CADCraft's, on loopback as well
+CADCRAFT_CONTROL_PORT = 9878
+
+# VectorCraft's control channel, on the Sandbox's loopback only as well, and the file that says the
+# session has brought the project's documents back (vectorcraft/resume.sh)
+VECTORCRAFT_CONTROL_PORT = 7979
+VECTORCRAFT_READY_FILE = "/tmp/selkies-modal/vectorcraft-ready"
+
+# LightCraft's, loopback only as theirs are, and the port its own documentation uses
+LIGHTCRAFT_CONTROL_PORT = 7980
 
 # What the session is, whoever starts it. Modal terminates TLS and its connect
 # token guards the address, so Selkies serves plain HTTP with no login of its
@@ -165,6 +193,11 @@ APP_ENV = {
         # The control channel; its token is the session's own (start_session)
         "PHOTOCRAFT_CONTROL_PORT": str(PHOTOCRAFT_CONTROL_PORT),
     },
+    "soundcraft": {
+        "SELKIES_MODAL_APP": "soundcraft",
+        # The control channel, which SoundCraft itself reads the port of
+        "SOUNDCRAFT_CONTROL_PORT": str(SOUNDCRAFT_CONTROL_PORT),
+    },
     "unreal": {
         "SELKIES_MODAL_APP": "unreal",
         # The desktop, whose taskbar keeps the GitHub client, Firefox, and Blender in reach
@@ -182,6 +215,31 @@ APP_ENV = {
         "SELKIES_MODAL_BLENDER_SPOOL": BLENDER_SPOOL,
         "BLENDER_USER_RESOURCES": f"{WORKSPACE}/.blender",
         "SELKIES_MODAL_BLENDER_RECOVERY": f"{WORKSPACE}/.blender/autosave",
+    },
+    "cadcraft": {
+        "SELKIES_MODAL_APP": "cadcraft",
+        # The control channel; CADCraft makes its token itself as it starts (cadcraft/control.sh)
+        "CADCRAFT_CONTROL_PORT": str(CADCRAFT_CONTROL_PORT),
+        # Mesa's Vulkan in software (lavapipe), as FilmCraft draws: a Sandbox has no render node
+        # with or without a GPU, and a drawing is 2D lines the CPU rasterizes at the display's rate
+        "WGPU_BACKEND": "vulkan",
+    },
+    "vectorcraft": {
+        "SELKIES_MODAL_APP": "vectorcraft",
+        # The control channel; the token a release with a sign-in takes is the session's own (start_session)
+        "VECTORCRAFT_CONTROL_PORT": str(VECTORCRAFT_CONTROL_PORT),
+        "SELKIES_MODAL_VECTORCRAFT_READY": VECTORCRAFT_READY_FILE,
+    },
+    "lightcraft": {
+        "SELKIES_MODAL_APP": "lightcraft",
+        # The control channel, which takes no token: loopback is what guards it (lightcraft/autostart)
+        "LIGHTCRAFT_CONTROL_PORT": str(LIGHTCRAFT_CONTROL_PORT),
+        # As FilmCraft: the window draws through Mesa's Vulkan in software on every machine, and
+        # Vulkan is what reaches a GPU where there is one, for the develop pipeline. Without one
+        # LightCraft develops on the CPU, having found only a software adapter. OpenGL is left
+        # out: its window was no quicker than the spread between runs on the machine without a
+        # GPU, and on a GPU machine LightCraft's kernels fail to build on NVIDIA's OpenGL.
+        "WGPU_BACKEND": "vulkan",
     },
 }
 APPS = tuple(APP_ENV)
@@ -226,10 +284,11 @@ def session_image(app: str = "blender") -> modal.Image:
     it out behind a login and a license its user accepts, so the session
     installs it into the workspace once that user has (`nuke/setup.sh`); the
     image carries what that takes, Firefox among it (`nuke/install-deps.sh`).
-    FilmCraft and PhotoCraft are the Debian packages of their GitHub releases,
-    each checked against the hash its release publishes (`craft/install.sh`),
-    with what finds the session's project folder (`craft/project.sh`); FilmCraft
-    adds the client of its control channel (`filmcraft/control.sh`). Unreal's
+    FilmCraft, PhotoCraft, and SoundCraft are the Debian packages of their
+    GitHub releases, each checked against the hash its release publishes
+    (`craft/install.sh`), with what finds the session's project folder
+    (`craft/project.sh`); FilmCraft and SoundCraft each add the client of their
+    control channel (`filmcraft/control.sh`, `soundcraft/control.sh`). Unreal's
     is the desktop its editor runs beside, without the editor
     (`unreal_desktop`); `unreal_image` is the same desktop with the editor.
     """
@@ -246,6 +305,22 @@ def session_image(app: str = "blender") -> modal.Image:
         )
         if app == "filmcraft":
             image = image.add_local_file(HERE / "filmcraft" / "control.sh", "/usr/local/bin/selkies-modal-filmcraft", copy=True)
+        if app == "photocraft":
+            image = image.add_local_file(HERE / "photocraft" / "control.sh", "/usr/local/bin/selkies-modal-photocraft", copy=True)
+        if app == "lightcraft":
+            image = image.add_local_file(
+                HERE / "lightcraft" / "control.sh", "/usr/local/bin/selkies-modal-lightcraft", copy=True
+            ).add_local_file(HERE / "lightcraft" / "histogram.py", "/usr/local/bin/selkies-modal-histogram", copy=True)
+        if app == "cadcraft":
+            image = image.add_local_file(HERE / "cadcraft" / "control.sh", "/usr/local/bin/selkies-modal-cadcraft", copy=True)
+            image = image.add_local_file(HERE / "cadcraft" / "keep.sh", "/usr/local/bin/selkies-modal-cadcraft-keep", copy=True)
+        if app == "vectorcraft":
+            # The client of its control channel, and what brings a project's documents back at start
+            image = image.add_local_file(
+                HERE / "vectorcraft" / "control.sh", "/usr/local/bin/selkies-modal-vectorcraft", copy=True
+            ).add_local_file(HERE / "vectorcraft" / "resume.sh", "/usr/local/bin/selkies-modal-vectorcraft-resume", copy=True)
+        if app == "soundcraft":
+            image = image.add_local_file(HERE / "soundcraft" / "control.sh", "/usr/local/bin/selkies-modal-soundcraft", copy=True)
     elif app == "nuke":
         image = (
             modal.Image.from_registry(BASE_IMAGE)
@@ -556,6 +631,7 @@ def start_session(
             "SELKIES_MODAL_SESSION_TOKEN": token_urlsafe(32),
             "FILMCRAFT_CONTROL_TOKEN": token_hex(32),
             "PHOTOCRAFT_CONTROL_TOKEN": token_hex(32),
+            "VECTORCRAFT_CONTROL_TOKEN": token_hex(32),
             "SELKIES_MODAL_TURN_SECRET": token_urlsafe(32),
         }
     )
@@ -675,6 +751,61 @@ def filmcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] |
     return result if isinstance(result, dict) else {"result": result}
 
 
+def soundcraft_requests(sandbox: modal.Sandbox, requests: str, wait_seconds: int) -> modal.container_process.ContainerProcess:
+    """Hand JSON requests, one per line, to the session's SoundCraft and return the process printing its replies.
+
+    The requests go from inside the Sandbox, the only place the control
+    channel listens: `soundcraft/control.sh` sends each and prints each reply
+    on a line of its own, and runs as a command of the session, so it counts
+    as use while it waits.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-soundcraft", str(wait_seconds), bufsize=1)
+    try:
+        process.stdin.write(requests)
+        process.stdin.write_eof()
+        process.stdin.drain()
+    except modal.exception.Error:
+        # The command ended before it read anything; its status and output say why
+        pass
+    return process
+
+
+def soundcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
+    """Send one request on the session's SoundCraft control channel and return its result.
+
+    `method` and `params` are those of SoundCraft's control protocol:
+    `engine.execute` with `{"command", "params"}` runs any of its commands,
+    `session.inspect` reads the session, and the `ui.*` methods read and drive
+    its window. `timeout` is how many seconds to wait for SoundCraft to
+    listen, which it does as its window opens, and then for the reply.
+    SoundCraft gives up on a reply itself after 90 s, and a bounce renders
+    within the request that asks for it, so a long one is bounced in ranges
+    that each fit.
+
+    SoundCraft's channel takes no token, unlike FilmCraft's: it answers
+    whatever reaches the Sandbox's loopback, which only a process of the
+    session does.
+
+    The result is the reply's `result`, an object for most methods; a result
+    that is not one, such as the list `engine.plugins` returns, comes back as
+    `{"result": ...}`.
+
+    Raises:
+        RuntimeError: SoundCraft refused the request, with its message, or did not answer within `timeout`.
+    """
+    request = json.dumps({"id": 1, "method": method, "params": params or {}})
+    process = soundcraft_requests(sandbox, request + "\n", timeout)
+    output = process.stdout.read()
+    status = process.wait()
+    if not output.strip():
+        raise RuntimeError(f"SoundCraft did not answer: {process.stderr.read().strip() or f'status {status}'}")
+    reply = json.loads(output.splitlines()[-1])
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("error") or output.strip())
+    result = reply.get("result")
+    return result if isinstance(result, dict) else {"result": result}
+
+
 def unreal_projects(sandbox: modal.Sandbox) -> list[dict[str, Any]]:
     """The Unreal projects in an Unreal session's workspace, as `selkies-modal-unreal-projects` describes them.
 
@@ -732,6 +863,214 @@ def unreal_view_link(sandbox: modal.Sandbox) -> str:
     return f"{credentials.url}/?_modal_connect_token={credentials.token}"
 
 
+def cadcraft_requests(sandbox: modal.Sandbox, requests: str, wait_seconds: int) -> modal.container_process.ContainerProcess:
+    """Hand JSON requests, one per line, to the session's CADCraft and return the process printing its replies.
+
+    The requests go from inside the Sandbox, the only place the control
+    channel listens and its token is: `cadcraft/control.sh` adds the token
+    CADCraft wrote as it started to each and prints each reply on a line of its
+    own, and runs as a command of the session, so it counts as use while it
+    waits.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-cadcraft", str(wait_seconds), bufsize=1)
+    try:
+        process.stdin.write(requests)
+        process.stdin.write_eof()
+        process.stdin.drain()
+    except modal.exception.Error:
+        # The command ended before it read anything; its status and output say why
+        pass
+    return process
+
+
+def cadcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
+    """Send one request on the session's CADCraft control channel and return its result.
+
+    `method` and `params` are those of CADCraft's control protocol:
+    `engine.execute` with `{"command", "params"}` runs any of its commands,
+    `cmdline.input` with `{"text"}` types at its command line as a person does,
+    `drawing.inspect` reads the drawing back, and the `ui.*` methods read and
+    drive its window. `timeout` is how many seconds to wait for CADCraft to be
+    ready, which it is as its window opens, and then for the reply. CADCraft
+    gives up on a reply itself after 60 s, saying whether the request had
+    started, which the error raised here repeats (`timeout (may-have-run)`):
+    the drawing is inspected before such a request is sent again.
+
+    The result is the reply's `result`, an object for most methods; a result
+    that is not one, such as the list `engine.commands` returns, comes back as
+    `{"result": ...}`.
+
+    Raises:
+        RuntimeError: CADCraft refused the request, with its message, or did not answer within `timeout`.
+    """
+    request = json.dumps({"id": 1, "method": method, "params": params or {}})
+    process = cadcraft_requests(sandbox, request + "\n", timeout)
+    output = process.stdout.read()
+    status = process.wait()
+    if not output.strip():
+        raise RuntimeError(f"CADCraft did not answer: {process.stderr.read().strip() or f'status {status}'}")
+    reply = json.loads(output.splitlines()[-1])
+    if not reply.get("ok"):
+        state = f" ({reply['state']})" if reply.get("state") else ""
+        raise RuntimeError(f"{reply.get('error') or output.strip()}{state}")
+    result = reply.get("result")
+    return result if isinstance(result, dict) else {"result": result}
+
+
+def vectorcraft_requests(sandbox: modal.Sandbox, requests: str, wait_seconds: int) -> modal.container_process.ContainerProcess:
+    """Hand JSON requests, one per line, to the session's VectorCraft and return the process printing its replies.
+
+    The requests go from inside the Sandbox, the only place the control
+    channel listens and the session's token is: `vectorcraft/control.sh` signs
+    in on a connection of its own for each, where the release takes a sign-in,
+    and prints each reply on a line of its own. It runs as a command of the
+    session, so it counts as use while it waits.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-vectorcraft", str(wait_seconds), bufsize=1)
+    try:
+        process.stdin.write(requests)
+        process.stdin.write_eof()
+        process.stdin.drain()
+    except modal.exception.Error:
+        # The command ended before it read anything; its status and output say why
+        pass
+    return process
+
+
+def vectorcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
+    """Send one request on the session's VectorCraft control channel and return its result.
+
+    `method` and `params` are those of VectorCraft's control protocol:
+    `engine.execute` with `{"command", "params"}` runs any of its commands,
+    `document.inspect` reads the document, `app.open` opens a file, and the
+    `ui.*` methods read and drive its window. `timeout` is how many seconds to
+    wait for VectorCraft to listen, which it does a few seconds after its
+    window opens, and then for the reply. VectorCraft gives up on a reply
+    itself after 60 s. The paths a request names are read against the
+    session's project folder, the only folder the channel may read and write
+    (`vectorcraft/autostart`).
+
+    The result is the reply's `result`, an object for most methods; a result
+    that is not one, such as the null a command that returns nothing answers
+    with, comes back as `{"result": ...}`.
+
+    Raises:
+        RuntimeError: VectorCraft refused the request, with its message, or did not answer within `timeout`.
+    """
+    request = json.dumps({"id": 1, "method": method, "params": params or {}})
+    process = vectorcraft_requests(sandbox, request + "\n", timeout)
+    output = process.stdout.read()
+    status = process.wait()
+    if not output.strip():
+        raise RuntimeError(f"VectorCraft did not answer: {process.stderr.read().strip() or f'status {status}'}")
+    reply = json.loads(output.splitlines()[-1])
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("error") or output.strip())
+    result = reply.get("result")
+    return result if isinstance(result, dict) else {"result": result}
+
+
+def lightcraft_requests(sandbox: modal.Sandbox, requests: str, wait_seconds: int) -> modal.container_process.ContainerProcess:
+    """Hand JSON requests, one per line, to the session's LightCraft and return the process printing its replies.
+
+    As `filmcraft_requests`, through `lightcraft/control.sh`: from inside the
+    Sandbox, the only place the control channel listens, as a command of the
+    session, so it counts as use while it waits.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-lightcraft", str(wait_seconds), bufsize=1)
+    try:
+        process.stdin.write(requests)
+        process.stdin.write_eof()
+        process.stdin.drain()
+    except modal.exception.Error:
+        # The command ended before it read anything; its status and output say why
+        pass
+    return process
+
+
+def lightcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
+    """Send one request on the session's LightCraft control channel and return its result.
+
+    `method` and `params` are those of LightCraft's control protocol:
+    `engine.execute` with `{"command", "params"}` runs any of its commands, and
+    the `ui.*` methods read and drive its window. `timeout` is how many seconds
+    to wait for LightCraft to listen and then for the reply. LightCraft gives up
+    on a reply itself after 60 s, so a long export is started with
+    `background: true` and followed with `ui.inspect`'s `export`.
+
+    The result is the reply's `result`, an object for most methods; a result
+    that is not one, such as the list `develop.controls` returns or the `null`
+    of a command with nothing to say, comes back as `{"result": ...}`.
+
+    Raises:
+        RuntimeError: LightCraft refused the request, with its message, or did not answer within `timeout`.
+    """
+    request = json.dumps({"id": 1, "method": method, "params": params or {}})
+    process = lightcraft_requests(sandbox, request + "\n", timeout)
+    output = process.stdout.read()
+    status = process.wait()
+    if not output.strip():
+        raise RuntimeError(f"LightCraft did not answer: {process.stderr.read().strip() or f'status {status}'}")
+    reply = json.loads(output.splitlines()[-1])
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("error") or output.strip())
+    result = reply.get("result")
+    return result if isinstance(result, dict) else {"result": result}
+
+
+def photocraft_requests(sandbox: modal.Sandbox, requests: str, wait_seconds: int) -> modal.container_process.ContainerProcess:
+    """Hand JSON requests, one per line, to the session's PhotoCraft and return the process printing its replies.
+
+    The requests go from inside the Sandbox, the only place the control
+    channel listens and its token is: `photocraft/control.sh` authenticates a
+    connection for each by PhotoCraft's challenge, which proves the token to
+    both sides without sending it, and prints each reply on a line of its own.
+    It runs as a command of the session, so it counts as use while it waits.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-photocraft", str(wait_seconds), bufsize=1)
+    try:
+        process.stdin.write(requests)
+        process.stdin.write_eof()
+        process.stdin.drain()
+    except modal.exception.Error:
+        # The command ended before it read anything; its status and output say why
+        pass
+    return process
+
+
+def photocraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
+    """Send one request on the session's PhotoCraft control channel and return its result.
+
+    `method` and `params` are those of PhotoCraft's control protocol:
+    `engine.execute` with `{"command", "params"}` runs any of its commands,
+    `app.open` and `app.save` read and write files of the project folder, the
+    one folder the channel may touch, and the `ui.*` methods read and drive its
+    window. `timeout` is how many seconds to wait for PhotoCraft to listen,
+    which it does a few seconds after its window opens, and then for the reply.
+    PhotoCraft gives up on a reply itself after 60 s without undoing what it
+    started, so a long filter or save is started with `"wait": false` and
+    followed with `jobs.list`.
+
+    The result is the reply's `result`, an object for most methods; a result
+    that is not one, such as the list `engine.commands` returns, comes back as
+    `{"result": ...}`.
+
+    Raises:
+        RuntimeError: PhotoCraft refused the request, with its message, or did not answer within `timeout`.
+    """
+    request = json.dumps({"id": 1, "method": method, "params": params or {}})
+    process = photocraft_requests(sandbox, request + "\n", timeout)
+    output = process.stdout.read()
+    status = process.wait()
+    if not output.strip():
+        raise RuntimeError(f"PhotoCraft did not answer: {process.stderr.read().strip() or f'status {status}'}")
+    reply = json.loads(output.splitlines()[-1])
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("error") or output.strip())
+    result = reply.get("result")
+    return result if isinstance(result, dict) else {"result": result}
+
+
 def screenshot(sandbox: modal.Sandbox) -> bytes:
     """The session's screen as a JPEG no wider than 1280 pixels, small enough to hand to a model.
 
@@ -753,6 +1092,137 @@ def screenshot(sandbox: modal.Sandbox) -> bytes:
     if process.wait() != 0 or not picture:
         raise RuntimeError(f"no screenshot: {process.stderr.read().strip()}")
     return base64.b64decode(picture)
+
+
+def read_file(sandbox: modal.Sandbox, path: str, limit: int) -> bytes:
+    """A file of the session, whole, for one small enough to hold: a preview on its way to the person.
+
+    Raises:
+        RuntimeError: The file could not be read, with what the session said.
+        ValueError: The file is larger than `limit` bytes; nothing of it is returned.
+    """
+    # One byte past the limit is asked for, so a file over it is known without reading the rest
+    process = sandbox.exec("head", "-c", str(limit + 1), "--", path, text=False)
+    data = process.stdout.read()
+    if process.wait() != 0:
+        raise RuntimeError(f"could not read {path}: {process.stderr.read().decode(errors='replace').strip()}")
+    if len(data) > limit:
+        raise ValueError(f"{path} is larger than {limit} bytes")
+    return data
+
+
+# The bytes of a transfer in hand at once: what one write to a session's command carries (its buffer takes 16 MiB),
+# large enough that the round trip each write waits on does not set the pace
+SEND_PIECE = 8 * 1024 * 1024
+# Says what is at $1:`folder`, a file's size in bytes, or status 44 for neither
+MEASURE = 'if [ -d "$1" ]; then echo folder; elif [ -f "$1" ]; then stat -c %s "$1"; else exit 44; fi'
+# Writes standard input at $1 under a name of its own, moved into place only once all $2 bytes arrived
+RECEIVE_FILE = (
+    'set -e; mkdir -p "$(dirname "$1")"; part="$1.part-$$"; trap \'rm -f "$part"\' EXIT; cat > "$part"; '
+    'got="$(stat -c %s "$part")"; [ "$got" = "$2" ] || { echo "received $got of $2 bytes" >&2; exit 1; }; '
+    'mv -f "$part" "$1"'
+)
+# Unpacks the tar stream on standard input into the folder $1
+RECEIVE_FOLDER = 'set -e; mkdir -p "$1"; tar -C "$1" -xf -'
+# Write the file, or the folder as a tar stream, at $1 to standard output, as a process whose ID is kept in $2
+SEND_FILE = 'echo $$ > "$2"; exec cat -- "$1"'
+SEND_FOLDER = 'echo $$ > "$2"; exec tar -C "$1" -cf - .'
+
+
+def send_file(
+    source: modal.Sandbox,
+    path: str,
+    target: modal.Sandbox,
+    to_path: str,
+    keep_going: Callable[[], bool] | None = None,
+) -> int:
+    """Copy a file or a folder of one running session to a path of another, and return the bytes carried.
+
+    Two sessions that mount the same Volume do not see what the other writes
+    while both run: each sees the Volume as it was when its Sandbox started,
+    and Modal refuses to reload a Volume under an application that has files
+    open on it (`Sandbox.reload_volumes`), which a session's application
+    always has. So the bytes go through this side instead: a command of
+    `source` writes the file to its standard output, and each piece is handed,
+    as it arrives, to a command of `target` that writes it at `to_path`.
+    Nothing is held here but the piece in hand, so a file of any size passes
+    in the memory of one piece, and nothing touches a disk on the way.
+
+    The receiving command writes under a name of its own beside `to_path` and
+    moves the file into place only once every byte arrived, so an application
+    watching the folder never opens half a file and a transfer cut short
+    leaves nothing behind. A folder goes as a tar stream, unpacked over
+    `to_path`. Both commands run as commands of their sessions
+    (`selkies-modal-run`): the file is the session user's, and a long transfer
+    counts as use of both sessions. What `target` receives is in its own mount
+    of the Volume, so it is committed to the Volume from there as anything
+    else that session writes is, beside the copy `source` wrote.
+
+    `keep_going` is asked between pieces; once it says no, the transfer stops
+    and nothing is left at `to_path`.
+
+    Raises:
+        FileNotFoundError: `source` has no file or folder at `path`.
+        InterruptedError: `keep_going` said to stop.
+        RuntimeError: Either session's command failed, with what it said.
+    """
+    run = "/usr/local/bin/selkies-modal-run"
+    measure = source.exec(run, "sh", "-c", MEASURE, "sh", path)
+    found = measure.stdout.read().strip()
+    if measure.wait() != 0:
+        raise FileNotFoundError(path)
+    pid_file = f"/tmp/selkies-modal/send-{token_hex(8)}.pid"
+    if found == "folder":
+        reader = source.exec(run, "sh", "-c", SEND_FOLDER, "sh", path, pid_file, text=False)
+        writer = target.exec(run, "sh", "-c", RECEIVE_FOLDER, "sh", to_path, text=False)
+    else:
+        reader = source.exec(run, "sh", "-c", SEND_FILE, "sh", path, pid_file, text=False)
+        writer = target.exec(run, "sh", "-c", RECEIVE_FILE, "sh", to_path, found, text=False)
+    carried = 0
+    piece = bytearray()
+    stopped = broken = False
+
+    def hand_over() -> None:
+        """Send the piece in hand and wait until the writer took it, so no more than a piece is ever held."""
+        nonlocal carried
+        writer.stdin.write(bytes(piece))
+        writer.stdin.drain()
+        carried += len(piece)
+        piece.clear()
+
+    try:
+        for read in reader.stdout:
+            piece += read
+            if len(piece) < SEND_PIECE:
+                continue
+            if keep_going is not None and not keep_going():
+                stopped = True
+                break
+            hand_over()
+        if not stopped and piece:
+            hand_over()
+        writer.stdin.write_eof()
+        writer.stdin.drain()
+    except modal.exception.Error:
+        # The writer ended before it took everything; its own words say why, below
+        broken = True
+    received = writer.wait()
+    if stopped or broken:
+        # The reader is blocked writing to a stream nobody reads now, and would count as use of its session forever
+        source.exec("sh", "-c", 'kill "$(cat "$1")"; rm -f "$1"', "sh", pid_file).wait()
+    else:
+        source.exec("rm", "-f", pid_file).wait()
+    if stopped:
+        # A file short of its size was never moved into place; a folder's unpacked part is removed
+        if found == "folder":
+            target.exec(run, "rm", "-rf", "--", to_path).wait()
+        raise InterruptedError(f"stopped after {carried} bytes")
+    if received != 0 or broken:
+        said = writer.stderr.read().decode(errors="replace").strip()
+        raise RuntimeError(f"could not write {to_path}: {said or f'the transfer broke after {carried} bytes'}")
+    if reader.wait() != 0:
+        raise RuntimeError(f"could not read {path}: {reader.stderr.read().decode(errors='replace').strip()}")
+    return carried
 
 
 def drive_sign_in(sandbox: modal.Sandbox, wait_seconds: int) -> str:
@@ -920,6 +1390,95 @@ def filmcraft(args: argparse.Namespace) -> int:
     return status
 
 
+def soundcraft(args: argparse.Namespace) -> int:
+    """Send the JSON requests on standard input, one per line, to the session's SoundCraft and print each reply."""
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    process = soundcraft_requests(sandbox, sys.stdin.read(), args.wait)
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    status = process.wait()
+    sys.stderr.write(process.stderr.read())
+    return status
+
+
+def cadcraft(args: argparse.Namespace) -> int:
+    """Send the JSON requests on standard input, one per line, to the session's CADCraft and print each reply."""
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    process = cadcraft_requests(sandbox, sys.stdin.read(), args.wait)
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    status = process.wait()
+    sys.stderr.write(process.stderr.read())
+    return status
+
+
+def vectorcraft(args: argparse.Namespace) -> int:
+    """Send the JSON requests on standard input, one per line, to the session's VectorCraft and print each reply."""
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    process = vectorcraft_requests(sandbox, sys.stdin.read(), args.wait)
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    status = process.wait()
+    sys.stderr.write(process.stderr.read())
+    return status
+
+
+def lightcraft(args: argparse.Namespace) -> int:
+    """Send the JSON requests on standard input, one per line, to the session's LightCraft and print each reply."""
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    process = lightcraft_requests(sandbox, sys.stdin.read(), args.wait)
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    status = process.wait()
+    sys.stderr.write(process.stderr.read())
+    return status
+
+
+def photocraft(args: argparse.Namespace) -> int:
+    """Send the JSON requests on standard input, one per line, to the session's PhotoCraft and print each reply."""
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    process = photocraft_requests(sandbox, sys.stdin.read(), args.wait)
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    status = process.wait()
+    sys.stderr.write(process.stderr.read())
+    return status
+
+
+def send(args: argparse.Namespace) -> int:
+    """Copy a file or a folder of one running session to another (`send_file`), and say what it carried and how fast."""
+    source, target = find_session(args.name), find_session(args.to)
+    for name, found in ((args.name, source), (args.to, target)):
+        if found is None:
+            raise SystemExit(f"selkies-modal: no session named {name} is running")
+    started = time.monotonic()
+    try:
+        carried = send_file(source, args.path, target, args.to_path or args.path)
+    except FileNotFoundError:
+        raise SystemExit(f"selkies-modal: {args.name} has no {args.path}") from None
+    except RuntimeError as error:
+        raise SystemExit(f"selkies-modal: {error}") from None
+    seconds = time.monotonic() - started
+    megabytes = carried / (1024 * 1024)
+    say(f"{megabytes:.1f} MB in {seconds:.1f} s, {megabytes / max(seconds, 0.001):.1f} MB/s")
+    return 0
+
+
 def down(args: argparse.Namespace) -> int:
     """Stop a session, which ends its billing; its workspace stays."""
     sandbox = find_session(args.name)
@@ -1074,6 +1633,38 @@ def parser() -> argparse.ArgumentParser:
     control.add_argument(
         "--wait", type=int, default=60, help="seconds to wait for FilmCraft to be ready and for each reply (default: %(default)s)"
     )
+    sound = named(
+        command("soundcraft", soundcraft, "Send the JSON requests on standard input, one per line, to a session's SoundCraft.")
+    )
+    sound.add_argument(
+        "--wait", type=int, default=60, help="seconds to wait for SoundCraft to listen and for each reply (default: %(default)s)"
+    )
+    drafting = named(
+        command("cadcraft", cadcraft, "Send the JSON requests on standard input, one per line, to a session's CADCraft.")
+    )
+    drafting.add_argument(
+        "--wait", type=int, default=60, help="seconds to wait for CADCraft to be ready and for each reply (default: %(default)s)"
+    )
+    vector = named(
+        command("vectorcraft", vectorcraft, "Send the JSON requests on standard input to a session's VectorCraft control channel.")
+    )
+    vector.add_argument("--wait", type=int, default=60, help="seconds to wait for VectorCraft to answer (default: %(default)s)")
+    develop = named(
+        command("lightcraft", lightcraft, "Send the JSON requests on standard input, one per line, to a session's LightCraft.")
+    )
+    develop.add_argument(
+        "--wait", type=int, default=60, help="seconds to wait for LightCraft to listen and for each reply (default: %(default)s)"
+    )
+    control = named(
+        command("photocraft", photocraft, "Send the JSON requests on standard input, one per line, to a session's PhotoCraft.")
+    )
+    control.add_argument(
+        "--wait", type=int, default=60, help="seconds to wait for PhotoCraft to be ready and for each reply (default: %(default)s)"
+    )
+    carry = named(command("send", send, "Copy a file or a folder of a running session to another running session."))
+    carry.add_argument("--to", required=True, metavar="NAME", help="the session that receives it")
+    carry.add_argument("path", help="the file or folder, as a path in the sending session")
+    carry.add_argument("to_path", nargs="?", help="where it goes in the receiving session (default: the same path)")
     named(command("down", down, "Stop a session."))
     drive = named(
         command("drive-login", drive_login, "Connect Google Drive by a sign-in in a session's Firefox, kept as a Modal Secret.")

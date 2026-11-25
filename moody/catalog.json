@@ -462,8 +462,8 @@
     {
       "id": "photocraft",
       "name": "PhotoCraft",
-      "version": "",
-      "status": "next",
+      "version": "0.23",
+      "status": "available",
       "tagline": "Layers, masks, and retouching for posters, key art, and stills.",
       "accent": "#22c3e6",
       "disciplines": [
@@ -526,8 +526,8 @@
     {
       "id": "soundcraft",
       "name": "SoundCraft",
-      "version": "",
-      "status": "soon",
+      "version": "0.20",
+      "status": "available",
       "tagline": "A digital audio workstation for songs, scores, and podcasts.",
       "accent": "#2fd08a",
       "disciplines": [
@@ -550,8 +550,8 @@
     {
       "id": "lightcraft",
       "name": "LightCraft",
-      "version": "",
-      "status": "soon",
+      "version": "0.21",
+      "status": "available",
       "tagline": "Non-destructive photo development and grading.",
       "accent": "#ffd166",
       "disciplines": [
@@ -562,8 +562,8 @@
     {
       "id": "vectorcraft",
       "name": "VectorCraft",
-      "version": "",
-      "status": "soon",
+      "version": "0.24",
+      "status": "available",
       "tagline": "Vector art for logos, identities, and patterns.",
       "accent": "#ff7aa8",
       "disciplines": [
@@ -601,8 +601,8 @@
     {
       "id": "cadcraft",
       "name": "CADCraft",
-      "version": "",
-      "status": "soon",
+      "version": "0.20",
+      "status": "available",
       "tagline": "Drafting and CAD for buildings and products.",
       "accent": "#ff6b4a",
       "disciplines": [

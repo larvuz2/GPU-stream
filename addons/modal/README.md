@@ -32,8 +32,12 @@ writes after you approve it in a browser.
 | `exec -- <command>` | Runs a command in the session's environment: on its display, with its GPU |
 | `blender` | Runs the Python on standard input inside the session's Blender, the one the page shows |
 | `filmcraft` | Sends the JSON requests on standard input, one per line, to a FilmCraft session's control channel and prints each reply |
+| `soundcraft` | Sends the JSON requests on standard input, one per line, to a SoundCraft session's control channel and prints each reply |
+| `cadcraft` | Sends the JSON requests on standard input, one per line, to a CADCraft session's control channel and prints each reply |
+| `vectorcraft` | Sends the JSON requests on standard input, one per line, to a VectorCraft session's control channel and prints each reply |
+| `lightcraft` | Sends the JSON requests on standard input, one per line, to a LightCraft session's control channel and prints each reply |
 | `ls` | Lists the running sessions |
-| `down` | Stops a session, with the scene Blender has open kept for the next one |
+| `down` | Stops a session, with the scene Blender has open kept for the next one, and CADCraft's unsaved drawings saved |
 | `drive-login` | Opens Google's sign-in on a Nuke session's screen and keeps the Drive access it grants as a Modal Secret, which `up --secret` hands to a session as rclone's `gdrive:` |
 | `build` | Builds the image without starting a session |
 
@@ -102,6 +106,31 @@ session's Blender opens that scene again as Blender's own recovery does, an
 unsaved scene still unsaved and a saved file under its own path with the
 changes that were not saved. A Sandbox that is killed outright, at its
 lifetime or from Modal's dashboard, keeps only the last auto-save.
+
+### Between two running sessions
+
+A session sees the Volume as it was when its Sandbox started. What it writes
+is on the Volume within seconds (1.5 to 5 s, with or without a `sync`), and a
+session started after that has it, but a session already running never sees
+it: Modal cannot reload a Volume under an application that holds files open
+on it (`Sandbox.reload_volumes` answers that open files prevent it), and a
+session's application always does. `send` carries a file or a folder from one
+running session into the other instead:
+
+```bash
+addons/modal/selkies-modal send --name score --to cut /home/ubuntu/workspace/projects/trailer/handoff/mix.wav
+```
+
+The bytes pass through the machine that runs the command, 8 MiB in hand at a
+time, from a command of the sending session to a command of the receiving one
+(`send_file` in `sandbox.py`); the file appears under its name only once all
+of it arrived, as the session's user's, and a folder goes as a tar stream. A
+second path names where it goes in the receiving session when that is not the
+same path. Between two CPU sessions, from a machine outside Modal: 1 MB in
+1.7 s, 100 MB in 5.6 s, 1 GB in 42.7 s (24 MB/s), each with the same SHA-256 on
+both sides. What the receiving session got is in its own mount, so it reaches
+the Volume from there too. A FilmCraft session running since before a
+SoundCraft session bounced a WAV imported it once `send` had brought it.
 
 ## Nuke
 
@@ -246,15 +275,421 @@ writes the files a FilmCraft session of that project does:
 addons/modal/selkies-modal up --app photocraft --name poster --gpu none --env SELKIES_MODAL_PROJECT=projects/trailer
 ```
 
-Its settings and the recovery copies of unsaved documents are in `.photocraft`
-in the project folder. A project's first PhotoCraft session settles its
-rendering on the CPU (PhotoCraft's CPU compatibility mode): the window has no
-hardware adapter in a Sandbox, and PhotoCraft otherwise says so in a notice at
-every start. Its control channel listens on the Sandbox's loopback (port 7878)
-for the session's own token, and reads and writes the project folder alone. A
-connection authenticates first, `{"method": "auth", "params": {"token": ...}}`
-from inside the Sandbox, where `PHOTOCRAFT_CONTROL_TOKEN` holds it; the
-launcher has no verb for it yet.
+### Coming back to the work
+
+PhotoCraft has no project file that names its open documents, so a session
+comes back to the last one's work by PhotoCraft's own two means
+(`photocraft/autostart`):
+
+- **Saved work.** PhotoCraft opens on the document at the top of the project
+  folder that was saved last (`.pcraft`, `.psd`, or `.psb`).
+- **Unsaved changes.** PhotoCraft's settings and the recovery copies it keeps
+  of changed documents are in `.photocraft` in the project folder. A project's
+  first session sets the recovery interval to one minute, the shortest
+  PhotoCraft takes, where its own default is ten. PhotoCraft looks at that
+  clock only as it draws a frame, and a window nobody touches draws none, so
+  the session asks it for the list of open documents every 20 s, which has it
+  draw one. At the next start PhotoCraft reopens each copy, changed and under
+  the name and path it had, beside the saved document unless the copy is of
+  that same file.
+
+Stopped and started on a 7200 by 10800 pixel poster with eleven layers, a
+session had the saved poster and an untitled document with unsaved changes
+open again 8 s after Selkies listened. What `down` can lose is what changed in
+the minute and a half before it; the idle timeout is longer than that, so a
+session it ends loses nothing. A recovery copy is a folder of one small file
+per tile (1,800 for that poster), which the Volume fetches on first read: the
+session reads them together before PhotoCraft starts (4 s), where PhotoCraft
+reading them one after another took three minutes.
+
+### Driving it
+
+PhotoCraft's control channel answers JSON requests, the same commands its
+interface runs (1,009 of them in 0.23.1, `docs/control-protocol.md` in
+PhotoCraft). It listens on the Sandbox's loopback only (port 7878), and serves
+a connection only once it has authenticated. `photocraft` sends JSON requests,
+one per line, from inside the Sandbox, and prints each reply; for each it
+answers PhotoCraft's challenge, an HMAC over two nonces keyed with the
+session's own token, which `up` makes with the session's others, so the token
+never crosses the socket (`photocraft/control.sh`).
+
+```bash
+addons/modal/selkies-modal exec --name poster -- mkdir -p /home/ubuntu/workspace/projects/trailer/exports
+addons/modal/selkies-modal photocraft --name poster <<'EOF'
+{"method": "engine.execute", "params": {"command": "file.new", "params": {"width": 7200, "height": 10800, "resolution": 300, "name": "Poster", "background": "#0b0d1a"}}}
+{"method": "app.open", "params": {"path": "handoff/filmcraft-to-photocraft/poster-frame-shot01.png"}}
+{"method": "engine.execute", "params": {"command": "layer.copyToDocument", "params": {"document": 0, "center": true, "name": "Key art"}}}
+{"method": "engine.execute", "params": {"command": "file.close", "params": {"document": 1}}}
+{"method": "engine.execute", "params": {"command": "type.create", "params": {"x": 3600, "y": 8350, "text": "THE LONG DUSK", "align": "center", "font": "URW Gothic", "fontStyle": "Demi", "size": 132, "color": "#f6efe4"}}}
+{"method": "app.save", "params": {"path": "exports/poster.psd"}}
+EOF
+```
+
+```text
+{"id":null,"ok":true,"result":{"document":0}}
+{"id":null,"ok":true,"result":{"name":"poster-frame-shot01.png","path":"handoff/filmcraft-to-photocraft/poster-frame-shot01.png","warnings":[]}}
+{"id":null,"ok":true,"result":{"document":0,"layers":[6],"offset":[2640,4860]}}
+{"id":null,"ok":true,"result":null}
+{"id":null,"ok":true,"result":{"bounds":[1538,7936,5654,8359],"layer":7}}
+{"id":null,"ok":true,"result":{"path":"exports/poster.psd","warnings":[]}}
+```
+
+The image opens as a document of its own, so its layer is copied into the
+poster and it is closed again. A refused request comes back as `{"ok": false, "error": "..."}` with
+PhotoCraft's reason, and the status is then 1; the first request waits for
+PhotoCraft to listen (`--wait`, 60 s unless given). From Python, the control
+plane's way in, `photocraft_call(sandbox, method, params, timeout)` sends one
+request and returns its result, raising `RuntimeError` with PhotoCraft's
+message, as `filmcraft_call` does. What the channel reads and writes is the
+project folder alone, through `app.open` and `app.save` with paths relative to
+it; PhotoCraft refuses its own file commands there (`file.placeEmbedded`,
+`file.saveACopy`), paths outside the folder, and a folder that does not exist
+yet. PhotoCraft gives up on a reply after 60 s without undoing what it
+started, so a long filter is started with `"wait": false` and followed with
+`jobs.list`. `photocraft-cli`, in the image beside it, is the same engine
+without a window (`photocraft-cli commands --json --filter blur`,
+`photocraft-cli convert in.tif out.webp`).
+
+### Graphics and speed
+
+A Sandbox has no `/dev/dri`, so nothing presents into the session's display
+through a GPU, a T4's included: the window is Mesa's software rasterizer, and
+PhotoCraft then composites every document on the CPU whatever rendering mode
+it is in (`render path: all documents: CPU (softwareAdapter)` in its log). A
+project's first session therefore sets PhotoCraft's CPU compatibility mode,
+which is that same path without the notice its automatic mode puts over the
+window at every start. The five combinations of rendering mode (`cpu`,
+`auto`, `gpu`) and window backend (OpenGL, or Vulkan with `WGPU_BACKEND`) ran
+the same work within the spread between machines, and a T4 was no faster.
+Measured from inside the Sandbox on the poster above, 7200 by 10800 pixels at
+300 ppi with eleven layers:
+
+| | 2 cores, 4 at most (Moody's `cpu` tier) | 18 cores |
+| --- | --- | --- |
+| A request that reads or sets a value (`layer.list`, `layer.setProps`) | 0.1 s | 0.1 s |
+| Opening the saved poster (27 MB) | 1.9 s | 1.3 s |
+| Free Transform of a 13056 by 7344 smart object | 7.4 s | 3.6 to 4.4 s |
+| Gaussian Blur, radius 12, on a full-canvas layer | 2.0 s | 1.1 s |
+| Unsharp Mask on a full-canvas layer | 3.0 s | 1.7 to 2.0 s |
+| A brush stroke's frame: canvas, whole interface | 14 ms, 27 ms | 7 to 12 ms, 16 to 24 ms |
+| Save as PNG, as layered PSD | 3.0 s, 5.7 s | 1.4 to 1.6 s, 3.1 to 3.4 s |
+
+The whole poster (a film frame as a masked smart object, two adjustment
+layers, a grain layer, four type layers, and PSD, PNG, JPEG, and `.pcraft`
+saves) took 67 s as 34 calls of `photocraft_call` on the smaller machine, each
+call costing 0.3 s to reach the Sandbox. More cores make the heavy steps
+faster and a GPU does not, so `--gpu none` is the machine for PhotoCraft.
+
+### Between sessions
+
+A session sees the project folder as it was when the session started: a file
+another session writes afterwards does not appear in it, and Modal cannot
+reload the Volume under a running session while its application holds files
+open there (`Sandbox.reload_volumes` answers that open files prevent it). A
+file is on the Volume about 5 s after it was written (one of 368 MB as soon
+as one of a few bytes), and a session started 4 s after an export did not
+have it, while one started a minute later did. So work moves between two
+applications by exporting in one and either carrying the file into the other
+while it runs (`send`, under Files) or waiting until the file has reached the
+Volume and starting the other: a frame FilmCraft exported
+(`file.exportFrame`) opened as a poster's key art in a PhotoCraft session
+started after it, and that poster, saved as a 2048 by 3072 PNG, loaded as a
+texture in a Blender session started after that.
+
+## CADCraft
+
+`--app cadcraft` starts a session for
+[CADCraft](https://github.com/storytold/cadcraft), the same team's open-source
+2D drafting application (layers, dimensions, hatches, blocks, paper-space
+sheets, constraints; DXF and DWG), which an agent drives through its command
+channel while a person drafts in the same window:
+
+```bash
+addons/modal/selkies-modal up --app cadcraft --name plan --gpu none --env SELKIES_MODAL_PROJECT=projects/house
+```
+
+The image installs the Debian package of CADCraft's GitHub release, checked
+against the hash the release's `SHA256SUMS.txt` lists (`CADCRAFT_VERSION` and
+`CADCRAFT_SHA256` in `sandbox.py`; updating is a bump of both), as FilmCraft's
+is. CADCraft opens maximized, on a drawing of the session's project folder
+([`cadcraft/autostart`](cadcraft/autostart)):
+
+- It opens the newest `.dxf` or `.dwg` in the folder, and in a folder with
+  none a new `drawing.dxf`, metric (millimeters, the ISO-25 dimension style),
+  so Save and the agent's `app.save` write where the next session looks.
+  CADCraft also keeps an empty `Drawing1` tab beside it.
+- Its settings folder (preferences, logs, plotters, autosaves) is `.cadcraft`
+  in the project folder, so one project's autosaves are never offered in
+  another.
+- Work outlives the session. A session that ends by its idle timeout or
+  `down` first saves every drawing with unsaved changes
+  ([`cadcraft/keep.sh`](cadcraft/keep.sh), which `session.sh` runs): a drawing
+  with a file is saved to it, the file as it was kept beside it as
+  `<name>.bak`, and one never saved goes into the folder under its title
+  (`Drawing2.dxf`). A session cut off with no chance to (the Sandbox's
+  lifetime, a crash) leaves CADCraft's autosave, which the next session
+  offers in its Drawing Recovery window and the `drawingrecovery` command
+  lists; each start sets the autosave interval to one minute (`SAVETIME`),
+  CADCraft's shortest. Measured: two drawings with unsaved changes, `down`
+  (5 s), `up`, and both were there, the one that had been in front open; a
+  circle drawn 75 s before the Sandbox was terminated outright came back from
+  the autosave. CADCraft's window closes with the display at the end of a
+  session, which it records as a crash report of under 1 kB in
+  `.cadcraft/crash-reports`.
+
+The control channel is CADCraft's JSON lines on the Sandbox's loopback (port
+9878; [its protocol](https://github.com/storytold/cadcraft/blob/main/docs/control-protocol.md)).
+CADCraft makes the channel's token itself each time it starts and writes it to
+a file only the session's user reads, so the launcher holds none: the client
+in the session ([`cadcraft/control.sh`](cadcraft/control.sh)) reads it for
+each request.
+
+```bash
+addons/modal/selkies-modal cadcraft --name plan <<'EOF'
+{"method": "engine.execute", "params": {"command": "rectang", "params": {"p1": [0, 0], "p2": [4600, 4000]}}}
+{"method": "engine.execute", "params": {"command": "export", "params": {"path": "exports/plan.pdf"}}}
+{"method": "drawing.inspect", "params": {"entities": false}}
+EOF
+```
+
+Each reply is CADCraft's own line, `{"ok": true, "result": ...}` or `{"ok":
+false, "error": ...}`, and the status is 1 when one was refused. From Python,
+`cadcraft_call(sandbox, method, params, timeout)` sends one request and
+returns its result, raising `RuntimeError` with CADCraft's message; the
+control plane's `engine_call` finds it by that name. `engine.execute` runs any
+of the 517 commands `engine.commands` lists, without opening a dialog.
+
+It writes DXF, DWG, PDF, SVG, and PNG, and has no 3D: `export` refuses STL,
+STEP, IGES, OBJ, and glTF. A drawing goes to Blender as its DXF, read there
+with `ezdxf` (`moody/skills/cadcraft/references/handoff.md` has the recipe: a
+4600 × 4000 mm room's walls arrived 4.6 × 4.0 × 2.7 m).
+
+Two sessions on one workspace do not see each other's new files while both
+run: a Sandbox sees the Volume as it was when it started (a file written 13 s
+before a start was there, one written 1 s before was not, one written after
+never appeared, and `reload_volumes` is refused while the session has files
+open). A hand-off is therefore export, then `send` the file to the session
+that reads it, or start that session after the export.
+
+### Graphics and speed
+
+The window draws through Mesa's Vulkan in software (`WGPU_BACKEND=vulkan`,
+lavapipe), as FilmCraft's does, and a drawing is light work for it. Measured
+with `--gpu none` on the default two reserved cores; a GPU session was not
+measured, a Sandbox having no render node for it to draw through:
+
+| | |
+| --- | --- |
+| `up` until Selkies listens, image cached | 4 to 7 s; CADCraft answers 0.4 to 0.7 s later |
+| The image, built once | 71 s |
+| A request through `cadcraft_call` | 0.29 s median, the Sandbox's exec around a request that takes 28 ms from inside |
+| A frame of a dimensioned room plan (362 primitives) | 1.4 ms; 206 frames for 200 zooms |
+| `ui.screenshot`; `ui.render` at 2400 × 1600 | 0.26 s; 0.49 s |
+| A dimensioned plan, its A3 sheet, a part drawing, and 12 exports | 129 requests, 38 s |
+| CADCraft idle | 1.3 % of a core, 486 MB |
+| `cadcraft-cli perf`, 200,000 objects | display list 83 ms, DXF write 0.9 s, read 1.5 s |
+## VectorCraft
+
+`--app vectorcraft` starts a session for
+[VectorCraft](https://github.com/storytold/vectorcraft), the same team's vector
+illustration application, for logos, identities, icons, and patterns, which an
+agent drives through its command channel while a person works in the same
+window:
+
+```bash
+addons/modal/selkies-modal up --app vectorcraft --name mark --gpu none --env SELKIES_MODAL_PROJECT=projects/brand
+```
+
+The image installs the Debian package of VectorCraft's GitHub release, checked
+against the hash the release's `SHA256SUMS.txt` lists (`VECTORCRAFT_VERSION` and
+`VECTORCRAFT_SHA256` in `sandbox.py`; updating is a bump of both, and a run of
+the VectorCraft skill's recipes, `moody/skills/vectorcraft`). VectorCraft opens
+in the session's project folder, the one every engine of the project shares:
+
+- Its data folder (preferences, logs, recovery copies, the fonts folder a
+  project names) is `.vectorcraft` in the project folder, so it stays with the
+  project and outlives the Sandbox.
+- A start opens the newest `.vectorcraft` document of the folder. A folder with
+  none starts on the welcome screen: a document's size and color mode are a
+  design decision, not a default. VectorCraft answers its channel a second or
+  more before that document is open, so requests are held until it is
+  (`vectorcraft/control.sh`), and the first answer already lists what the
+  project has.
+- Unsaved changes outlive the session. VectorCraft keeps recovery copies of
+  modified documents, by itself every two minutes; the session asks it for one
+  every 10 s (`vectorcraft/resume.sh`), since nothing that ends a Sandbox quits
+  the application. The next start restores them as modified documents named
+  `<name> [Recovered]`, which stand in for the saved file they came from and
+  have no file of their own until saved to one (`file.saveAs` with a `path`).
+  Measured: an object added and left unsaved was in a recovery copy 4 s later,
+  and was there, with the document's artboards, layers, and swatches, after
+  `down` (4 s) and `up` (8 s) on the same workspace and project folder.
+
+### Its command channel
+
+Every menu item and tool of VectorCraft is one of its 1,430 commands, which its
+control channel runs as the window does
+([VectorCraft's protocol](https://github.com/storytold/vectorcraft/blob/main/docs/control-protocol.md)).
+The channel listens on the Sandbox's loopback only (port 7979) and reads and
+writes the project folder alone: a path outside it is refused, and a relative
+path is read against it. `vectorcraft` sends JSON requests from inside the
+Sandbox, one per line, and prints each reply:
+
+```bash
+addons/modal/selkies-modal vectorcraft --name mark <<'EOF'
+{"method": "engine.execute", "params": {"command": "file.new", "params": {"name": "mark", "width": 512, "height": 512}}}
+{"method": "engine.execute", "params": {"command": "shape.ellipse", "params": {"x": 96, "y": 96, "width": 320, "height": 320}}}
+{"method": "engine.execute", "params": {"command": "paint.setFill", "params": {"color": "#14213d", "ids": [2]}}}
+{"method": "engine.execute", "params": {"command": "file.saveAs", "params": {"path": "mark.vectorcraft"}}}
+{"method": "engine.execute", "params": {"command": "document.export", "params": {"path": "mark.svg", "artboard": 0}}}
+{"method": "engine.execute", "params": {"command": "document.export", "params": {"path": "/tmp/mark.svg"}}}
+## LightCraft
+
+`--app lightcraft` starts a session for
+[LightCraft](https://github.com/storytold/lightcraft), the same team's
+non-destructive photo developer, installed the same way from its release
+(`LIGHTCRAFT_VERSION`, `LIGHTCRAFT_SHA256`) and opened on the same project
+folder, so it develops the photographs a PhotoCraft session retouches and a
+FilmCraft session cuts in:
+
+```bash
+addons/modal/selkies-modal up --app lightcraft --name lab --gpu none --env SELKIES_MODAL_PROJECT=projects/shoot
+```
+
+LightCraft never changes a photograph: an edit is a record in its library, and
+the library is in the project folder, so a person's work is there in the next
+session with nothing to save.
+
+- `lightcraft-library` holds the catalog (every photo's develop settings,
+  history, versions, masks, ratings, and albums), the user's develop presets
+  and saved export presets, and the preview cache. LightCraft appends each
+  change to the catalog's journal and syncs it before it answers, so a session
+  that ends by the idle timeout or `down` loses nothing. A new library starts
+  empty, without LightCraft's demo photos.
+- `.lightcraft` is its settings folder: the interface's state, the lens
+  database once it is downloaded (LightCraft offers it at a project's first
+  start), and the logs.
+- Photos are imported in place, from wherever they are in the project folder,
+  and stay there for the project's other engines.
+
+One LightCraft session per project folder at a time: a library's lock file
+does not reach from one Sandbox to another, so a second session opens the same
+library and the two overwrite each other's catalog.
+
+### Its command channel
+
+Every menu item, slider, and brush stroke in LightCraft is one of its 600-odd
+commands, which its control channel runs as the window does
+([LightCraft's protocol](https://github.com/storytold/lightcraft/blob/main/docs/control-protocol.md)).
+`lightcraft` sends JSON requests, one per line, and prints each reply:
+
+```bash
+addons/modal/selkies-modal lightcraft --name lab <<'EOF'
+{"method": "engine.execute", "params": {"command": "library.import", "params": {"paths": ["/home/ubuntu/workspace/projects/shoot/photos"], "mode": "add"}}}
+{"method": "engine.execute", "params": {"command": "develop.set", "params": {"values": {"light.exposure": 0.15, "light.highlights": -55}, "ids": [1]}}}
+{"method": "engine.execute", "params": {"command": "app.export", "params": {"ids": [1], "dir": "/home/ubuntu/workspace/projects/shoot/exports/web", "format": "jpeg", "longEdge": 2048, "colorSpace": "srgb"}}}
+EOF
+```
+
+```text
+{"id":null,"ok":true,"result":{"index":0,"previewMode":"default"}}
+{"id":null,"ok":true,"result":{"id":2}}
+{"id":null,"ok":true,"result":{"objects":1}}
+{"id":null,"ok":true,"result":{"background":true,"format":"vectorcraft","path":"mark.vectorcraft","status":"Saving mark.vectorcraft…","warnings":[]}}
+{"id":null,"ok":true,"result":{"bytes":346,"format":"svg","path":"mark.svg","warnings":[]}}
+{"error":"automation path rejected: outside the write root .../projects/brand: /tmp/mark.svg","id":null,"ok":false}
+```
+
+A refused request comes back as `{"ok": false, "error": "..."}` with
+VectorCraft's reason, and the status is then 1. The first request waits for
+VectorCraft to listen (`--wait`, 60 s unless given), which it does about a
+second after Selkies. From Python, the control plane's way in,
+`vectorcraft_call(sandbox, method, params, timeout)` sends one request and
+returns its result, raising `RuntimeError` with VectorCraft's message; it is
+what Moody's `engine_call` reaches for a VectorCraft engine. Lengths are points,
+from the top left corner of the first artboard, with y down.
+
+The release pinned here, 0.24.1, has no sign-in on its channel (its protocol
+says so: "the port has no authentication"), so what guards it is where it
+listens: the loopback of a Sandbox that is one person's. VectorCraft's main
+branch signs each connection in with a token (an `auth` request first), and the
+session is ready for the release that brings it: `up` makes
+`VECTORCRAFT_CONTROL_TOKEN` with the session's other tokens, and the client
+(`vectorcraft/control.sh`) sends the sign-in on every connection, which 0.24.1
+answers as an unknown method and the client skips.
+
+### Graphics and speed
+
+No graphics variable is set. VectorCraft rasterizes its canvas on the CPU and
+only composites the window through wgpu, and it lists the adapters that can
+present into the display itself: on a T4 its log lists the Tesla T4 as
+"can't show the window" and it draws on `llvmpipe (Vulkan, Cpu)`, the adapter
+it also takes with no GPU. A GPU adds nothing to it, so `--gpu none`
+is the machine. Measured on Moody's Starter shape (2 cores reserved, 4 at
+most, 4 GiB), on a three-artboard identity document of 99 objects:
+
+| | `--gpu none` |
+| --- | --- |
+| `up` until Selkies listens, then until VectorCraft answers | 4 to 5 s, then 1 s |
+| One command through `vectorcraft_call`, median of 77 | 0.31 s, nearly all of it Modal's round trip |
+| A request from inside the Sandbox (`ui.inspect`, which waits for a frame) | 108 ms with the client's start; the frame itself 2 ms |
+| The canvas redrawn while an object is dragged (62 pointer events) | 2.6 ms a frame |
+| The whole document at 2880x1800 (`vectorcraft-cli bench`) | 14 ms a frame |
+| Export: SVG, a three-page PDF, a 2000 px PNG, seven icon files | 0.3 s, 0.3 s, 0.5 s, 0.5 s |
+{"id":null,"ok":true,"result":{"duplicates":[],"failed":[],"imported":[1,2,3,4,5,6,7,8,9],"scanned":9,"sidecars":5}}
+{"id":null,"ok":true,"result":null}
+{"id":null,"ok":true,"result":{"files":[{"bytes":1455492,"height":1363,"path":"...","sidecars":[],"width":2048}]}}
+```
+
+A refused request comes back as `{"ok": false, "error": "..."}` with
+LightCraft's reason, and the status is then 1. From Python,
+`lightcraft_call(sandbox, method, params, timeout)` sends one request and
+returns its result, raising `RuntimeError` with LightCraft's message.
+`engine.commands` lists every command with its parameters. LightCraft answers
+a request within 60 s or gives up on it, so a long export is started with
+`background: true` and followed in `ui.inspect`'s `export`.
+
+LightCraft's channel takes no token, unlike FilmCraft's and PhotoCraft's: it
+listens on the Sandbox's loopback (port 7980), which nothing outside the
+Sandbox reaches, and any process inside it can send it commands. LightCraft
+listens a few seconds before its window draws its first frame and refuses what
+arrives in between; the client sends such a request again until `--wait` is
+over (60 s unless given).
+
+The control channel has no command that returns a histogram, so the image
+carries a reader for rendered files: `selkies-modal-histogram <picture>
+[--region x0,y0,x1,y1]` prints a JPEG's, PNG's, or TIFF's size, pixel format,
+embedded color profile, tonal percentiles, clipping, and channel means as
+JSON, which is how an agent measures an edit (`ui.render` writes the picture)
+and checks an export.
+
+### Graphics and speed
+
+A Sandbox has no `/dev/dri`, so LightCraft's window draws through Mesa's Vulkan
+in software on every machine (`WGPU_BACKEND=vulkan`, as FilmCraft's does).
+Without a GPU LightCraft finds only that software adapter and develops on the
+CPU, which is its own choice ("the CPU pipeline is faster"); with one, its
+develop pipeline runs on the GPU through Vulkan and the pictures come back to
+the software window as pixels. OpenGL was tried for the window
+(`LIGHTCRAFT_GPU_BACKEND=gl`): on the machine without a GPU its frames were no
+quicker than the spread between runs, and on a T4 LightCraft's kernels fail to
+build on NVIDIA's OpenGL. Measured from inside the Sandbox, on machines shaped
+as a service starts them (the CPU request and twice it as the limit), with
+raws of 24 to 33 megapixels:
+
+| | 2 CPU, 4 GiB, no GPU | 4 CPU, 16 GiB, T4 |
+| --- | --- | --- |
+| `up` until the first request is answered | 6 s | not measured |
+| A request that needs a frame (`ui.inspect`), median | 38 to 43 ms | 31 ms |
+| A slider change until the finished picture in the window, median | 330 to 380 ms | 170 to 190 ms |
+| Stepping to another photo until its finished picture, median | 1.3 to 1.4 s | 0.6 to 0.7 s |
+| Export of one 33-megapixel raw: JPEG at 2048 px, JPEG at full size, 16-bit TIFF at full size | 2.3 to 2.6 s, 5.0 to 5.2 s, 7.0 to 7.3 s | 2.4 s, 3.0 s, 7.5 s |
+| Export of 9 photos to JPEG at 2048 px | 11.6 to 12.9 s | 11.2 to 11.5 s |
+
+The machine without a GPU serves developing and exporting; a T4 with its four
+cores makes the sliders about twice as quick and all but the full-size JPEG
+export no faster. The same four cores on a machine without a GPU were quicker
+than either (a slider in 115 ms, the batch in 4.8 s).
 
 ## Unreal
 
@@ -443,15 +878,104 @@ On 2026-11-24, with the image cached unless said otherwise:
 | A repository that does not exist | `failed` 0.7 s after the clone started |
 | Rebuild after a change to the client's package script, or to the bundle changes | 220 s, or 95 to 130 s |
 
+## SoundCraft
+
+`--app soundcraft` starts a session for
+[SoundCraft](https://github.com/storytold/soundcraft), the same team's digital
+audio workstation, installed the same way from its release
+(`SOUNDCRAFT_VERSION`, `SOUNDCRAFT_SHA256`). It needs no GPU:
+
+```bash
+addons/modal/selkies-modal up --app soundcraft --name song --gpu none --env SELKIES_MODAL_PROJECT=projects/trailer
+```
+
+- SoundCraft opens the newest `.scraft` session in the project folder, and in a
+  folder with none a new `project.scraft`, which SoundCraft's command-line tool
+  writes before the window opens. A session keeps the audio it imports in
+  `Audio Files` beside its file and its earlier saves in `Backups`.
+- Unsaved changes outlive the session. SoundCraft autosaves them within seconds
+  of each edit into `.soundcraft` in the project folder (its settings folder:
+  preferences, presets, logs, autosaves), and offers them at the next start in
+  a "Recover Unsaved Work" question it has no flag to answer. The session's
+  autostart answers it, pressing Recover through the control channel once the
+  window has its size, so the next session opens with the changes, unsaved, as
+  FilmCraft's does. Checked across `down` and `up` with the files dated three
+  days back: a track, a fader, and a marker made without saving were there, the
+  session marked changed. Where the press does not land, the question stays on
+  screen for the person.
+- Sound reaches the page. SoundCraft plays to the default ALSA device, which
+  the base container's PipeWire carries to the sink Selkies captures. Checked
+  with a stand-in page on the session's WebSocket: no audio frames while the
+  transport is stopped, 500 Opus frames in 5 s while it plays, and the sink's
+  monitor at the loudness of the bounce of the same session (-27.9 LUFS). A
+  bounce renders offline and needs no sound device at all.
+
+### Its command channel
+
+Every menu item and button in SoundCraft is one of its 483 commands, and the
+running application takes them as JSON on a control channel
+([SoundCraft's protocol](https://github.com/storytold/soundcraft/blob/main/docs/control-protocol.md)).
+The channel listens on the Sandbox's loopback only (port 7801). SoundCraft's
+channel has no token, unlike FilmCraft's and PhotoCraft's: it answers whatever
+reaches that address, which is every process of the Sandbox and nothing
+outside it. `soundcraft` sends JSON requests, one per line, from inside the
+Sandbox:
+
+```bash
+addons/modal/selkies-modal soundcraft --name song <<'EOF'
+{"method": "engine.execute", "params": {"command": "track.new", "params": {"kind": "instrument", "name": "Keys", "instrument": "subtractive_synth"}}}
+{"method": "engine.execute", "params": {"command": "file.bounce_mix", "params": {"path": "mix.wav"}}}
+{"method": "session.inspect"}
+EOF
+```
+
+Each reply is printed on a line of its own; a refusal carries SoundCraft's
+reason, and the status is then 1. The first request waits for SoundCraft to
+listen (`--wait`, 60 s unless given). From Python,
+`soundcraft_call(sandbox, method, params, timeout)` sends one request and
+returns its result, raising `RuntimeError` with SoundCraft's message.
+SoundCraft answers a request within 90 s or gives up on it, and a bounce
+renders within its request.
+
+### Measured
+
+On Sandboxes without a GPU, with the 2 CPUs and 4 GiB `up` reserves:
+
+| | |
+| --- | --- |
+| `up`, image cached | 7-34 s to the link; Selkies listens 4-6 s after the Sandbox starts |
+| First `session.inspect` after `up` | 0.6 s |
+| One command through `soundcraft_call` | 0.24 s |
+| 170 notes as one `soundcraft` run | 4.6 s |
+| Bounce of a 26 s mix (3 instruments, an audio track, 8 inserts, a reverb return) to 24-bit WAV | 1.1 s |
+| Bounce of the same session looped to 3 min 49 s | 8.0 s; its four stems 31 s |
+
+The 26 s export measured stereo, 48 kHz, 24-bit, 25.86 s, -14.2 LUFS
+integrated and -0.7 dBFS true peak with ffmpeg's EBU R 128 meter, against the
+-14.17 LUFS SoundCraft reported for it.
+
+### Several engines of one project
+
+Engines of one project mount the same directory of the Volume, and each sees it
+as it was when its Sandbox started. A FilmCraft session started beside a
+running SoundCraft one listed the master and stems SoundCraft had written
+minutes before. Files written after that do not cross between two running
+Sandboxes, in either direction (not after a minute), and
+`Sandbox.reload_volumes()` is refused while an application holds files open in
+the folder, which each does. A session that is stopped and started again sees
+them: 13 s after a write in the running SoundCraft session, a restarted
+FilmCraft session listed the file and imported the WAV. Without a restart,
+`send` carries the file across (Files, "Between two running sessions").
+
 ## The session
 
 The image is the base container by digest with three additions: Blender's
 release archive from blender.org, checked against the hash blender.org
 publishes, `xprintidle` to read the display's idle counter, and this
 directory's scripts. `BASE_IMAGE`, `BLENDER_VERSION`, and `BLENDER_SHA256` at
-the top of `sandbox.py` choose what it is built from, as `FILMCRAFT_VERSION`,
-`FILMCRAFT_SHA256`, `PHOTOCRAFT_VERSION`, and `PHOTOCRAFT_SHA256` do for
-FilmCraft's and PhotoCraft's images, and a change to any of them builds a new
+the top of `sandbox.py` choose what it is built from,
+and each craft app's `<APP>_VERSION` and `<APP>_SHA256` do for its image, and a
+change to any of them builds a new
 image on the next `up` or `build`.
 
 The Selkies window manager runs Blender as the session's application,

@@ -109,6 +109,10 @@ and set:
 | `MOODY_TEAM_EMAILS` | The accounts, by email and comma-separated, that may start apps of status `team` (Nuke) |
 | `MOODY_NUKE_SEATS` | Nuke sessions that may be open at once across all users, `2` unless set: the seats its license has |
 | `MOODY_API_URL` | The API's own address, where GitHub's callbacks should not be built from the address a request arrives at |
+| `MOODY_PREVIEW_MAX_MB` | The largest copy of a file, in megabytes, the agent's `preview` puts in a conversation, `50` unless set; a larger one is refused |
+| `MOODY_PREVIEW_ORIGINAL_MAX_MB` | The size over which a preview is a lighter copy the engine encodes rather than the file itself, `8` unless set |
+| `MOODY_PREVIEW_MAX_FILES` | The files one preview may show, `12` unless set |
+| `MOODY_TRANSFER_MAX_MB` | The largest file or folder, in megabytes, `engine_send` carries between two running engines, `4096` unless set |
 
 **GitHub.** "Connect GitHub" is a GitHub App's user authorization, and the
 repositories a user can pick are those the app is installed on that they can

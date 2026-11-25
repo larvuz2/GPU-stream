@@ -21,9 +21,12 @@
  *   failed), and says so rather than spinning forever.
  * - An `ask` is answered by the person's next message, whichever way it was sent: a choice button
  *   or the composer.
+ * - A `preview` is a card of work in progress. Each one knows how many previews its turn showed
+ *   after it (`later`), which is what lets the conversation keep a long turn light: it shows the
+ *   newest few of a turn and folds the ones before them behind one line.
  * @module
  */
-import type { Asset, Media, PlanItem, Session, StudioEvent, TurnId } from '../lib/api';
+import type { Asset, Media, PlanItem, PreviewItem, Session, StudioEvent, TurnId } from '../lib/api';
 
 /** A tool call's state. */
 export type ToolState = 'running' | 'ok' | 'failed' | 'stopped';
@@ -43,13 +46,26 @@ export type TranscriptItem =
       first: boolean;
     }
   | { type: 'ask'; key: string; question: string; options: string[]; answer: string | null; first: boolean }
+  | {
+      type: 'preview';
+      key: string;
+      /** The turn that showed it, whose previews fold together. */
+      turn: TurnId | null;
+      engineId: string;
+      caption: string;
+      files: PreviewItem[];
+      compare: boolean;
+      /** How many previews the same turn showed after this one. */
+      later: number;
+      first: boolean;
+    }
   | { type: 'plan'; key: string; items: PlanItem[] }
   | { type: 'library'; key: string; asset: Asset }
   | { type: 'engine'; key: string; engine: Session }
   | { type: 'error'; key: string; message: string };
 
 /** The agent's kinds of entry, which share a gutter and show its mark beside the first of a run. */
-const AGENT_TYPES: ReadonlySet<TranscriptItem['type']> = new Set(['agent', 'tool', 'ask']);
+const AGENT_TYPES: ReadonlySet<TranscriptItem['type']> = new Set(['agent', 'tool', 'ask', 'preview']);
 
 /**
  * Builds the conversation from the event log.
@@ -63,6 +79,8 @@ export function buildTranscript(events: readonly StudioEvent[]): TranscriptItem[
   const openAsks: number[] = [];
   /** The turn of each tool card still running, to close it when its turn ends. */
   const toolTurns = new Map<number, TurnId | null>();
+  /** Where each turn's previews are, in order, so a new one can tell the earlier ones it came. */
+  const turnPreviews = new Map<TurnId | null, number[]>();
   let previous: StudioEvent | undefined;
 
   for (const event of events) {
@@ -127,6 +145,28 @@ export function buildTranscript(events: readonly StudioEvent[]): TranscriptItem[
           first: false,
         });
         break;
+      case 'preview': {
+        const earlier = turnPreviews.get(event.turn_id) ?? [];
+        for (const index of earlier) {
+          const shown = items[index];
+          if (shown?.type === 'preview') {
+            items[index] = { ...shown, later: shown.later + 1 };
+          }
+        }
+        turnPreviews.set(event.turn_id, [...earlier, items.length]);
+        items.push({
+          type: 'preview',
+          key,
+          turn: event.turn_id,
+          engineId: event.data.engine_id,
+          caption: event.data.caption,
+          files: event.data.items,
+          compare: event.data.compare,
+          later: 0,
+          first: false,
+        });
+        break;
+      }
       case 'plan':
         items.push({ type: 'plan', key, items: event.data.items });
         break;
@@ -153,12 +193,54 @@ export function buildTranscript(events: readonly StudioEvent[]): TranscriptItem[
   }
 
   return items.map((item, index) => {
-    if (item.type !== 'agent' && item.type !== 'tool' && item.type !== 'ask') {
+    if (item.type !== 'agent' && item.type !== 'tool' && item.type !== 'ask' && item.type !== 'preview') {
       return item;
     }
     const before = items[index - 1];
     return { ...item, first: before === undefined || !AGENT_TYPES.has(before.type) };
   });
+}
+
+/** Which previews of a conversation are folded away, and where the line that unfolds them goes. */
+export interface PreviewFolds {
+  /** The keys of the previews not shown. */
+  hidden: ReadonlySet<string>;
+  /** By the key of each turn's first folded preview, how many of that turn are folded. */
+  lines: ReadonlyMap<string, number>;
+}
+
+/**
+ * Folds the earlier previews of each turn that showed more than a few.
+ *
+ * The newest `shown` previews of a turn stay; the ones before them are hidden, behind one line
+ * where the first of them was, unless the person unfolded that turn.
+ *
+ * @param items The conversation.
+ * @param shown How many previews of a turn stay in view.
+ * @param unfolded The turns the person unfolded, as strings.
+ * @returns What is hidden, and where each turn's line goes.
+ */
+export function foldPreviews(
+  items: readonly TranscriptItem[],
+  shown: number,
+  unfolded: ReadonlySet<string>,
+): PreviewFolds {
+  const hidden = new Set<string>();
+  const lines = new Map<string, number>();
+  const counted = new Set<string>();
+  for (const item of items) {
+    if (item.type !== 'preview' || item.later < shown || unfolded.has(String(item.turn))) {
+      continue;
+    }
+    hidden.add(item.key);
+    const turn = String(item.turn);
+    if (!counted.has(turn)) {
+      // The first preview of a turn has every other one after it.
+      counted.add(turn);
+      lines.set(item.key, item.later + 1 - shown);
+    }
+  }
+  return { hidden, lines };
 }
 
 /**

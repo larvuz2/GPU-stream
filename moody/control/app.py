@@ -79,7 +79,16 @@ def config() -> Any:
         ),
         nuke_seats=int(os.environ.get("MOODY_NUKE_SEATS", "2")),
         api_url=os.environ.get("MOODY_API_URL", "").rstrip("/"),
+        preview_limit_bytes=megabytes("MOODY_PREVIEW_MAX_MB", 50),
+        preview_original_bytes=megabytes("MOODY_PREVIEW_ORIGINAL_MAX_MB", 8),
+        preview_files=int(os.environ.get("MOODY_PREVIEW_MAX_FILES", "12")),
+        transfer_limit_bytes=megabytes("MOODY_TRANSFER_MAX_MB", 4096),
     )
+
+
+def megabytes(name: str, default: int) -> int:
+    """A size the environment gives in megabytes, in bytes."""
+    return int(os.environ.get(name, str(default))) * 1024 * 1024
 
 
 class ModalJobs:

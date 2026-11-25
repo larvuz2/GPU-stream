@@ -13,6 +13,10 @@
  * tools produced, inline. A change the agent made to the plan, the library, or an engine reads
  * as a line that leads to it. A message just sent shows at once, dimmed until the log has it.
  *
+ * Work in progress the agent shows is a card of its own (`PreviewCard.tsx`). A turn that showed
+ * many keeps its newest few in view and folds the earlier ones behind "Show earlier previews",
+ * so a long session stays light to scroll and to load (`foldPreviews`).
+ *
  * The view follows the newest entry while the person is at the bottom, and stays where they are
  * when they have scrolled up to read, offering a way back down instead.
  * @module
@@ -38,12 +42,16 @@ import { MediaView } from './MediaView';
 import { ErrorNotice, Notice } from './Notice';
 import { DisciplineIcon } from '../components/DisciplineIcon';
 import { disciplineName } from './present';
+import { PreviewCard } from './PreviewCard';
 import { Prose } from './Prose';
-import { buildTranscript, openQuestion, type ToolState, type TranscriptItem } from './transcript';
+import { buildTranscript, foldPreviews, openQuestion, type ToolState, type TranscriptItem } from './transcript';
 import type { ProjectData } from './useProject';
 
 /** How close to the bottom, in pixels, still counts as following the conversation. */
 const FOLLOW_SLACK_PX = 96;
+
+/** How many previews of one turn stay in view; the ones before them fold away. */
+const PREVIEWS_IN_VIEW = 3;
 
 /** Props of {@link Conversation}. */
 interface ConversationProps {
@@ -79,6 +87,8 @@ export function Conversation(props: ConversationProps) {
   const { project, data, canSend } = props;
   const items = useMemo(() => buildTranscript(data.events), [data.events]);
   const question = openQuestion(items);
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
+  const folds = useMemo(() => foldPreviews(items, PREVIEWS_IN_VIEW, unfolded), [items, unfolded]);
   const scroller = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
   const [seen, setSeen] = useState(0);
@@ -146,9 +156,28 @@ export function Conversation(props: ConversationProps) {
             <Welcome project={project} canSend={canSend} onSuggest={props.onSuggest} />
           ) : (
             <ol className="grid grid-cols-1 gap-y-3" aria-label="Conversation">
-              {items.map((item) => (
-                <Entry key={item.key} item={item} open={item === question} {...props} />
-              ))}
+              {items.map((item) => {
+                const folded = folds.lines.get(item.key);
+                if (item.type === 'preview' && folded !== undefined) {
+                  return (
+                    <li key={item.key} className="pl-10">
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 rounded-lg text-xs text-lavender/80 hover:text-lavender"
+                        onClick={() => {
+                          setUnfolded((turns) => new Set(turns).add(String(item.turn)));
+                        }}
+                      >
+                        <ChevronRight className="size-3.5" aria-hidden="true" />
+                        Show {folded} earlier {folded === 1 ? 'preview' : 'previews'}
+                      </button>
+                    </li>
+                  );
+                }
+                return folds.hidden.has(item.key) ? null : (
+                  <Entry key={item.key} item={item} open={item === question} {...props} />
+                );
+              })}
               {data.pending === null ? null : (
                 <li className="mt-5">
                   <div className="message-user" data-pending="true">
@@ -305,6 +334,19 @@ function Entry({
           />
         </AgentRow>
       );
+    case 'preview': {
+      const engine = data.engines.find((candidate) => candidate.id === item.engineId);
+      return (
+        <AgentRow first={item.first}>
+          <PreviewCard
+            caption={item.caption}
+            files={item.files}
+            compare={item.compare}
+            engine={engine === undefined ? null : (findApp(engine.app)?.name ?? engine.app)}
+          />
+        </AgentRow>
+      );
+    }
     case 'plan':
       return <PlanLine items={item.items} onShowPlan={onShowPlan} />;
     case 'library':

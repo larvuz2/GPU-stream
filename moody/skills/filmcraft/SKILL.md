@@ -229,6 +229,38 @@ storytold/craft-ai-integrations, whose adapters persist hosted results the same 
 
 The recipes for each stage, mapped from Premiere practice, are in editing.md.
 
+## Show your work
+
+A cut is judged in motion and a grade on a frame, so show both as you go, with `preview` (the
+studio skill has the tool's rules). Export into `<project folder>/previews/` with full paths:
+
+```text
+filmcraft(engine_id, "engine.execute", {"command": "file.exportFrame", "params":
+  {"path": "<project folder>/previews/shot04-graded.png", "time": 508032000000, "target": "program"}})
+preview(engine_id, path="previews/shot04-graded.png", caption="Shot 4 after the grade, at 0:02")
+
+filmcraft(engine_id, "engine.execute", {"command": "file.exportMedia", "params":
+  {"path": "<project folder>/previews/scene2-cut-v3.mp4", "format": "h264", "width": 960, "height": 540,
+   "range": "custom", "startSeconds": 31, "endSeconds": 44, "wait": true}})
+preview(engine_id, path="previews/scene2-cut-v3.mp4", caption="Scene 2 with the split edits, 0:31 to 0:44")
+```
+
+- **A frame** (`file.exportFrame`, `time` in ticks, 254,016,000,000 a second) for anything about
+  one picture: a grade, a title's placement, a reframe. Two frames of the same time, before and
+  after, go in one preview with `compare: true`.
+- **A range** (`file.exportMedia` with `range: "custom"` and `startSeconds`, `endSeconds`) for
+  anything about time: a cut, a transition, a music edit, the pace of a scene. Which range is
+  your judgment for the moment: one transition with a second either side, one scene, or the
+  whole cut (`range: "entire"`) when the whole is the question. There is no fixed length.
+- Render previews small unless quality is the point: half the sequence size and H.264 is enough
+  to judge a cut, and it exports fast (72 frames of 960x540 in half a second on a CPU engine,
+  where full 1080p ran at about 10 frames a second). For a grade or a title, export at full size.
+- A ProRes or other mezzanine export previews too: the tool shows a light H.264 copy and leaves
+  the file alone.
+- Preview at the end of each stage and before each checkpoint, with a caption that says what
+  changed; not after every command. `look: true` hands you the frame, or four frames of a range,
+  when you need to check your own work first.
+
 ## Taste
 
 **Story.** Every scene turns something; a scene that turns nothing is a candidate to cut. Enter

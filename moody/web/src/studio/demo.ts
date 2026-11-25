@@ -19,6 +19,13 @@
  * here starts a turn whose events arrive over a few seconds, under the studio's own polling, and
  * an engine started here queues, starts, and runs. The images are the site's own artwork.
  *
+ * The film's agent shows its work before it asks: four previews of every kind a card takes (a
+ * file, a frame, a before and after pair of a grade, and a six-second animatic), one more than a
+ * turn keeps in view, so the earliest is folded. A third project, Lighthouse theme, is a score in
+ * SoundCraft whose agent plays the person the first eight bars as a preview. The clip, the graded
+ * frame, and the eight bars are made for the demo: the clip and the frame from the site's own
+ * artwork with ffmpeg, the bars synthesized with it (`public/media/preview-*`).
+ *
  * Beside the film is a game, Ember Ridge, part way through a studio's onboarding (`moody/UNREAL.md`):
  * the agent started an Unreal engine and put its Desktop on the screen, the developer cloned the
  * game there, and the agent found it and reported what it is, which the engine's card in the
@@ -48,6 +55,7 @@ import {
   type Media,
   type Me,
   type PlanItem,
+  type PreviewItem,
   type Project,
   type Session,
   type SessionStatus,
@@ -495,7 +503,73 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
     turn_id: t2,
     kind: 'text',
     data: {
-      text: 'FilmCraft is open on the project’s folder, so the cut can start as soon as the shots exist. One decision first:',
+      text: 'FilmCraft is open on the project’s folder. The shots do not exist yet, so I cut a rough animatic of the opening from the references and tried the dusk grade on Spire City, to give you something to judge.',
+    },
+  });
+  /** Shows work in progress the way the agent's `preview` tool does: its call, the card, its outcome. */
+  const show = (call: string, summary: string, caption: string, items: PreviewItem[], compare = false): void => {
+    add({ turn_id: t2, kind: 'tool_start', data: { call_id: call, tool: 'preview', title: 'Preparing a preview' } });
+    add({ turn_id: t2, kind: 'preview', data: { engine_id: engine.id, caption, items, compare } }, 3 * SECOND);
+    add({ turn_id: t2, kind: 'tool_end', data: { call_id: call, ok: true, summary } }, SECOND);
+  };
+  show('c8', 'Showed 1 file: the opening’s shot list', 'The opening as a shot list: six shots, 24 seconds.', [
+    { kind: 'file', url: '/media/preview-shot-list.txt', name: 'opening-shot-list.txt' },
+  ]);
+  add({
+    turn_id: t2,
+    kind: 'tool_start',
+    data: { call_id: 'c9', tool: 'filmcraft', title: 'FilmCraft: file.exportFrame' },
+  });
+  add(
+    { turn_id: t2, kind: 'tool_end', data: { call_id: 'c9', ok: true, summary: 'FilmCraft: file.exportFrame done' } },
+    2 * SECOND,
+  );
+  show('c10', 'Showed 1 image: shot 2', 'Shot 2, the violet flats: the frame the animatic cuts to at 0:03.', [
+    { kind: 'image', url: '/media/discipline-experiences.webp', name: 'shot02-flats.png', width: 1200, height: 800 },
+  ]);
+  show(
+    'c11',
+    'Showed 2 images as before and after: the dusk grade',
+    'Shot 1, Spire City: the reference as generated, and with the dusk grade I would give the film. Drag to compare.',
+    [
+      { kind: 'image', url: SPIRE.url, name: 'shot01-reference.png', width: 1200, height: 800 },
+      { kind: 'image', url: '/media/preview-shot-graded.webp', name: 'shot01-graded.png', width: 1200, height: 800 },
+    ],
+    true,
+  );
+  add({
+    turn_id: t2,
+    kind: 'tool_start',
+    data: { call_id: 'c12', tool: 'filmcraft', title: 'FilmCraft: file.exportMedia' },
+  });
+  add(
+    {
+      turn_id: t2,
+      kind: 'tool_end',
+      data: { call_id: 'c12', ok: true, summary: 'previews/opening-animatic-v1.mp4 · 144 frames at 640 × 360' },
+    },
+    4 * SECOND,
+  );
+  show(
+    'c13',
+    'Showed 1 video: the opening animatic',
+    'Animatic of the wide opening: Spire City at dusk, then the violet flats. Six seconds, low resolution, no sound yet.',
+    [
+      {
+        kind: 'video',
+        url: '/media/preview-cut.mp4',
+        name: 'opening-animatic-v1.mp4',
+        seconds: 6,
+        width: 640,
+        height: 360,
+      },
+    ],
+  );
+  add({
+    turn_id: t2,
+    kind: 'text',
+    data: {
+      text: 'That is the wide opening. The other two I can cut the same way once you have seen this one. One decision first:',
     },
   });
   add({
@@ -675,6 +749,107 @@ function openInUnreal(turn: TurnId, at: (seconds: number) => number, epicLinked:
   ];
 }
 
+/** The score's plan as the demo opens. */
+function scorePlan(): PlanItem[] {
+  return [
+    { id: 's1', title: 'Agree the brief: tempo, key, instruments, length', status: 'done' },
+    { id: 's2', title: 'Write the theme’s first eight bars on piano', status: 'done' },
+    { id: 's3', title: 'Choose where the theme goes next', status: 'active' },
+    { id: 's4', title: 'Arrange, mix, and master to -14 LUFS', status: 'pending' },
+  ];
+}
+
+/**
+ * The score's conversation: the agent writing the first eight bars of a theme in SoundCraft,
+ * bouncing them, and showing the bounce as a preview the person can play before deciding.
+ *
+ * @param start When the conversation began.
+ * @param engine The SoundCraft engine the agent opened.
+ * @returns The events, in order, with their times.
+ */
+function scoreEvents(start: number, engine: Session): Scheduled[] {
+  const turn = 'score-1';
+  const step = (seconds: number, event: EventBody): Scheduled => ({ at: start + seconds * SECOND, event });
+  const call = (seconds: number, id: string, tool: string, title: string, took: number, summary: string): Scheduled[] => [
+    step(seconds, { turn_id: turn, kind: 'tool_start', data: { call_id: id, tool, title } }),
+    step(seconds + took, { turn_id: turn, kind: 'tool_end', data: { call_id: id, ok: true, summary } }),
+  ];
+  return [
+    step(0, {
+      turn_id: turn,
+      kind: 'user_message',
+      data: {
+        text: 'A theme for a lighthouse keeper: slow, warm, a little lonely. About two minutes. Start with piano alone.',
+      },
+    }),
+    step(6, {
+      turn_id: turn,
+      kind: 'text',
+      data: {
+        text:
+          'A slow theme in A minor at 72 BPM, in four-bar phrases, the melody leaving room at the end of each. ' +
+          'I will write the first eight bars on piano in SoundCraft and play them to you before going further.',
+      },
+    }),
+    step(8, { turn_id: turn, kind: 'plan', data: { items: scorePlan() } }),
+    step(10, {
+      turn_id: turn,
+      kind: 'tool_start',
+      data: { call_id: 'm1', tool: 'engine_start', title: 'Starting SoundCraft' },
+    }),
+    step(24, { turn_id: turn, kind: 'engine', data: { engine } }),
+    step(25, {
+      turn_id: turn,
+      kind: 'tool_end',
+      data: { call_id: 'm1', ok: true, summary: 'SoundCraft is running' },
+    }),
+    ...call(30, 'm2', 'engine_call', 'SoundCraft: engine.execute', 38, 'Tempo 72, A minor, one piano track, 34 notes'),
+    ...call(72, 'm3', 'engine_call', 'SoundCraft: engine.execute', 2, 'previews/theme-bars-1-8.wav · 10.2 s · -19.3 LUFS'),
+    step(76, {
+      turn_id: turn,
+      kind: 'tool_start',
+      data: { call_id: 'm4', tool: 'preview', title: 'Preparing a preview' },
+    }),
+    step(79, {
+      turn_id: turn,
+      kind: 'preview',
+      data: {
+        engine_id: engine.id,
+        caption: 'The theme’s first eight bars, piano alone: A minor, 72 BPM, nothing mixed yet.',
+        items: [{ kind: 'audio', url: '/media/preview-theme.m4a', name: 'theme-bars-1-8.wav', seconds: 10.2 }],
+        compare: false,
+      },
+    }),
+    step(80, {
+      turn_id: turn,
+      kind: 'tool_end',
+      data: { call_id: 'm4', ok: true, summary: 'Showed 1 audio: the theme’s first eight bars' },
+    }),
+    step(84, {
+      turn_id: turn,
+      kind: 'text',
+      data: {
+        text:
+          'Play the eight bars above. They sit at -19.3 LUFS with peaks at -4.8 dBFS, so there is room for strings. ' +
+          'The second phrase answers the first a third lower; tell me if it should rise instead.',
+      },
+    }),
+    step(86, {
+      turn_id: turn,
+      kind: 'ask',
+      data: {
+        question: 'Where should the theme go next?',
+        options: [
+          'Repeat it with strings under the piano',
+          'A second, brighter section in C major',
+          'Keep it piano alone and let it breathe',
+        ],
+      },
+    }),
+    step(87, { turn_id: turn, kind: 'turn_end', data: {} }),
+  ];
+}
+
 /** The demo's projects, as the sidebar lists them. */
 function demoProjects(now: number): Project[] {
   const project = (
@@ -731,7 +906,10 @@ function demoProjects(now: number): Project[] {
     ),
     project({ id: 'demo-vertical', name: 'Spire City', discipline: 'media', format: 'Vertical drama' }, DAY + 3 * HOUR),
     project({ id: 'demo-art', name: 'Ember peaks key art', discipline: 'art', format: 'Concept art' }, 3 * DAY),
-    project({ id: 'demo-score', name: 'Lighthouse theme', discipline: 'music', format: 'Score' }, 6 * DAY),
+    project(
+      { id: 'demo-score', name: 'Lighthouse theme', discipline: 'music', format: 'Score', plan: scorePlan() },
+      8 * MINUTE,
+    ),
   ];
 }
 
@@ -869,10 +1047,22 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     ],
     streams: demoStreams('unreal'),
   };
-  let simulations: Simulation[] = [filmSimulation, gameSimulation];
+  const scoreStart = opened - 10 * MINUTE;
+  const scoreSimulation: Simulation = {
+    id: 'demo-engine-3',
+    project: 'demo-score',
+    app: 'soundcraft',
+    tier: 'cpu',
+    phases: [
+      { at: scoreStart + 10 * SECOND, status: 'starting' },
+      { at: scoreStart + 24 * SECOND, status: 'running' },
+    ],
+  };
+  let simulations: Simulation[] = [filmSimulation, gameSimulation, scoreSimulation];
   const logs = new Map<string, Scheduled[]>([
     ['demo-film', filmEvents(opened, libraries.get('demo-film') ?? [], snapshot(filmSimulation, opened - 11 * MINUTE))],
     ['demo-game', gameEvents(gameStart, gameCloned, snapshot(gameSimulation, gameStart + 70 * SECOND))],
+    ['demo-score', scoreEvents(scoreStart, snapshot(scoreSimulation, scoreStart + 24 * SECOND))],
   ]);
   /** The demo's GitHub account, connected. */
   const demoGitHub: GitHubStatus = { configured: true, connected: true, login: LOGIN, avatar_url: AVATAR };
@@ -894,7 +1084,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     },
   ];
   let counter = 100;
-  const me: Me = { id: 'demo-user', email: DEMO_EMAIL, credits: 412, max_sessions: 2 };
+  const me: Me = { id: 'demo-user', email: DEMO_EMAIL, credits: 412, max_sessions: 3 };
   const health: Health = {
     ok: true,
     agent: !offline,
