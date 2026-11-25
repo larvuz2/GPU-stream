@@ -250,15 +250,125 @@ writes the files a FilmCraft session of that project does:
 addons/modal/selkies-modal up --app photocraft --name poster --gpu none --env SELKIES_MODAL_PROJECT=projects/trailer
 ```
 
-Its settings and the recovery copies of unsaved documents are in `.photocraft`
-in the project folder. A project's first PhotoCraft session settles its
-rendering on the CPU (PhotoCraft's CPU compatibility mode): the window has no
-hardware adapter in a Sandbox, and PhotoCraft otherwise says so in a notice at
-every start. Its control channel listens on the Sandbox's loopback (port 7878)
-for the session's own token, and reads and writes the project folder alone. A
-connection authenticates first, `{"method": "auth", "params": {"token": ...}}`
-from inside the Sandbox, where `PHOTOCRAFT_CONTROL_TOKEN` holds it; the
-launcher has no verb for it yet.
+### Coming back to the work
+
+PhotoCraft has no project file that names its open documents, so a session
+comes back to the last one's work by PhotoCraft's own two means
+(`photocraft/autostart`):
+
+- **Saved work.** PhotoCraft opens on the document at the top of the project
+  folder that was saved last (`.pcraft`, `.psd`, or `.psb`).
+- **Unsaved changes.** PhotoCraft's settings and the recovery copies it keeps
+  of changed documents are in `.photocraft` in the project folder. A project's
+  first session sets the recovery interval to one minute, the shortest
+  PhotoCraft takes, where its own default is ten. PhotoCraft looks at that
+  clock only as it draws a frame, and a window nobody touches draws none, so
+  the session asks it for the list of open documents every 20 s, which has it
+  draw one. At the next start PhotoCraft reopens each copy, changed and under
+  the name and path it had, beside the saved document unless the copy is of
+  that same file.
+
+Stopped and started on a 7200 by 10800 pixel poster with eleven layers, a
+session had the saved poster and an untitled document with unsaved changes
+open again 8 s after Selkies listened. What `down` can lose is what changed in
+the minute and a half before it; the idle timeout is longer than that, so a
+session it ends loses nothing. A recovery copy is a folder of one small file
+per tile (1,800 for that poster), which the Volume fetches on first read: the
+session reads them together before PhotoCraft starts (4 s), where PhotoCraft
+reading them one after another took three minutes.
+
+### Driving it
+
+PhotoCraft's control channel answers JSON requests, the same commands its
+interface runs (1,009 of them in 0.23.1, `docs/control-protocol.md` in
+PhotoCraft). It listens on the Sandbox's loopback only (port 7878), and serves
+a connection only once it has authenticated. `photocraft` sends JSON requests,
+one per line, from inside the Sandbox, and prints each reply; for each it
+answers PhotoCraft's challenge, an HMAC over two nonces keyed with the
+session's own token, which `up` makes with the session's others, so the token
+never crosses the socket (`photocraft/control.sh`).
+
+```bash
+addons/modal/selkies-modal exec --name poster -- mkdir -p /home/ubuntu/workspace/projects/trailer/exports
+addons/modal/selkies-modal photocraft --name poster <<'EOF'
+{"method": "engine.execute", "params": {"command": "file.new", "params": {"width": 7200, "height": 10800, "resolution": 300, "name": "Poster", "background": "#0b0d1a"}}}
+{"method": "app.open", "params": {"path": "handoff/filmcraft-to-photocraft/poster-frame-shot01.png"}}
+{"method": "engine.execute", "params": {"command": "layer.copyToDocument", "params": {"document": 0, "center": true, "name": "Key art"}}}
+{"method": "engine.execute", "params": {"command": "file.close", "params": {"document": 1}}}
+{"method": "engine.execute", "params": {"command": "type.create", "params": {"x": 3600, "y": 8350, "text": "THE LONG DUSK", "align": "center", "font": "URW Gothic", "fontStyle": "Demi", "size": 132, "color": "#f6efe4"}}}
+{"method": "app.save", "params": {"path": "exports/poster.psd"}}
+EOF
+```
+
+```text
+{"id":null,"ok":true,"result":{"document":0}}
+{"id":null,"ok":true,"result":{"name":"poster-frame-shot01.png","path":"handoff/filmcraft-to-photocraft/poster-frame-shot01.png","warnings":[]}}
+{"id":null,"ok":true,"result":{"document":0,"layers":[6],"offset":[2640,4860]}}
+{"id":null,"ok":true,"result":null}
+{"id":null,"ok":true,"result":{"bounds":[1538,7936,5654,8359],"layer":7}}
+{"id":null,"ok":true,"result":{"path":"exports/poster.psd","warnings":[]}}
+```
+
+The image opens as a document of its own, so its layer is copied into the
+poster and it is closed again. A refused request comes back as `{"ok": false, "error": "..."}` with
+PhotoCraft's reason, and the status is then 1; the first request waits for
+PhotoCraft to listen (`--wait`, 60 s unless given). From Python, the control
+plane's way in, `photocraft_call(sandbox, method, params, timeout)` sends one
+request and returns its result, raising `RuntimeError` with PhotoCraft's
+message, as `filmcraft_call` does. What the channel reads and writes is the
+project folder alone, through `app.open` and `app.save` with paths relative to
+it; PhotoCraft refuses its own file commands there (`file.placeEmbedded`,
+`file.saveACopy`), paths outside the folder, and a folder that does not exist
+yet. PhotoCraft gives up on a reply after 60 s without undoing what it
+started, so a long filter is started with `"wait": false` and followed with
+`jobs.list`. `photocraft-cli`, in the image beside it, is the same engine
+without a window (`photocraft-cli commands --json --filter blur`,
+`photocraft-cli convert in.tif out.webp`).
+
+### Graphics and speed
+
+A Sandbox has no `/dev/dri`, so nothing presents into the session's display
+through a GPU, a T4's included: the window is Mesa's software rasterizer, and
+PhotoCraft then composites every document on the CPU whatever rendering mode
+it is in (`render path: all documents: CPU (softwareAdapter)` in its log). A
+project's first session therefore sets PhotoCraft's CPU compatibility mode,
+which is that same path without the notice its automatic mode puts over the
+window at every start. The five combinations of rendering mode (`cpu`,
+`auto`, `gpu`) and window backend (OpenGL, or Vulkan with `WGPU_BACKEND`) ran
+the same work within the spread between machines, and a T4 was no faster.
+Measured from inside the Sandbox on the poster above, 7200 by 10800 pixels at
+300 ppi with eleven layers:
+
+| | 2 cores, 4 at most (Moody's `cpu` tier) | 18 cores |
+| --- | --- | --- |
+| A request that reads or sets a value (`layer.list`, `layer.setProps`) | 0.1 s | 0.1 s |
+| Opening the saved poster (27 MB) | 1.9 s | 1.3 s |
+| Free Transform of a 13056 by 7344 smart object | 7.4 s | 3.6 to 4.4 s |
+| Gaussian Blur, radius 12, on a full-canvas layer | 2.0 s | 1.1 s |
+| Unsharp Mask on a full-canvas layer | 3.0 s | 1.7 to 2.0 s |
+| A brush stroke's frame: canvas, whole interface | 14 ms, 27 ms | 7 to 12 ms, 16 to 24 ms |
+| Save as PNG, as layered PSD | 3.0 s, 5.7 s | 1.4 to 1.6 s, 3.1 to 3.4 s |
+
+The whole poster (a film frame as a masked smart object, two adjustment
+layers, a grain layer, four type layers, and PSD, PNG, JPEG, and `.pcraft`
+saves) took 67 s as 34 calls of `photocraft_call` on the smaller machine, each
+call costing 0.3 s to reach the Sandbox. More cores make the heavy steps
+faster and a GPU does not, so `--gpu none` is the machine for PhotoCraft.
+
+### Between sessions
+
+A session sees the project folder as it was when the session started: a file
+another session writes afterwards does not appear in it, and Modal cannot
+reload the Volume under a running session while its application holds files
+open there (`Sandbox.reload_volumes` answers that open files prevent it). A
+file is on the Volume about 5 s after it was written (one of 368 MB as soon
+as one of a few bytes), and a session started 4 s after an export did not
+have it, while one started a minute later did. So work moves between two
+applications by exporting in one, waiting until the file has reached the
+Volume, and starting the other: a frame FilmCraft exported
+(`file.exportFrame`) opened as a poster's key art in a PhotoCraft session
+started after it, and that poster, saved as a 2048 by 3072 PNG, loaded as a
+texture in a Blender session started after that.
 
 ## CADCraft
 

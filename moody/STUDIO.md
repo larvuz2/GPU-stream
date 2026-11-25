@@ -57,13 +57,17 @@ session on a Modal Sandbox (`addons/modal`). Status: `available` (anyone),
 such as Nuke), `byol` (anyone, with the part of it on the user's own license
 coming once they have linked that license, which the app's `license` names with
 the steps that link it: Unreal Engine's editor on the user's Epic account,
-`UNREAL.md`), `next` (being built: PhotoCraft), `soon`.
+`UNREAL.md`), `next` (being built), `soon`.
 
 - **FilmCraft** is built from the release the fork tracks
   (`github.com/larvuz2/filmcraft`, a fork of `storytold/filmcraft`), pinned by
   version and checksum in `addons/modal/sandbox.py`; updating is a version bump
   after the fork syncs with upstream. The agent drives it through its control
   channel from the control plane (`filmcraft_call` in `addons/modal/sandbox.py`).
+- **PhotoCraft** is installed the same way from `storytold/photocraft`'s release
+  and driven the same way (`photocraft_call`). It keeps a project's open work
+  in the project folder, saved and unsaved, so an engine started later opens
+  on it; its skill is `moody/skills/photocraft`.
 - **Nuke** runs from the image `selkies-modal` builds from a workspace's own
   install (`nuke_image`). Foundry licenses Nuke per person: a user signs in with
   their own Foundry account in the session, and serving the team's install to
@@ -225,5 +229,9 @@ private); `url` fields are signed and expire.
 6. The agent driving any engine with a command channel through one tool, and
    moving work between engines through the project's folder (`engine_call`,
    `engine_files`, the `studio` skill).
-7. Next: PhotoCraft engine, Unreal Engine, engines exchanging files beyond the
-   shared folder, billing the agent's model and generation use.
+7. PhotoCraft engine, driven through its command channel, with its skill, and
+   work passing between it, FilmCraft, and Blender as files of the project's
+   folder.
+8. Next: Unreal Engine, engines exchanging files beyond the shared folder (a
+   running engine does not see what another wrote after it started), billing
+   the agent's model and generation use.

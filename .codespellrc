@@ -14,5 +14,6 @@ skip = ./.git,./build,./dist,./target,./crates/selkies-desktop/locales,./tests/t
 # ue: the exp-Golomb ue(v) syntax element. rightt: the X keysym's name.
 # doubleclick: Openbox's DoubleClick mouse action. inout: FilmCraft's export
 # range value (`range: "inOut"`). atleast/atmost: LightCraft's rating filter
-# values (`ratingOp: "atLeast"`).
-ignore-words-list = renderd,requestor,requestors,currenty,initialy,chage,anc,zink,parm,datas,propertyst,notin,ue,rightt,doubleclick,trun,re-declares,retuned,inout,atleast,atmost
+# values (`ratingOp: "atLeast"`). liquify: PhotoCraft's Liquify filter
+# (`filter.liquify`).
+ignore-words-list = renderd,requestor,requestors,currenty,initialy,chage,anc,zink,parm,datas,propertyst,notin,ue,rightt,doubleclick,trun,re-declares,retuned,inout,atleast,atmost,liquify

@@ -462,8 +462,8 @@
     {
       "id": "photocraft",
       "name": "PhotoCraft",
-      "version": "",
-      "status": "next",
+      "version": "0.23",
+      "status": "available",
       "tagline": "Layers, masks, and retouching for posters, key art, and stills.",
       "accent": "#22c3e6",
       "disciplines": [

@@ -858,7 +858,7 @@ def test_a_session_starts_in_the_users_own_workspace_and_hands_back_a_link(world
 def test_what_is_not_on_offer_is_refused(world):
     client = world[0]
     post = lambda body: client.post("/v1/sessions", headers=auth("alice-token"), json=body).status_code
-    assert post({"app": "photocraft", "tier": "cpu"}) == 400, "an app that is coming next"
+    assert post({"app": "effectcraft", "tier": "cpu"}) == 400, "an app that is announced, not offered"
     assert post({"app": "godot", "tier": "cpu"}) == 400, "an app that is coming soon"
     assert post({"app": "blender", "tier": "nope"}) == 400
     assert post({"app": "blender", "tier": "cpu", "region": "mars"}) == 400
@@ -1171,7 +1171,7 @@ def test_an_engine_starts_in_its_projects_folder_on_the_users_credits(studio):
     assert client.post(f"/v1/projects/{other['id']}/engines", headers=auth("alice-token"),
                        json={"app": "blender", "tier": "cpu"}).status_code == 409, "one open session per user, as before"
     assert client.post(f"/v1/projects/{other['id']}/engines", headers=auth("alice-token"),
-                       json={"app": "photocraft", "tier": "cpu"}).status_code == 400, "an engine that is coming next"
+                       json={"app": "effectcraft", "tier": "cpu"}).status_code == 400, "an engine that is announced, not offered"
     assert client.post(f"/v1/sessions/{engine['id']}/link", headers=auth("alice-token")).json()["url"].startswith("https://sb-1.")
     client.delete(f"/v1/sessions/{engine['id']}", headers=auth("alice-token"))
     assert launcher.stopped == ["sb-1"]
