@@ -58,7 +58,7 @@ import sys
 import time
 from pathlib import Path, PurePosixPath
 from secrets import token_hex, token_urlsafe
-from typing import Any
+from typing import Any, Callable
 
 import modal
 from modal.stream_type import StreamType
@@ -1094,6 +1094,118 @@ def screenshot(sandbox: modal.Sandbox) -> bytes:
     return base64.b64decode(picture)
 
 
+def read_file(sandbox: modal.Sandbox, path: str, limit: int) -> bytes:
+    """A file of the session, whole, for one small enough to hold: a preview on its way to the person.
+
+    Raises:
+        RuntimeError: The file could not be read, with what the session said.
+        ValueError: The file is larger than `limit` bytes; nothing of it is returned.
+    """
+    # One byte past the limit is asked for, so a file over it is known without reading the rest
+    process = sandbox.exec("head", "-c", str(limit + 1), "--", path, text=False)
+    data = process.stdout.read()
+    if process.wait() != 0:
+        raise RuntimeError(f"could not read {path}: {process.stderr.read().decode(errors='replace').strip()}")
+    if len(data) > limit:
+        raise ValueError(f"{path} is larger than {limit} bytes")
+    return data
+
+
+# Says what is at $1: `folder`, a file's size in bytes, or status 44 for neither
+MEASURE = 'if [ -d "$1" ]; then echo folder; elif [ -f "$1" ]; then stat -c %s "$1"; else exit 44; fi'
+# Writes standard input at $1 under a name of its own, moved into place only once all $2 bytes arrived
+RECEIVE_FILE = (
+    'set -e; mkdir -p "$(dirname "$1")"; part="$1.part-$$"; trap \'rm -f "$part"\' EXIT; cat > "$part"; '
+    'got="$(stat -c %s "$part")"; [ "$got" = "$2" ] || { echo "received $got of $2 bytes" >&2; exit 1; }; '
+    'mv -f "$part" "$1"'
+)
+# Unpacks the tar stream on standard input into the folder $1
+RECEIVE_FOLDER = 'set -e; mkdir -p "$1"; tar -C "$1" -xf -'
+# Write the file, or the folder as a tar stream, at $1 to standard output, as a process whose ID is kept in $2
+SEND_FILE = 'echo $$ > "$2"; exec cat -- "$1"'
+SEND_FOLDER = 'echo $$ > "$2"; exec tar -C "$1" -cf - .'
+
+
+def send_file(
+    source: modal.Sandbox,
+    path: str,
+    target: modal.Sandbox,
+    to_path: str,
+    keep_going: Callable[[], bool] | None = None,
+) -> int:
+    """Copy a file or a folder of one running session to a path of another, and return the bytes carried.
+
+    Two sessions that mount the same Volume do not see what the other writes
+    while both run: each sees the Volume as it was when its Sandbox started,
+    and Modal refuses to reload a Volume under an application that has files
+    open on it (`Sandbox.reload_volumes`), which a session's application
+    always has. So the bytes go through this side instead: a command of
+    `source` writes the file to its standard output, and each piece is handed,
+    as it arrives, to a command of `target` that writes it at `to_path`.
+    Nothing is held here but the piece in hand, so a file of any size passes
+    in the memory of one piece, and nothing touches a disk on the way.
+
+    The receiving command writes under a name of its own beside `to_path` and
+    moves the file into place only once every byte arrived, so an application
+    watching the folder never opens half a file and a transfer cut short
+    leaves nothing behind. A folder goes as a tar stream, unpacked over
+    `to_path`. Both commands run as commands of their sessions
+    (`selkies-modal-run`): the file is the session user's, and a long transfer
+    counts as use of both sessions. What `target` receives is in its own mount
+    of the Volume, so it is committed to the Volume from there as anything
+    else that session writes is, beside the copy `source` wrote.
+
+    `keep_going` is asked between pieces; once it says no, the transfer stops
+    and nothing is left at `to_path`.
+
+    Raises:
+        FileNotFoundError: `source` has no file or folder at `path`.
+        InterruptedError: `keep_going` said to stop.
+        RuntimeError: Either session's command failed, with what it said.
+    """
+    run = "/usr/local/bin/selkies-modal-run"
+    measure = source.exec(run, "sh", "-c", MEASURE, "sh", path)
+    found = measure.stdout.read().strip()
+    if measure.wait() != 0:
+        raise FileNotFoundError(path)
+    pid_file = f"/tmp/selkies-modal/send-{token_hex(8)}.pid"
+    if found == "folder":
+        reader = source.exec(run, "sh", "-c", SEND_FOLDER, "sh", path, pid_file, text=False)
+        writer = target.exec(run, "sh", "-c", RECEIVE_FOLDER, "sh", to_path, text=False)
+    else:
+        reader = source.exec(run, "sh", "-c", SEND_FILE, "sh", path, pid_file, text=False)
+        writer = target.exec(run, "sh", "-c", RECEIVE_FILE, "sh", to_path, found, text=False)
+    carried = 0
+    stopped = False
+    try:
+        for piece in reader.stdout:
+            if keep_going is not None and not keep_going():
+                stopped = True
+                break
+            writer.stdin.write(piece)
+            # Each piece is sent before the next is read, so the writer's buffer holds one piece, never the file
+            writer.stdin.drain()
+            carried += len(piece)
+        writer.stdin.write_eof()
+        writer.stdin.drain()
+    except modal.exception.Error as error:
+        raise RuntimeError(f"the transfer broke after {carried} bytes: {error}") from error
+    received = writer.wait()
+    if stopped:
+        # The reader is blocked writing to a stream nobody reads now, and would count as use of its session forever
+        source.exec("sh", "-c", 'kill "$(cat "$1")"; rm -f "$1"', "sh", pid_file).wait()
+        # A file short of its size was never moved into place; a folder's unpacked part is removed
+        if found == "folder":
+            target.exec(run, "rm", "-rf", "--", to_path).wait()
+        raise InterruptedError(f"stopped after {carried} bytes")
+    source.exec("rm", "-f", pid_file).wait()
+    if reader.wait() != 0:
+        raise RuntimeError(f"could not read {path}: {reader.stderr.read().decode(errors='replace').strip()}")
+    if received != 0:
+        raise RuntimeError(f"could not write {to_path}: {writer.stderr.read().decode(errors='replace').strip()}")
+    return carried
+
+
 def drive_sign_in(sandbox: modal.Sandbox, wait_seconds: int) -> str:
     """Have the person at a session sign in to Google in its Firefox, and return the token rclone was granted.
 
@@ -1329,6 +1441,25 @@ def photocraft(args: argparse.Namespace) -> int:
     return status
 
 
+def send(args: argparse.Namespace) -> int:
+    """Copy a file or a folder of one running session to another (`send_file`), and say what it carried and how fast."""
+    source, target = find_session(args.name), find_session(args.to)
+    for name, found in ((args.name, source), (args.to, target)):
+        if found is None:
+            raise SystemExit(f"selkies-modal: no session named {name} is running")
+    started = time.monotonic()
+    try:
+        carried = send_file(source, args.path, target, args.to_path or args.path)
+    except FileNotFoundError:
+        raise SystemExit(f"selkies-modal: {args.name} has no {args.path}") from None
+    except RuntimeError as error:
+        raise SystemExit(f"selkies-modal: {error}") from None
+    seconds = time.monotonic() - started
+    megabytes = carried / (1024 * 1024)
+    say(f"{megabytes:.1f} MB in {seconds:.1f} s, {megabytes / max(seconds, 0.001):.1f} MB/s")
+    return 0
+
+
 def down(args: argparse.Namespace) -> int:
     """Stop a session, which ends its billing; its workspace stays."""
     sandbox = find_session(args.name)
@@ -1511,6 +1642,10 @@ def parser() -> argparse.ArgumentParser:
     control.add_argument(
         "--wait", type=int, default=60, help="seconds to wait for PhotoCraft to be ready and for each reply (default: %(default)s)"
     )
+    carry = named(command("send", send, "Copy a file or a folder of a running session to another running session."))
+    carry.add_argument("--to", required=True, metavar="NAME", help="the session that receives it")
+    carry.add_argument("path", help="the file or folder, as a path in the sending session")
+    carry.add_argument("to_path", nargs="?", help="where it goes in the receiving session (default: the same path)")
     named(command("down", down, "Stop a session."))
     drive = named(
         command("drive-login", drive_login, "Connect Google Drive by a sign-in in a session's Firefox, kept as a Modal Secret.")
