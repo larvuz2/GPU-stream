@@ -9,7 +9,7 @@
  *
  * The files live under `public/` and are delivered apart from this code, so every path is built
  * here and every image that uses one tolerates its absence (`components/Art.tsx`): the art is
- * decoration over a gradient, and a logo falls back to the app's name in text.
+ * decoration over the pixel grid, and a logo falls back to the app's name in text.
  *
  * Art follows the catalog by name: one image per app identifier and one per discipline identifier.
  * Engine pictures and logos are listed, because only some apps have one, and an `<img>` needs each
@@ -32,9 +32,6 @@ const APP_LOGOS: Readonly<Record<string, LogoFile>> = {
   blender: { src: '/logos/blender.svg', width: 2048, height: 550 },
   unreal: { src: '/logos/unreal.svg', width: 1002, height: 1092 },
 };
-
-/** The landing page's hero backdrop, 20:9, its subject in the right half. */
-export const HERO_ART = '/media/hero.webp';
 
 /** The still the landing page's video frame shows until the product video plays, 16:9. */
 export const VIDEO_POSTER = '/media/video-poster.webp';

@@ -115,7 +115,7 @@ export function CommandBlock({ command, title, className }: CommandBlockProps) {
       </div>
       <pre className="p-4 text-left">
         <code>
-          <span className="text-ember-300 select-none" aria-hidden="true">
+          <span className="text-fg select-none" aria-hidden="true">
             ${' '}
           </span>
           {command.split(' ').map((argument, index) => (

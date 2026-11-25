@@ -342,7 +342,7 @@ function AssetCard({ asset, onOpen }: AssetCardProps) {
         {asset.tag === null || asset.tag === '' ? (
           <span className="block text-[0.6875rem] text-faint">No tag</span>
         ) : (
-          <span className="mono block truncate text-[0.6875rem] text-ember-200">@{asset.tag}</span>
+          <span className="mono block truncate text-[0.6875rem] text-fg">@{asset.tag}</span>
         )}
       </span>
     </button>
@@ -471,7 +471,7 @@ function AssetDetail({ asset, onBack, onUpload, onDelete }: AssetDetailProps) {
                   type="button"
                   className={cx(
                     'asset-thumb block size-12 rounded-lg border',
-                    index === shown ? 'border-ember-300' : 'border-line',
+                    index === shown ? 'border-fg' : 'border-line',
                   )}
                   aria-label={`Show ${file.name ?? `${file.kind} ${index + 1}`}`}
                   onClick={() => {

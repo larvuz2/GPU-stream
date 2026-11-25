@@ -8,8 +8,9 @@
  * Images that may not be there: the decorative art and the apps' official logos.
  *
  * Both are files delivered apart from the code (`lib/media.ts`). Art is drawn over a frame that
- * already paints a gradient (the `art` class), invisible until it has loaded and removed if it
- * fails, so a missing file leaves a finished panel. A logo that fails gives way to the app's name
+ * already paints the pixel grid (the `art` class), invisible until it has loaded and removed if it
+ * fails, so a missing file leaves a finished panel. It rests in grayscale and blooms to color under
+ * the pointer of a `bloom` ancestor (`styles.css`). A logo that fails gives way to the app's name
  * in text. Art is concept imagery, not a picture of the product, so it carries an empty `alt`;
  * a logo is content and says whose it is.
  * @module

@@ -28,22 +28,22 @@ const STILLS = [
 
 /** The drawn timeline's tracks: each clip's start and length in percent of the sequence, and its tint. */
 const TRACKS: readonly { name: string; clips: readonly [number, number, string][] }[] = [
-  { name: 'V2', clips: [[31, 12, '#a678ff']] },
+  { name: 'V2', clips: [[31, 12, '#ffffff']] },
   {
     name: 'V1',
     clips: [
-      [0, 14, '#ff8a2e'],
-      [14.5, 16, '#ff8a2e'],
-      [31, 21, '#ffb070'],
-      [52.5, 13, '#ff8a2e'],
+      [0, 14, '#bdbdbd'],
+      [14.5, 16, '#bdbdbd'],
+      [31, 21, '#e6e6e6'],
+      [52.5, 13, '#bdbdbd'],
     ],
   },
-  { name: 'A1', clips: [[0, 66, '#4ade80']] },
+  { name: 'A1', clips: [[0, 66, '#8c8c8c']] },
   {
     name: 'A2',
     clips: [
-      [6, 22, '#2dd4bf'],
-      [36, 26, '#2dd4bf'],
+      [6, 22, '#6e6e6e'],
+      [36, 26, '#6e6e6e'],
     ],
   },
 ];
@@ -67,8 +67,8 @@ export function DemoScreen({ app, stream }: DemoScreenProps) {
     const desktop = app?.id === 'unreal' && stream === DESKTOP_STREAM;
     const picture = desktop ? engineImage('blender') : app === undefined ? undefined : engineImage(app.id);
     return (
-      <div className="art absolute inset-0" style={{ '--accent': app?.accent }}>
-        <img src={picture ?? STILLS[2]} alt="" className="art-image" data-loaded="true" />
+      <div className="absolute inset-0 bg-ink-800">
+        <img src={picture ?? STILLS[2]} alt="" className="absolute inset-0 size-full object-cover" />
         <span className="absolute bottom-3 left-3 rounded-md bg-ink-950/70 px-2 py-1 text-xs font-semibold">
           {desktop
             ? 'Desktop · GitHub client, Firefox, Blender'
@@ -81,8 +81,8 @@ export function DemoScreen({ app, stream }: DemoScreenProps) {
   }
   return (
     <div className="@container absolute inset-0">
-      <div className="flex size-full flex-col bg-[#0d0d12] font-sans text-[clamp(5px,1.15cqw,12px)] text-white/70 select-none">
-        <div className="flex h-[6%] items-center gap-[2.2%] border-b border-white/5 bg-[#16161d] px-[1.5%]">
+      <div className="flex size-full flex-col bg-[#0d0d0d] font-sans text-[clamp(5px,1.15cqw,12px)] text-white/70 select-none">
+        <div className="flex h-[6%] items-center gap-[2.2%] border-b border-white/5 bg-[#191919] px-[1.5%]">
           <span className="font-semibold text-white/90">{app.name}</span>
           {['File', 'Edit', 'Clip', 'Sequence', 'Color', 'Audio', 'Export'].map((menu) => (
             <span key={menu}>{menu}</span>
@@ -90,7 +90,7 @@ export function DemoScreen({ app, stream }: DemoScreenProps) {
           <span className="ml-auto text-white/40">The Beacon · Scene 1</span>
         </div>
         <div className="flex min-h-0 flex-1">
-          <div className="flex w-[22%] flex-col gap-[3%] border-r border-white/5 bg-[#121218] p-[1.2%]">
+          <div className="flex w-[22%] flex-col gap-[3%] border-r border-white/5 bg-[#121212] p-[1.2%]">
             <span className="text-white/45">Media</span>
             <div className="grid grid-cols-2 gap-[6%]">
               {STILLS.map((still) => (
@@ -101,7 +101,7 @@ export function DemoScreen({ app, stream }: DemoScreenProps) {
             </div>
           </div>
           <div className="flex min-w-0 flex-1 flex-col items-center justify-center bg-black/60 p-[1.5%]">
-            <div className="relative aspect-video h-[88%] max-w-full overflow-hidden rounded-[0.2em] shadow-[0_0_40px_-10px_rgb(255_122_26/0.5)]">
+            <div className="relative aspect-video h-[88%] max-w-full overflow-hidden rounded-[0.2em]">
               <img src={STILLS[0]} alt="" className="size-full object-cover" />
               <span className="absolute bottom-[4%] left-[3%] rounded-[0.25em] bg-black/60 px-[0.6em] py-[0.15em] font-mono text-white/85">
                 01:00:07:14
@@ -109,7 +109,7 @@ export function DemoScreen({ app, stream }: DemoScreenProps) {
             </div>
           </div>
         </div>
-        <div className="relative h-[34%] border-t border-white/5 bg-[#111117] px-[1.2%] py-[1%]">
+        <div className="relative h-[34%] border-t border-white/5 bg-[#111111] px-[1.2%] py-[1%]">
           <div className="ml-[5%] flex justify-between pb-[0.6%] font-mono text-white/30">
             {['00:00', '00:15', '00:30', '00:45', '01:00'].map((mark) => (
               <span key={mark}>{mark}</span>
@@ -131,7 +131,7 @@ export function DemoScreen({ app, stream }: DemoScreenProps) {
               </div>
             ))}
           </div>
-          <span className="absolute top-[6%] bottom-[4%] left-[30%] w-px bg-[#ff7a1a] shadow-[0_0_8px_#ff7a1a]" />
+          <span className="absolute top-[6%] bottom-[4%] left-[30%] w-px bg-white" />
         </div>
       </div>
     </div>

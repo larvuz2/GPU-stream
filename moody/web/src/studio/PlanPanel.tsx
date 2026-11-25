@@ -16,7 +16,7 @@ import { cx } from '../lib/cx';
 /** How each state of a step is drawn and said. */
 const STEP: Readonly<Record<PlanStatus, { label: string; className: string }>> = {
   pending: { label: 'To do', className: 'text-faint' },
-  active: { label: 'In progress', className: 'text-ember-300' },
+  active: { label: 'In progress', className: 'text-fg' },
   done: { label: 'Done', className: 'text-ok' },
   blocked: { label: 'Blocked', className: 'text-warn' },
 };
@@ -66,7 +66,7 @@ export function PlanBody({ items }: PlanBodyProps) {
               key={item.id}
               className={cx(
                 'flex items-start gap-2.5 rounded-lg px-2 py-1.5 text-sm',
-                item.status === 'active' && 'bg-ember/[0.07]',
+                item.status === 'active' && 'bg-ink-800',
               )}
             >
               <Icon

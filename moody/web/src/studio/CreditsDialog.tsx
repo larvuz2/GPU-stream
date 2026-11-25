@@ -106,13 +106,13 @@ function Packs({ titleId, onCheckout }: PacksProps) {
                 <span className="flex w-full items-center justify-between gap-2">
                   <span className="display text-3xl">{usd(pack.usd)}</span>
                   {bonus > 0 ? (
-                    <span className="pill h-6 border-ember/40 bg-ember/10 text-[0.6875rem] text-ember-200 backdrop-blur-none">
+                    <span className="pill h-6 border-line-strong bg-ink-700 text-[0.6875rem] text-fg">
                       +{percentage(bonus)}
                     </span>
                   ) : null}
                 </span>
                 <span className="mt-2 text-sm font-medium">{creditCount(pack.credits)} credits</span>
-                <span className="mt-4 flex items-center gap-1.5 text-sm font-semibold text-ember-300">
+                <span className="mt-4 flex items-center gap-1.5 text-sm font-semibold text-fg">
                   {buying === pack.id ? <span className="spinner" aria-hidden="true" /> : null}
                   {buying === pack.id ? 'Opening checkout…' : 'Buy'}
                   {buying === pack.id ? null : <ArrowRight className="size-4" aria-hidden="true" />}
