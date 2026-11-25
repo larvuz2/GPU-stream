@@ -968,8 +968,12 @@
     font-weight: 600;
   }
 
-  /* Text still being written ends in a caret, lavender as the intelligence at work is. */
-  .prose-studio[data-streaming] > :last-child::after {
+  /*
+   * Text still being written ends in a caret, lavender as the intelligence at work is. It follows
+   * the last words, which in a list are its last item's.
+   */
+  .prose-studio[data-streaming] > :last-child:not(ul, ol)::after,
+  .prose-studio[data-streaming] > :is(ul, ol):last-child > li:last-child::after {
     content: '';
     display: inline-block;
     width: 0.45em;

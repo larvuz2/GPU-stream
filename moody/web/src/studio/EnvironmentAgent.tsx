@@ -105,9 +105,7 @@ export function AgentEnvironment({ environment, status, permissions, onRevoke }:
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">{connector.name}</span>
-                        <span className="block truncate text-xs text-muted" title={connector.detail}>
-                          {connector.detail}
-                        </span>
+                        <span className="line-clamp-2 text-xs text-muted">{connector.detail}</span>
                       </span>
                       <span className={cx('flex flex-none items-center gap-1.5 text-xs', state.className)}>
                         <span className={state.dot} aria-hidden="true" />

@@ -356,7 +356,7 @@ function EngineRow({ engine, onScreen, onShow, onStop, children }: EngineRowProp
       </div>
       {running ? null : (
         <div className="mt-2.5">
-          <div className="progress progress-busy" role="progressbar" aria-label={`${app?.name ?? engine.app} is starting`} />
+          <div className="progress" role="progressbar" aria-label={`${app?.name ?? engine.app} is starting`} />
           <p className="mt-1.5 text-[0.6875rem] text-faint">
             {engine.status === 'queued'
               ? 'A machine is being found for it. Nothing is billed until it runs.'
