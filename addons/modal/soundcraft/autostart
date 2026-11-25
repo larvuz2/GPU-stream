@@ -1,0 +1,41 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Run by the Selkies window manager once it is up, as the session's
+# application, installed as /etc/xdg/openbox/autostart, which both backends
+# read: SoundCraft, on the session of the session's project folder
+# (`craft/project.sh`).
+#
+# SoundCraft starts in that folder, so its dialogs and relative paths land
+# beside the session, and opens the newest session file there; a folder with
+# none gets a new `project.scraft`, written by SoundCraft's own command-line
+# tool before the window opens, so the session has a path from the start and
+# Save and the control channel's `session.save` write where the next session
+# of the project looks. A session keeps the audio it records and imports in
+# `Audio Files` beside its file, and its earlier saves in `Backups`.
+#
+# SoundCraft's settings folder, which holds its preferences, presets, logs, and
+# the autosaved copies of unsaved work, is `.soundcraft` in the project folder
+# rather than one for the whole workspace: SoundCraft offers to recover what
+# an earlier run left unsaved as it opens, and a folder shared by every
+# project would offer one project's work in another. SoundCraft has no way to
+# take that offer without asking, so a session that ended with changes
+# unsaved, by the idle timeout or `down`, reopens on the saved session with
+# the question on screen.
+#
+# The control channel listens on the Sandbox's loopback only, on
+# SOUNDCRAFT_CONTROL_PORT, which SoundCraft reads from the environment the
+# image sets (sandbox.py). Sound goes to the default ALSA device, which the
+# base container's PipeWire provides and Selkies streams.
+folder="$(selkies-modal-project)" || exit 1
+mkdir -p "${folder}/.soundcraft"
+cd "${folder}" || exit 1
+
+file="$(find . -maxdepth 1 -name '*.scraft' -type f -printf '%T@ %p\n' 2> /dev/null | sort -rn | head -n 1 | cut -d ' ' -f 2-)"
+if [ -z "${file}" ]; then
+  file="./project.scraft"
+  soundcraft-cli run --save "${file}" > /dev/null
+fi
+SOUNDCRAFT_CONFIG_DIR="${folder}/.soundcraft" exec soundcraft "${folder}/${file#./}"
