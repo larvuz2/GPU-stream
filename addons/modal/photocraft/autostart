@@ -12,23 +12,56 @@
 # unsaved documents it keeps under XDG_STATE_HOME are in `.photocraft` in the
 # project folder, where they outlive the Sandbox and stay with their project.
 #
-# Settings made here for the first time start PhotoCraft in its CPU
-# compatibility rendering mode. A Sandbox has no hardware adapter that can
-# present into the display (no render node; NVIDIA's Vulkan refuses it), so the
-# window is a software one on every machine, and PhotoCraft then composites on
-# the CPU whatever mode it is in; in its automatic mode it says so in a notice
-# over the window at every start, which this mode, the one that notice offers
-# to keep, leaves out. A mode the user picks afterwards stays theirs.
+# A session comes back to the work the last one left, by PhotoCraft's own two
+# means, since it has no project file that names its open documents:
+#
+# - Unsaved changes. PhotoCraft writes each changed document to its recovery
+#   folder on an interval and reopens what it finds there at its next start,
+#   changed and under the name and path it had. The interval is ten minutes
+#   unless set; a session can end at any minute (the idle timeout, `down`), so
+#   settings that do not say are given one minute, the shortest PhotoCraft
+#   takes. What was changed in the last minute before a session was stopped is
+#   what can still be lost; the idle timeout is longer than that, so a session
+#   it ends loses nothing.
+# - Saved work. With nothing to recover, PhotoCraft opens on the document of
+#   the project folder that was saved last (`.pcraft`, `.psd`, `.psb`, at the
+#   folder's top), as FilmCraft opens on the newest project file. With
+#   something to recover it opens on that alone: the recovered document is the
+#   newer state of the same work, and the saved one beside it would be a second
+#   tab of it.
+#
+# Settings that do not say start PhotoCraft in its CPU compatibility rendering
+# mode. A Sandbox has no hardware adapter that can present into the display (no
+# render node; NVIDIA's Vulkan refuses it), so the window is a software one on
+# every machine, a GPU's included, and PhotoCraft then composites on the CPU
+# whatever mode it is in, at the same speed; in its automatic mode it says so
+# in a notice over the window at every start, which this mode, the one that
+# notice offers to keep, leaves out. A value the user picks for either setting
+# afterwards stays theirs, as jq's `//=` sets only what is absent.
 #
 # The control channel listens on the Sandbox's loopback only, on
-# PHOTOCRAFT_CONTROL_PORT, for connections that authenticate with
+# PHOTOCRAFT_CONTROL_PORT, for connections that prove they hold
 # PHOTOCRAFT_CONTROL_TOKEN, which the launcher makes for each session
-# (sandbox.py); what it may read and write is the project folder alone.
+# (sandbox.py, `photocraft/control.sh`); what it may read and write is the
+# project folder alone.
 folder="$(selkies-modal-project)" || exit 1
 mkdir -p "${folder}/.photocraft/state"
 cd "${folder}" || exit 1
 export PHOTOCRAFT_CONFIG_DIR="${folder}/.photocraft"
 export XDG_STATE_HOME="${folder}/.photocraft/state"
-[ -e "${PHOTOCRAFT_CONFIG_DIR}/preferences.json" ] ||
-  printf '%s\n' '{"performance": {"renderingMode": "cpu"}}' > "${PHOTOCRAFT_CONFIG_DIR}/preferences.json"
-exec photocraft --automation-read-root "${folder}" --automation-write-root "${folder}"
+
+settings="${PHOTOCRAFT_CONFIG_DIR}/preferences.json"
+[ -s "${settings}" ] || echo '{}' > "${settings}"
+# A file jq cannot read is left as it is, for PhotoCraft to report
+if jq '.performance.renderingMode //= "cpu" | .fileHandling.autosaveMinutes //= 1' "${settings}" > "${settings}.new" 2> /dev/null; then
+  mv "${settings}.new" "${settings}"
+else
+  rm -f "${settings}.new"
+fi
+
+set --
+if [ -z "$(find "${XDG_STATE_HOME}/photocraft/Recovery" -maxdepth 1 -name '*.json' -print -quit 2> /dev/null)" ]; then
+  file="$(find . -maxdepth 1 \( -name '*.pcraft' -o -name '*.psd' -o -name '*.psb' \) -printf '%T@ %p\n' 2> /dev/null | sort -rn | head -n 1 | cut -d ' ' -f 2-)"
+  [ -z "${file}" ] || set -- "${file#./}"
+fi
+exec photocraft --automation-read-root "${folder}" --automation-write-root "${folder}" -- "$@"
