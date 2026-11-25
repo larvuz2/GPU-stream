@@ -31,9 +31,11 @@ import argparse
 import json
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 
 WIDTH = 512
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Rec. 709 luma weights, applied to the encoded values as a histogram display does
 LUMA = (0.2126, 0.7152, 0.0722)
 
@@ -64,10 +66,14 @@ def profile_name(path: str) -> str | None:
     rather than through each container's own framing, and its `desc` tag is
     read in both forms profiles use: the version 2 ASCII description and the
     version 4 multi-localized one. Only the first megabyte is searched, where
-    every writer puts the profile, so a large file is not read whole.
+    every writer puts the profile, so a large file is not read whole. A PNG
+    is the exception, since it stores the profile compressed: there the
+    `iCCP` chunk is found and inflated first.
     """
     with Path(path).open("rb") as file:
         head = file.read(1 << 20)
+    if head.startswith(PNG_SIGNATURE):
+        head = png_profile(head)
     at = head.find(b"acsp")
     if at < 36:
         return None
@@ -87,6 +93,29 @@ def profile_name(path: str) -> str | None:
             text = offset + int.from_bytes(head[offset + 24 : offset + 28], "big")
             return head[text : text + length].decode("utf-16-be", "replace")
     return None
+
+
+def png_profile(head: bytes) -> bytes:
+    """The ICC profile of a PNG whose first bytes are `head`, inflated, or nothing where it has none.
+
+    The `iCCP` chunk precedes the picture data, so the walk over the chunks
+    stops at the first `IDAT`. Its content is the profile's name, a zero
+    byte, the compression method, and the deflated profile.
+    """
+    at = len(PNG_SIGNATURE)
+    while at + 8 <= len(head):
+        length = int.from_bytes(head[at : at + 4], "big")
+        kind = head[at + 4 : at + 8]
+        if kind == b"IDAT":
+            break
+        if kind == b"iCCP":
+            content = head[at + 8 : at + 8 + length]
+            try:
+                return zlib.decompress(content[content.index(b"\0") + 2 :])
+            except (ValueError, zlib.error):
+                break
+        at += 12 + length
+    return b""
 
 
 def pixels(path: str, region: tuple[float, float, float, float] | None) -> bytes:
