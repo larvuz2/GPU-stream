@@ -1489,4 +1489,18 @@
   .ui-wave .ui-seek {
     cursor: pointer;
   }
+
+  /* A card that is a document of the agent's own: its frame has no edge, so the card's surface is the document's. */
+  .ui-html-frame {
+    display: block;
+    width: 100%;
+    border: 0;
+    border-radius: 0.6rem;
+    background: transparent;
+    color-scheme: dark;
+  }
+
+  .ui-card[data-locked='true'] .ui-html-frame {
+    opacity: 0.75;
+  }
 }

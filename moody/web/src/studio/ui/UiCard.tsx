@@ -124,6 +124,7 @@ function ComponentsCard({ ui, locked, live, onSubmit }: UiCardProps) {
   if (root === null) {
     return <p className="ui-text-muted">This card cannot be shown here.</p>;
   }
+  const unchosen = missing(inputs, state);
   return (
     <CardContext value={card}>
       <div className="ui-body">
@@ -133,7 +134,7 @@ function ComponentsCard({ ui, locked, live, onSubmit }: UiCardProps) {
         label={ui.submit}
         locked={frozen}
         live={live}
-        blocked={missing(inputs, state)}
+        blocked={unchosen === null ? null : `Still to choose: ${unchosen}`}
         summary={frozen ? summarize(inputs, state) : []}
         onLock={() => {
           onSubmit(state);

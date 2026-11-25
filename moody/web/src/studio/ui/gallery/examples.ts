@@ -12,7 +12,8 @@
  * document for the sandboxed frame, so the gallery is also the worked reference for both: a look
  * tuned by sliders over a before and after pair, a lead picked from portraits, a style chosen
  * from boards, a storyboard put in order, a poster taken apart into its layers, a shot list with
- * its budget, and two cues to choose between.
+ * its budget, two cues to choose between, and three documents of the agent's own
+ * (`documents.ts`): an equalizer, a simulation, and the frame's self-test.
  *
  * The photographs are the site's own artwork (`public/media`), named here for the part they play.
  * The rest was made for the gallery, computed from nothing but code (`public/media/card-*`):
@@ -27,6 +28,7 @@
  * @module
  */
 import type { UiData, UiMedia } from '../tree';
+import { CONTACT_DOCUMENT, EQ_DOCUMENT, ISOLATION_DOCUMENT, LANTERNS_DOCUMENT, RUNAWAY_DOCUMENT } from './documents';
 
 /** One card of the gallery, with the exchange it answers. */
 export interface Example {
@@ -478,6 +480,88 @@ export const EXAMPLES: Example[] = [
       submit: 'Use this cue',
       waits: true,
       media: [file('harbor', 'card-cue-harbor.m4a', 'audio'), file('market', 'card-cue-market.m4a', 'audio')],
+    },
+  },
+  {
+    id: 'eq',
+    asked: 'The market cue is muddy under the dialogue. Can you clear it up?',
+    says: 'I put the cue through three bands of equalization so you can hear the difference yourself. Press play, shape it, and lock in the curve: I will apply it to the stem in SoundCraft.',
+    ui: {
+      ui_id: 'ui-eq',
+      title: 'Shape the market cue',
+      kind: 'html',
+      html: EQ_DOCUMENT,
+      height: 400,
+      submit: 'Lock in this EQ',
+      waits: true,
+      media: [file('cue', 'card-cue-market.m4a', 'audio')],
+    },
+  },
+  {
+    id: 'lanterns',
+    asked: 'How should the lanterns move in the last shot?',
+    says: 'Easier to feel than to describe, so here is a small simulation: every lantern rides the same wind and rises on its own heat. Set it the way the shot should feel and I will match the particle pass to it.',
+    ui: {
+      ui_id: 'ui-lanterns',
+      title: 'Lanterns on the wind',
+      kind: 'html',
+      html: LANTERNS_DOCUMENT,
+      height: 440,
+      submit: 'Use this motion',
+      waits: true,
+      media: [],
+    },
+  },
+  {
+    id: 'contact',
+    asked: 'One of the opening frames should be the poster. Which?',
+    says: 'Here is the contact sheet. Click the frame you want, or double-click it to send it to print right away.',
+    ui: {
+      ui_id: 'ui-contact',
+      title: 'A frame for the poster',
+      kind: 'html',
+      html: CONTACT_DOCUMENT,
+      height: 330,
+      submit: 'Print this frame',
+      waits: true,
+      media: [
+        file('towers', 'app-unreal.webp'),
+        file('market', 'discipline-media.webp'),
+        file('house', 'discipline-architecture.webp'),
+        file('studio', 'discipline-art.webp'),
+        file('letter', 'discipline-writing.webp'),
+        file('vista', 'discipline-games.webp'),
+      ],
+    },
+  },
+  {
+    id: 'isolation',
+    asked: 'What can a card you write actually reach?',
+    says: 'Nothing but what I hand it. This card is a document that tries every way out of its frame and reports what became of each.',
+    ui: {
+      ui_id: 'ui-isolation',
+      title: 'What a card’s own code can reach',
+      kind: 'html',
+      html: ISOLATION_DOCUMENT,
+      height: 420,
+      submit: 'Keep this report',
+      waits: false,
+      media: [],
+    },
+  },
+  {
+    id: 'runaway',
+    asked: 'And if a card tried to leave with what it was shown?',
+    says: 'It is stopped where it stands. This one navigates itself away with its files’ addresses in the link; the frame around it refuses, and the card says what happened.',
+    ui: {
+      ui_id: 'ui-runaway',
+      title: 'A card that tries to leave',
+      kind: 'html',
+      html: RUNAWAY_DOCUMENT,
+      height: 120,
+      submit: null,
+      waits: false,
+      media: [file('shot', 'discipline-media.webp')],
     },
   },
   {

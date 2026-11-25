@@ -38,7 +38,7 @@ interface LockBarProps {
   locked: boolean;
   /** Whether the card can be answered now. */
   live: boolean;
-  /** What still has to be chosen before it can be locked in, or `null`. */
+  /** Why it cannot be locked in yet, as a sentence, or `null` where nothing holds it. */
   blocked: string | null;
   /** What was locked in, a line per value. */
   summary: AnswerLine[];
@@ -99,9 +99,7 @@ export function LockBar({ label, locked, live, blocked, summary, onLock }: LockB
   }
   const hint = !live
     ? `You can explore this, but it cannot be locked in right now: ${brand} is working, or the conversation has moved past it.`
-    : blocked !== null
-      ? `Still to choose: ${blocked}`
-      : 'Nothing is sent until you lock it in.';
+    : (blocked ?? 'Nothing is sent until you lock it in.');
   return (
     <footer className="ui-lockbar">
       <button
