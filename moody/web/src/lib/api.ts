@@ -412,6 +412,30 @@ export interface ScreenData {
   stream: string;
 }
 
+/** One file of a preview: a {@link Media} with what is known of its length and its size on screen. */
+export interface PreviewItem extends Media {
+  /** Its file name in the project's folder. */
+  name: string;
+  /** How long it plays, in seconds, for sound and video. */
+  seconds?: number;
+  /** Its width in pixels, for a picture or a video. */
+  width?: number;
+  /** Its height in pixels, for a picture or a video. */
+  height?: number;
+}
+
+/** The agent showed work in progress: files an engine wrote, or its screen. */
+export interface PreviewData {
+  /** The engine the files came from. */
+  engine_id: string;
+  /** What the preview shows, in the agent's words. */
+  caption: string;
+  /** The files, in the order to show them; one whose file is gone is left out. */
+  items: PreviewItem[];
+  /** Whether two items are a before and after pair, the one before first. */
+  compare: boolean;
+}
+
 /** Something went wrong in the turn. */
 export interface ErrorData {
   /** What went wrong, for the person. */
@@ -430,6 +454,7 @@ export type StudioEvent = EventEnvelope &
     | { kind: 'library'; data: LibraryData }
     | { kind: 'engine'; data: EngineData }
     | { kind: 'screen'; data: ScreenData }
+    | { kind: 'preview'; data: PreviewData }
     | { kind: 'turn_end'; data: Record<string, unknown> }
     | { kind: 'error'; data: ErrorData }
   );
@@ -779,6 +804,24 @@ const isMedia: Guard<Media> = (value): value is Media =>
 
 const isMediaList = arrayOf(isMedia);
 
+/** Checks a value into a {@link PreviewItem}. */
+const isPreviewItem: Guard<PreviewItem> = (value): value is PreviewItem =>
+  isRecord(value) &&
+  oneOf(MEDIA_KINDS)(value.kind) &&
+  isWebUrl(value.url) &&
+  isString(value.name) &&
+  optional(isNumber)(value.seconds) &&
+  optional(isNumber)(value.width) &&
+  optional(isNumber)(value.height);
+
+/** Checks a value into a {@link PreviewData}. */
+const isPreview: Guard<PreviewData> = (value): value is PreviewData =>
+  isRecord(value) &&
+  isString(value.engine_id) &&
+  isString(value.caption) &&
+  arrayOf(isPreviewItem)(value.items) &&
+  isBoolean(value.compare);
+
 /** Checks a value into an {@link Asset}. */
 const isAsset: Guard<Asset> = (value): value is Asset =>
   isRecord(value) &&
@@ -862,6 +905,8 @@ function parseEvent(value: unknown): StudioEvent | null {
       return isSession(data.engine) ? { ...envelope, kind: 'engine', data: { engine: data.engine } } : null;
     case 'screen':
       return isScreen(data) ? { ...envelope, kind: 'screen', data } : null;
+    case 'preview':
+      return isPreview(data) ? { ...envelope, kind: 'preview', data } : null;
     case 'turn_end':
       return { ...envelope, kind: 'turn_end', data };
     case 'error':

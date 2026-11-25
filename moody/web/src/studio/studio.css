@@ -785,6 +785,119 @@
     transition: transform 0.15s ease;
   }
 
+  /*
+   * A preview: work in progress, not a deliverable. The card is the intelligence's lavender,
+   * with a dashed edge, where a finished file is a plain solid tile.
+   */
+  .preview-card {
+    border-style: dashed;
+  }
+
+  .preview-frame {
+    overflow: hidden;
+    max-height: 22rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.6rem;
+    background: var(--color-ink-950);
+  }
+
+  button.preview-frame {
+    cursor: zoom-in;
+  }
+
+  button.preview-frame:hover {
+    border-color: var(--ai-line);
+  }
+
+  .preview-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.6rem;
+    background: rgb(255 255 255 / 0.03);
+    font-size: 0.875rem;
+  }
+
+  .preview-badge {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.4rem;
+    border-radius: 0.3rem;
+    background: rgb(8 8 8 / 0.78);
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    pointer-events: none;
+  }
+
+  /* The handle of a before and after pair, and the range input laid over the pair that moves it. */
+  .compare-divider {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--color-lavender);
+    pointer-events: none;
+  }
+
+  .compare-range {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    background: transparent;
+    cursor: ew-resize;
+    appearance: none;
+  }
+
+  .compare-range::-webkit-slider-runnable-track {
+    height: 100%;
+    background: transparent;
+  }
+
+  .compare-range::-moz-range-track {
+    height: 100%;
+    background: transparent;
+  }
+
+  /* The input's own thumb is not drawn: the divider is the handle, wherever the pair is tall. */
+  .compare-range::-webkit-slider-thumb {
+    width: 2rem;
+    height: 2rem;
+    opacity: 0;
+    appearance: none;
+  }
+
+  .compare-range::-moz-range-thumb {
+    width: 2rem;
+    height: 2rem;
+    border: 0;
+    opacity: 0;
+  }
+
+  .compare-divider::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 1.1rem;
+    height: 1.6rem;
+    border: 2px solid var(--color-ink-950);
+    border-radius: 0.3rem;
+    background: var(--color-lavender);
+    transform: translate(-50%, -50%);
+  }
+
+  .compare-range:focus-visible {
+    outline: 2px solid var(--color-lime);
+    outline-offset: 2px;
+  }
+
   /* The agent's question: a card of choices. */
   .ask-option {
     display: flex;

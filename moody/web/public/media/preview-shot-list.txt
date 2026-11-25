@@ -1,0 +1,10 @@
+THE BEACON: the opening, wide version
+
+1  0:00  WIDE   Spire City at dusk. Lights fail block by block.            4 s
+2  0:04  WIDE   The violet flats. One figure, very small.                   4 s
+3  0:08  MED    Pip, running, the beacon cold under his arm.               3 s
+4  0:11  CLOSE  The beacon: one ember left.                                  3 s
+5  0:14  MED    Mara at the trailhead, counting coins.                     5 s
+6  0:19  WIDE   The glasshouse on the horizon, dark.                       5 s
+
+Total 24 s. Shots 1 and 2 are in the animatic; 3 to 6 wait for generated takes.
