@@ -44,7 +44,8 @@ description: Work on an Unreal Engine project, from a GitHub repository a whole 
 
 ## A new project (no repository yet)
 
-1. Start the engine. Ask which template: Third Person, First Person, Top Down, Vehicle, or Blank.
+1. Ask which template: Third Person, First Person, Top Down, Vehicle, or Blank. Then start the
+   engine: the question needs none, and the engine costs credits while the person decides.
 2. With `engine_exec`, list the engine's `Templates/` folder, copy the Blueprint template
    (`TP_ThirdPersonBP` and the like) into the project's folder as `<Name>/`, and rename its
    `.uproject` to `<Name>.uproject`. Use the C++ template only when they ask for C++. No
