@@ -274,22 +274,37 @@ subagent definitions, the event log, storage, and the page. Other models reach
 a project as tools (fal's image and video models are the first), so a better
 model for one job is a tool added, never a loop replaced.
 
+A turn is one run of the loop (`moody/control/loop.py`), in the worker the
+message route spawned. The SDK runs its `claude` program as a child process
+of that worker; the program gets the Anthropic key, directories made for the
+turn, and the variables the deployment names (`MOODY_LOOP_ENV`), and nothing
+else of the worker's environment, so no other secret of the deployment is in
+a process the model steers.
+
 - **Tools.** Moody's tools (`TOOLS` and `Agent.tool_<name>` in
-  `moody/control/agent.py`) are served to the loop in process, and the loop's
-  own file and shell tools are off: the agent reaches nothing of the machine
-  its turn runs on. Web search and web fetch are on. A tool's definition says
-  what it looks like while it runs (`activity`, one of `catalog.json`'s
-  `activities`), whether it only reads (so the loop may run several at once),
-  and whether the person approves it first (`approval`).
-- **Skills** are `moody/skills/<name>/SKILL.md`, as before, loaded by the loop
-  on demand: a skill's description is always in context, its body when the
-  work calls for it, a reference file when the body sends the agent to it.
-  Which skills a project offers is still the discipline's (`skills_for`).
+  `moody/control/agent.py`) are served to the loop in process, which names
+  each `mcp__moody__<name>`, and the loop's own file and shell tools are off:
+  the agent reaches nothing of the machine its turn runs on. Of the loop's
+  own tools four are on beside the one that starts a subagent, and the events
+  call them `web_search`, `web_fetch`, `skill`, and `read`. A fetch is of a
+  public web address or it is refused, and `read` reads the files of the
+  skills the project is offered and no other path, both checked before the
+  call runs. A tool's definition says what it looks like while it runs
+  (`activity`, one of `catalog.json`'s `activities`), whether it only reads
+  (so the loop may run several at once), and whether the person approves it
+  first (`approval`).
+- **Skills** are `moody/skills/<name>/SKILL.md`, loaded by the loop on
+  demand: the description of each skill the project is offered is always in
+  context, its body when the agent opens it with `skill`, a reference file
+  when the body sends the agent to it and the agent reads it with `read`.
+  Which skills a project is offered is the discipline's (`skills_for`), and
+  the loop refuses to open any other.
 - **Subagents** are `moody/agents/<name>.md`: front matter and a system
   prompt. The agent hands a subagent one job; it works in a context of its
   own with the tools its definition lists, several at once where the jobs are
-  independent, and only its final report returns to the agent. The page shows
-  each one working.
+  independent, and only its final report returns to the agent. A subagent
+  cannot ask the person a question or start a subagent of its own. The page
+  shows each one working.
 
   ```text
   ---
@@ -305,39 +320,81 @@ model for one job is a tool added, never a loop replaced.
   ---
   The subagent's system prompt.
   ```
+
+  A file whose name starts with `_` is a template, not a subagent. One is
+  read: `_operator.md`, from which an operator is derived for every app that
+  can be started and has a skill of its own name. Its `name` is the app's id,
+  its `title` "<App name> agent", its tools the template's or else `engine_*`
+  and `preview`, its skill that app's, and `{app}` and `{name}` in the
+  template's description and prompt are the app's id and name. A definition
+  that names a tool or a skill that does not exist, or whose `name` is not
+  its file's, keeps the agent from starting.
 - **Approvals.** A tool whose definition says `approval: ask` (starting an
-  engine, generating video) waits for the person: the agent's turn writes an
-  `approval` event and goes on once the person answers, with "always" kept
-  for that tool in that project (`Project.permissions`) and revocable in the
-  Environment panel. Engines cost credits every minute, so none starts unless
-  the work needs it or the person asked: planning, writing, and generating
-  need no engine.
+  engine, generating video) waits for the person, unless the project's
+  permissions say `always` for it: the call's `tool_start` is followed by an
+  `approval` event, and the turn goes on once an `approval_result` is
+  recorded. `once` and `always` run the call; `deny` and `expired` end it
+  with a `tool_end` that is not ok, and the model is told which. "Always" is
+  kept for that tool in that project (`Project.permissions`) and revocable in
+  the Environment panel. A wait ends as `expired` after
+  `MOODY_APPROVAL_SECONDS` (600 by default), and the model is then told to
+  end its turn and ask. An approval is answered once: the first answer
+  recorded stands, and the route says whether the one it was sent is that
+  answer (`recorded`). A subagent's approval carries its `agent_id`, as its
+  result does. Engines cost credits every minute, so none starts unless the
+  work needs it or the person asked: planning, writing, and generating need
+  no engine, and a turn that is about to end while engines of the project are
+  open is told so once, to stop each or say why it stays open.
 - **Questions and interactive cards end the turn.** `ask_user` and a
-  `show_ui` that waits write their event and end the turn; the person's
-  answer or locked-in values start the next one, which resumes the same
-  session.
+  `show_ui` that waits write their event and end the turn (a tool's result
+  says so with `ends_turn`): the loop makes no further model call, and its
+  process is gone while the person decides. The person's answer or locked-in
+  values start the next turn, which resumes the same session. A message that
+  locks in a card names it (`ui_id`, which must be a `ui` event of the
+  project) and carries its state (`value`, JSON of at most 64 KiB); the
+  model reads them as a line after the person's words.
 - **Sessions.** A project's conversation is one SDK session
-  (`projects.agent_session`), its transcript stored in the database through
-  the SDK's session store, so a turn resumes on any machine, days later.
-- **Spending.** A turn has a budget (`MOODY_TURN_BUDGET_USD`) the loop
-  enforces, and ends with a `usage` event.
+  (`projects.agent_session`), its transcript stored in the database
+  (`agent_transcripts`) through the SDK's session store as the turn writes
+  it, so a turn resumes on any machine, days later. The loop keys a session
+  by the turn's working directory, which is `<MOODY_LOOP_ROOT>/<project id>`
+  on every machine. What changes between turns (the plan, the library, the
+  engines, what was shown) is sent with each message, after the person's
+  words. A project that has events and no session yet starts one that is
+  first told what was said before.
+- **Spending.** A turn has a budget (`MOODY_TURN_BUDGET_USD`, 10 by default,
+  0 for none) and a limit of steps (`MOODY_TURN_LIMIT`, 200 by default) the
+  loop enforces, each ending the turn with an `error` event that says so, and
+  every turn ends with a `usage` event. `cost_usd` is the loop's own pricing
+  of the turn's model calls, subagents' included; generation and engines are
+  not in it.
+- **Stopping.** `POST /v1/projects/{pid}/stop` interrupts the loop: a call
+  still running ends with a `tool_end` that is not ok, a subagent's card ends
+  `stopped`, and what was written of the answer stays as its last snapshot.
 
 Additions to the API:
 
 ```text
 POST   /v1/projects/{pid}/messages         {text, ui?: {ui_id, value}} -> 202 {turn_id}: `ui` locks in an
-                                           interactive card; `value` is the card's state, JSON
-POST   /v1/projects/{pid}/approvals/{aid}  {decision: "once" | "always" | "deny"} -> {recorded}
+                                           interactive card; `value` is the card's state, JSON. `text` may
+                                           be empty with a `ui`. 404 for a card the project has not shown,
+                                           413 for a `value` over 64 KiB
+POST   /v1/projects/{pid}/approvals/{aid}  {decision: "once" | "always" | "deny"} -> {recorded}: whether this
+                                           answer is the one that stands; 404 for an approval the project's
+                                           agent did not ask for
 GET    /v1/projects/{pid}/environment      {connectors: [Connector], agents: [AgentInfo], skills: [SkillInfo]}
 PATCH  /v1/projects/{pid}                  also {permissions?: {tool: "always"}}: what the person no longer
-                                           wants to be asked about; a tool left out is asked again
+                                           wants to be asked about, the whole of it; a tool left out is
+                                           asked again
 ```
 
 ```text
 Project      also {permissions: {tool: "always"}}
 Connector    {id, name, kind: "generation" | "repository" | "search" | "license" | "mcp",
               state: "connected" | "available" | "off", detail}: a service the project's agent can
-              use, or could once the person connects it
+              use, or could once the person connects it. The ids are `fal`, `github`, `web`, and,
+              in a project whose discipline has Unreal Engine, `epic`; `off` is a service the
+              deployment is not configured for
 AgentInfo    {name, title, description}: a subagent this project's agent can hand work to
 SkillInfo    {name, description}
 Activity     one of catalog.json's `activities` ids: thinking, searching, processing, analyzing,
@@ -351,16 +408,28 @@ belongs to, absent for the agent itself.
 user_message     {text, ui?: {ui_id, value}}
 text             {text, block?, partial?}   `block` names the block of the answer this is; a later
                                             event with the same `block` replaces it, which is how an
-                                            answer appears while it is written (`partial: true`)
+                                            answer appears while it is written (`partial: true`).
+                                            A block is written at most once a second while it grows,
+                                            each event carrying all of it so far, and once whole,
+                                            without `partial`
 thinking         {text, block?, partial?}   the model's reasoning, summarized; folded the same way
 tool_start       {call_id, tool, title, activity}
+                                            written as the call is about to run, after the words the
+                                            model wrote before it. `tool` is Moody's name for it. A
+                                            call the loop refuses for its input writes no event, and
+                                            handing a job to a subagent writes none: its card stands
+                                            for it
 agent            {agent_id, group, name, title, task, state: "working" | "completed" | "failed" |
                  "stopped", activity, detail, seconds?, tokens?}
                                             a subagent's card. Every `agent` event carries the whole
                                             card; the latest for an `agent_id` is its state. `group`
                                             is shared by the subagents one step started together,
-                                            `task` is the job in a line, `detail` what it is doing now
-approval         {approval_id, tool, title, detail}   the agent waits for the person
+                                            `task` is the job in a line, `detail` what it is doing now.
+                                            `activity` is `thinking` until it runs a tool, then that
+                                            tool's, `confused` after a call that failed or when it
+                                            ends any way but completed, `satisfied` once completed
+approval         {approval_id, tool, title, detail}   the agent waits for the person; `detail` is what
+                                            the call will cost, as far as that is known
 approval_result  {approval_id, decision: "once" | "always" | "deny" | "expired"}
 ui               {ui_id, title, kind: "components" | "html", spec?, html?, height?, submit: string | null,
                  waits, media: [{name, kind, url}]}
@@ -370,7 +439,9 @@ ui               {ui_id, title, kind: "components" | "html", spec?, html?, heigh
                                             button's label, null for a card with nothing to send
                                             back. `media` are the files the card shows, signed for
                                             each reading of the log
-usage            {input_tokens, output_tokens, cost_usd, seconds, agents}   once per turn, before turn_end
+usage            {input_tokens, output_tokens, cost_usd, seconds, agents}   once per turn, before turn_end.
+                                            `input_tokens` counts what was read from and written to
+                                            the cache too, `agents` the subagents the turn started
 ```
 
 ## What is done when

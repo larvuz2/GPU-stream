@@ -3380,6 +3380,9 @@ def test_subagents_are_read_from_files_offered_by_discipline_and_given_their_too
     asking = AgentSpec("asker", "Asker", "Asks.", frozenset({"all"}), ("ask_user",), (), "inherit", "Ask.")
     with pytest.raises(ValueError, match="no tool is named ask_user"):
         Agent(studio.sessions, model, None, studio.agent.skills, [asking])
+    reading = AgentSpec("reader", "Reader", "Reads.", frozenset({"all"}), ("library_list",), ("typography",), "inherit", "Read.")
+    with pytest.raises(ValueError, match="reader names skills there are none of: typography"):
+        Agent(studio.sessions, model, None, studio.agent.skills, [reading])
 
 
 def test_the_subagents_and_skills_of_the_repository_load_and_name_only_tools_the_agent_has(studio):

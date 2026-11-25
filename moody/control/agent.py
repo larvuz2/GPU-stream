@@ -1150,7 +1150,13 @@ class Agent:
         self.derived = derived or []
         self.heartbeat_seconds: float = HEARTBEAT_SECONDS
         self.approval_poll_seconds: float = APPROVAL_POLL_SECONDS
-        # A definition that names a tool there is none of stops the agent here, not in the middle of a person's turn
+        # A definition that names a tool or a skill there is none of stops the agent here, not in the middle of a
+        # person's turn
+        known = {skill.name for skill in skills}
+        for agent in (*self.agents, *self.derived):
+            missing = [name for name in agent.skills if name not in known]
+            if missing:
+                raise ValueError(f"the subagent {agent.name} names skills there are none of: {', '.join(missing)}")
         for discipline in sessions.catalog.disciplines:
             self.subagents({"discipline": discipline}, skills_for(skills, sessions.catalog, discipline))
 
