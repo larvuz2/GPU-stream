@@ -72,6 +72,22 @@ from service import OPEN, Catalog, Clone, Config, OwnCopy, Refused, Sessions, St
 import unreal
 
 CATALOG = Catalog(Path(__file__).resolve().parent.parent / "catalog.json")
+
+
+class Counter:
+    """The whole numbers from one, each given once.
+
+    `itertools.count` does the same and cannot be pickled from Python 3.14
+    on, and the store that holds these is handed to another process as a
+    pickle (`test_loop.py`, `trial.py`).
+    """
+
+    def __init__(self) -> None:
+        self.last = 0
+
+    def __next__(self) -> int:
+        self.last += 1
+        return self.last
 ALICE = User(id="00000000-0000-0000-0000-00000000000a", email="alice@example.test")
 BOB = User(id="00000000-0000-0000-0000-00000000000b", email="bob@example.test")
 TOKENS = {"alice-token": ALICE, "bob-token": BOB}
@@ -127,8 +143,8 @@ class FakeStore:
             },
         }
         self.files: dict[str, tuple[bytes, str]] = {}
-        self.serial = itertools.count(1)
-        self.clock = itertools.count(1)
+        self.serial = Counter()
+        self.clock = Counter()
 
     def stamp(self) -> str:
         """Now, a microsecond later each time, so rows sort in the order they were written."""

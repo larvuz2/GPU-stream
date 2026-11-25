@@ -123,8 +123,13 @@ def backend(
     api_url: str,
     store: FakeStore | None = None,
     loop_root: Path | None = None,
+    key: str = "sk-ant-scripted",
 ) -> SimpleNamespace:
-    """The Studio's backend on the real loop: the stand-ins of `test_api.py` for everything but the SDK."""
+    """The Studio's backend on the real loop: the stand-ins of `test_api.py` for everything but the SDK.
+
+    `api_url` is where the loop's program reaches the Messages API, empty for
+    Anthropic's own, which `key` is then a real key for (`trial.py`).
+    """
     skills_folder, agents_folder = write_definitions(folder)
     store, launcher, jobs, github, fal = (
         store or FakeStore(),
@@ -134,7 +139,7 @@ def backend(
         FakeFal(),
     )
     settings = config(
-        anthropic_key="sk-ant-scripted",
+        anthropic_key=key,
         anthropic_base_url=api_url,
         fal_key="fal-test",
         loop_root=str(loop_root or folder / "loop"),
@@ -609,7 +614,13 @@ def test_a_session_resumes_in_a_fresh_process_that_has_nothing_of_the_first_but_
             "PATH": os.environ.get("PATH", os.defpath),
             "HOME": str(home),
             "TMPDIR": str(home),
-            "PYTHONPATH": str(Path(__file__).parent),
+            # Where this file is and where the agent's modules are, which an image may keep apart
+            "PYTHONPATH": os.pathsep.join(
+                dict.fromkeys(
+                    str(Path(found).parent)
+                    for found in (__file__, sys.modules[Agent.__module__].__file__)
+                )
+            ),
         }
         ran = subprocess.run(
             [
