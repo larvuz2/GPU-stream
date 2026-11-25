@@ -12,6 +12,7 @@
 const dollars = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 const wholeDollars = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const count = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
+const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
 const percent = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 0 });
 const dateTime = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const date = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -44,6 +45,16 @@ export function price(amount: number): string {
  */
 export function creditCount(credits: number): string {
   return count.format(credits);
+}
+
+/**
+ * Writes a number of tokens as briefly as a line of small print allows.
+ *
+ * @param tokens The number of tokens.
+ * @returns Text such as `940`, `6.1K`, or `1.2M`.
+ */
+export function tokenCount(tokens: number): string {
+  return compact.format(tokens);
 }
 
 /** The units a size on disk is written in, each a thousand of the one before. */

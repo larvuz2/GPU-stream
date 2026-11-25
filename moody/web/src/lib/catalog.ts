@@ -92,6 +92,20 @@ export interface Category {
   engines: string[];
 }
 
+/**
+ * Something an agent is doing, as the page shows it: the pixel eyes play the expression of the
+ * same identifier (`lib/moodyEyes.ts`) beside this label.
+ *
+ * The control plane reads the same list: a tool's definition and a subagent's card name one of
+ * these identifiers.
+ */
+export interface Activity {
+  /** The identifier an event carries, and the name of the eyes' expression. */
+  id: string;
+  /** What the page calls it, such as "Searching". */
+  label: string;
+}
+
 /** A size of workstation. */
 export interface Tier {
   /** The identifier the control plane takes. */
@@ -138,6 +152,8 @@ export interface Catalog {
   credit_usd: number;
   /** Credits a new account starts with. */
   signup_credits: number;
+  /** What an agent can be shown doing, each an expression of the pixel eyes. */
+  activities: Activity[];
   /** The twelve top-level disciplines, in the order they are shown. */
   disciplines: Discipline[];
   /** The finer categories, each under a discipline. */
@@ -264,6 +280,16 @@ export function findApp(id: string): CatalogApp | undefined {
  */
 export function tierFits(tier: Tier, app: CatalogApp): boolean {
   return app.requires_gpu !== true || tier.gpu !== null;
+}
+
+/**
+ * What the page calls an activity.
+ *
+ * @param id The activity's identifier, as an event names it.
+ * @returns Its catalog label, or `undefined` for one the catalog does not list.
+ */
+export function activityLabel(id: string): string | undefined {
+  return catalog.activities.find((activity) => activity.id === id)?.label;
 }
 
 /**
