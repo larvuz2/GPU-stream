@@ -15,20 +15,36 @@
  * by which name, how a minute is charged and that a balance never goes below
  * zero, that a payment delivered twice is credited once, that an engine starts
  * only in its user's project and a seat-capped app stops at its seats, that a
- * project runs one turn at a time and a dead turn does not hold it, and that
+ * project runs one turn at a time and a dead turn does not hold it, that the
+ * agent's transcript is kept in the order written with a batch sent twice kept
+ * once, that an approval is answered once and "always" is remembered, and that
  * the keys a browser holds reach no row and no function. The migrations also
- * apply to a database with no Storage at all, as the first did, and moving to
- * the GitHub App drops the OAuth App's grants a database already held. `npm
- * test` runs it; it exits non-zero on a failure.
+ * apply to a database with no Storage at all, as the first did, moving to the
+ * GitHub App drops the OAuth App's grants a database already held, and moving
+ * to the agent's loop keeps a project's events while its replayed conversation
+ * goes. `npm test` runs it; it exits non-zero on a failure.
  * @module
  */
 import { PGlite } from '@electric-sql/pglite';
 import fs from 'node:fs';
 
 const MIGRATIONS = new URL('./migrations/', import.meta.url);
-/** Every migration's SQL, in the order Supabase applies them: by file name. */
-const migrations = fs.readdirSync(MIGRATIONS).filter((name) => name.endsWith('.sql')).sort()
-  .map((name) => fs.readFileSync(new URL(name, MIGRATIONS), 'utf8'));
+/** Every migration's file name, in the order Supabase applies them. */
+const names = fs.readdirSync(MIGRATIONS).filter((name) => name.endsWith('.sql')).sort();
+/** Every migration's SQL, in that order. */
+const migrations = names.map((name) => fs.readFileSync(new URL(name, MIGRATIONS), 'utf8'));
+
+/**
+ * Where a migration stands in the order, by the name after its timestamp.
+ * @param name The migration's name, as `github_app`.
+ * @returns Its index in `migrations`.
+ * @throws Where no migration has the name: a check of an upgrade would otherwise test nothing.
+ */
+const migration = (name: string): number => {
+  const index = names.findIndex((file) => file.endsWith(`_${name}.sql`));
+  if (index < 0) throw new Error(`no migration is named ${name}`);
+  return index;
+};
 
 /** A row as a query returns it. */
 type Row = Record<string, unknown>;
@@ -194,13 +210,63 @@ check("stopping a dead turn ends it at once", (await one("select moody_stop_turn
   && (await one("select turn_id from projects where id=$1", [pa.id])).turn_id === null
   && (await turnEvents(t3)).map((e) => e.kind).join() === "user_message,turn_end");
 check("with no turn running there is nothing to stop", (await one("select moody_stop_turn($1,$2,120) ok", [pa.id, A])).ok === false);
+const t4 = (await one("select moody_begin_turn($1,$2,'this one',120,$3) t", [pa.id, A, { ui_id: "card-1", value: { pick: 2 } }])).t;
+const locked = ((await turnEvents(t4))[0] ?? {}).data as Row;
+check("a turn's message keeps the card it locks in", locked.text === "this one" && JSON.stringify(locked.ui) === '{"ui_id":"card-1","value":{"pick":2}}', locked);
+check("every kind of event the agent writes is taken", (await refused(
+  `insert into project_events (project_id,turn_id,kind) select '${pa.id}','${String(t4)}',kind from unnest(array[
+    'thinking','screen','preview','agent','ui','usage']) kind`)) === null);
+check("a kind nothing writes is refused", /project_events_kind_check/.test(await refused(
+  `insert into project_events (project_id,turn_id,kind) values ('${pa.id}','${String(t4)}','note')`) ?? ""));
 
-// The library, the conversation, and the GitHub connection, and what deleting a project takes with it.
+// An approval: answered once, whoever is first, and "always" is remembered for its tool.
+await db.exec(`insert into project_events (project_id,turn_id,kind,data) values
+  ('${pa.id}','${String(t4)}','approval','{"approval_id":"ap-1","tool":"engine_start","agent_id":"sub-1"}'),
+  ('${pa.id}','${String(t4)}','approval','{"approval_id":"ap-2","tool":"generate_video"}')`);
+check("a project starts with nothing approved for good", JSON.stringify((await one("select permissions from projects where id=$1", [pa.id])).permissions) === "{}");
+check("an approval the project does not have is refused", (await refused("select moody_resolve_approval($1,'nope','once')", [pa.id])) === "no_approval"
+  && (await refused("select moody_resolve_approval($1,'ap-1','once')", [pb.id])) === "no_approval");
+check("an answer is recorded", (await one("select moody_resolve_approval($1,'ap-1','once') d", [pa.id])).d === "once");
+check("a second answer changes nothing and is told the first", (await one("select moody_resolve_approval($1,'ap-1','always') d", [pa.id])).d === "once"
+  && JSON.stringify((await one("select permissions from projects where id=$1", [pa.id])).permissions) === "{}");
+const answered = (await turnEvents(t4)).filter((e) => e.kind === "approval_result").map((e) => e.data as Row);
+check("as one event, in the turn that asked, marked as its subagent's", answered.length === 1
+  && answered[0]?.approval_id === "ap-1" && answered[0]?.decision === "once" && answered[0]?.agent_id === "sub-1", answered);
+check("always is kept for the tool", (await one("select moody_resolve_approval($1,'ap-2','always') d", [pa.id])).d === "always"
+  && JSON.stringify((await one("select permissions from projects where id=$1", [pa.id])).permissions) === '{"generate_video":"always"}');
+check("permissions are an object", /check/.test(await refused(`update projects set permissions='[]' where id='${pa.id}'`) ?? ""));
+await one("select moody_end_turn($1,$2)", [pa.id, t4]);
+
+// The agent's transcript: entries in the order written, a batch sent twice kept once.
+/**
+ * A transcript's entries, in order.
+ * @param key The project key it was written under.
+ * @param subpath Empty for the session's own transcript, a subagent's path otherwise.
+ * @returns Each entry's `n`.
+ */
+const transcript = async (key: string, subpath = ""): Promise<unknown[]> =>
+  (await db.query<Row>("select entry from agent_transcripts where project_id=$1 and project_key=$2 and session_id='s-1' and subpath=$3 order by id",
+    [pa.id, key, subpath])).rows.map((row) => (row.entry as Row).n);
+const batch = [{ uuid: "u-1", n: 1 }, { uuid: "u-2", n: 2 }, { n: 3 }];
+check("a batch is written whole", (await one("select moody_append_transcript($1,'-work','s-1','',$2) n", [pa.id, batch])).n === 3);
+check("sent again, only its entries without an id are written", (await one("select moody_append_transcript($1,'-work','s-1','',$2) n", [pa.id, batch])).n === 1);
+await one("select moody_append_transcript($1,'-work','s-1','',$2)", [pa.id, [{ uuid: "u-4", n: 4 }]]);
+check("in the order written", (await transcript("-work")).join() === "1,2,3,3,4", await transcript("-work"));
+await one("select moody_append_transcript($1,'-work','s-1','subagents/agent-7',$2)", [pa.id, [{ uuid: "u-1", n: 7 }]]);
+await one("select moody_append_transcript($1,'-other','s-1','',$2)", [pa.id, [{ uuid: "u-1", n: 9 }]]);
+check("a subagent's transcript and another key's are their own", (await transcript("-work", "subagents/agent-7")).join() === "7"
+  && (await transcript("-other")).join() === "9" && (await transcript("-work")).length === 5);
+const listed = (await db.query<Row>("select * from moody_transcript_sessions($1,'-work')", [pa.id])).rows;
+check("a key lists its sessions and when each was written", listed.length === 1 && listed[0]?.session_id === "s-1" && Number(listed[0]?.mtime) > 1e12, listed);
+const under = (await db.query<Row>("select * from moody_transcript_subkeys($1,'-work','s-1')", [pa.id])).rows;
+check("a session lists its subagents' transcripts", under.length === 1 && under[0]?.subpath === "subagents/agent-7", under);
+check("another project sees none of it", (await db.query("select * from moody_transcript_sessions($1,'-work')", [pb.id])).rows.length === 0);
+
+// The library, the transcript, and the GitHub connection, and what deleting a project takes with it.
 await db.exec(`insert into assets (project_id,section,name,tag) values ('${pa.id}','Characters','Mara','@mara')`);
 check("a tag names one entry of a project", /duplicate key/.test(await refused(`insert into assets (project_id,section,name,tag) values ('${pa.id}','Props','Mara again','@mara')`) ?? ""));
 check("the same tag in another project is its own", (await refused(`insert into assets (project_id,section,name,tag) values ('${pb.id}','Songs','Mara','@mara')`)) === null);
 check("untagged entries do not collide", (await refused(`insert into assets (project_id,section,name) values ('${pa.id}','Props','Cup'),('${pa.id}','Props','Plate')`)) === null);
-await db.exec(`insert into agent_messages (project_id,role,content) values ('${pa.id}','user','"hello"')`);
 await db.exec(`insert into github_connections (user_id,login,token_encrypted,refresh_token_encrypted,token_expires_at,github_id,name)
   values ('${A}','mara-films','gAAAA-sealed','gAAAA-refresh',now() + interval '8 hours',1001,'Mara')`);
 await db.exec(`insert into epic_connections (user_id,login,token_encrypted,scope) values ('${A}','mara-films','gAAAA-epic','read:packages')`);
@@ -208,11 +274,12 @@ check("a project names no branch until it chooses one", (await one("select githu
 check("one Epic connection per user", /duplicate key/.test(await refused(`insert into epic_connections (user_id,login,token_encrypted) values ('${A}','x','y')`) ?? ""));
 const pc = await one("insert into projects (user_id,name,discipline) values ($1,'Gone','media') returning *", [A]);
 const ec = await one("select * from moody_request_session($1,'blender','cpu','auto',1,5,$2)", [A, pc.id]);
-await db.exec(`insert into assets (project_id,section,name) values ('${pc.id}','Props','Hat'); insert into agent_messages (project_id,role,content) values ('${pc.id}','user','"bye"')`);
+await db.exec(`insert into assets (project_id,section,name) values ('${pc.id}','Props','Hat')`);
+await one("select moody_append_transcript($1,'-work','s-2','',$2)", [pc.id, [{ uuid: "u-1", n: 1 }]]);
 await one("select moody_begin_turn($1,$2,'bye',120)", [pc.id, A]);
 await db.exec(`delete from projects where id='${pc.id}'`);
-check("deleting a project deletes its library, events, and conversation", (await one(
-  "select ((select count(*) from assets where project_id=$1) + (select count(*) from project_events where project_id=$1) + (select count(*) from agent_messages where project_id=$1))::int n",
+check("deleting a project deletes its library, events, and transcript", (await one(
+  "select ((select count(*) from assets where project_id=$1) + (select count(*) from project_events where project_id=$1) + (select count(*) from agent_transcripts where project_id=$1))::int n",
   [pc.id])).n === 0);
 check("and keeps its engines' sessions, unlinked", (await one("select project_id from sessions where id=$1", [ec.id])).project_id === null);
 await one("select * from moody_end_session($1,'stopped',false)", [ec.id]);
@@ -221,11 +288,22 @@ const bucket = await one("select * from storage.buckets where id='library'");
 check("the library bucket exists and is private", bucket.public === false, bucket);
 const upgraded = new PGlite();
 await upgraded.exec(SUPABASE);
-for (const sql of migrations.slice(0, -1)) await upgraded.exec(sql);
+for (const sql of migrations.slice(0, migration("github_app"))) await upgraded.exec(sql);
 await upgraded.exec(`insert into auth.users values ('${A}','a@x.test'); select moody_ensure_profile('${A}','a@x.test',60)`);
 await upgraded.exec(`insert into github_connections (user_id,login,token_encrypted,scope) values ('${A}','mara-films','gAAAA-oauth','repo,read:packages')`);
-await upgraded.exec(migrations[migrations.length - 1] ?? "");
+await upgraded.exec(migrations[migration("github_app")] ?? "");
 check("moving to the GitHub App drops the OAuth App's grants", ((await upgraded.query<Row>("select count(*)::int n from github_connections")).rows[0] ?? {}).n === 0);
+// A project that talked to the agent before its loop changed: its events stay, the replayed conversation goes.
+const old = (await upgraded.query<Row>(`insert into projects (user_id,name,discipline) values ('${A}','Before','media') returning id`)).rows[0] ?? {};
+const before = ((await upgraded.query<Row>("select moody_begin_turn($1,$2,'hello',120) t", [old.id, A])).rows[0] ?? {}).t;
+await upgraded.exec(`insert into agent_messages (project_id,role,content) values ('${String(old.id)}','user','"hello"');
+  insert into project_events (project_id,turn_id,kind,data) values ('${String(old.id)}','${String(before)}','text','{"text":"Hi."}')`);
+await upgraded.exec(migrations[migration("agent_loop")] ?? "");
+const kept = (await upgraded.query<Row>("select agent_session, permissions, turn_id from projects where id=$1", [old.id])).rows[0] ?? {};
+check("moving to the agent's loop keeps a project's events and its running turn, with no session yet",
+  ((await upgraded.query<Row>("select count(*)::int n from project_events where project_id=$1", [old.id])).rows[0] ?? {}).n === 2
+  && kept.agent_session === null && JSON.stringify(kept.permissions) === "{}" && kept.turn_id === before, kept);
+check("and the conversation it replayed is gone", ((await upgraded.query<Row>("select to_regclass('public.agent_messages') t")).rows[0] ?? {}).t === null);
 const bare = new PGlite();
 await bare.exec(SUPABASE);
 check("the migrations apply where there is no Storage", await (async () => {
@@ -243,10 +321,14 @@ for (const role of ["anon", "authenticated"]) {
   check(`${role} sees no profile rows`, (await one("select count(*)::int n from profiles")).n === 0);
   check(`${role} sees no session rows`, (await one("select count(*)::int n from sessions")).n === 0);
   check(`${role} sees no api key rows`, (await one("select count(*)::int n from api_keys")).n === 0);
-  for (const table of ["projects", "assets", "project_events", "agent_messages", "github_connections", "epic_connections"]) {
+  for (const table of ["projects", "assets", "project_events", "agent_transcripts", "github_connections", "epic_connections"]) {
     check(`${role} sees no ${table} rows`, (await one(`select count(*)::int n from ${table}`)).n === 0);
   }
   check(`${role} cannot start a turn`, /permission denied/.test(await refused("select moody_begin_turn($1,$2,'x',120)", [pa.id, A]) ?? ""));
+  check(`${role} cannot answer an approval`, /permission denied/.test(await refused("select moody_resolve_approval($1,'ap-1','always')", [pa.id]) ?? ""));
+  check(`${role} cannot write a transcript`, /permission denied/.test(await refused("select moody_append_transcript($1,'-work','s-1','','[]')", [pa.id]) ?? "")
+    && /permission denied/.test(await refused("select * from moody_transcript_sessions($1,'-work')", [pa.id]) ?? "")
+    && /permission denied/.test(await refused("select * from moody_transcript_subkeys($1,'-work','s-1')", [pa.id]) ?? ""));
   check(`${role} cannot start an engine`, /permission denied/.test(await refused("select * from moody_request_session($1,'blender','cpu','auto',1,5,$2)", [A, pa.id]) ?? ""));
   check(`${role} cannot grant itself credits`, /permission denied/.test(await refused("select moody_add_credits($1,999,'grant',null)", [A]) ?? ""));
   check(`${role} cannot insert a profile`, /row-level security/.test(await refused(`insert into profiles (id) values ('${C}')`) ?? "") || /duplicate/.test(await refused(`insert into profiles (id) values ('${C}')`) ?? "x") === false);
@@ -254,7 +336,9 @@ for (const role of ["anon", "authenticated"]) {
 }
 await db.exec("set role service_role");
 check("the service role may call the functions", (await refused("select moody_queue_position($1)", [s1.id])) === null
-  && (await refused("select moody_turn_alive($1,$2)", [pa.id, A])) === null);
+  && (await refused("select moody_turn_alive($1,$2)", [pa.id, A])) === null
+  && (await refused("select moody_append_transcript($1,'-work','s-1','','[]')", [pa.id])) === null
+  && (await refused("select moody_resolve_approval($1,'ap-2','once')", [pa.id])) === null);
 await db.exec("reset role");
 
 console.log(failures === 0 ? "\nall checks passed" : `\n${failures} FAILED`);

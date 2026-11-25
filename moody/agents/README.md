@@ -68,11 +68,14 @@ per engine written by hand (the template below makes those).
 
 ## Engine operators: `_operator.md`
 
-An engine that has a skill gets an operator without a definition of its own: the loader derives
-one from `_operator.md` for each such engine, titled with the engine's name and "agent"
-("FilmCraft agent"), which reads that engine's skill. In the template, `{app}` stands for the
-app's id and `{name}` for its name. Which engines get one, the operator's id, and which projects
-are offered it are the loader's to decide, so the template has no `disciplines` line.
+Every engine that can be started gets an operator without a definition of its own: the loader
+derives one from `_operator.md` for each, titled with the engine's name and "agent" ("FilmCraft
+agent"). It reads that engine's skill where the engine has one, and works from the application's
+own scripting interface where it has none yet. In the template, `{app}` stands for the app's id
+and `{name}` for its name. The operator's id and which projects are offered it are the loader's
+to decide (`operators` in `moody/control/definitions.py`), so the template has no `disciplines`
+line. An engine's skill can give its operator tools of its own with an `operator_tools` line in
+its front matter, as the Unreal skill does for opening and listing Unreal projects.
 
 An operator does one job in an engine that is already running: it follows the engine's skill,
 shows its work with `preview`, and reports. Its tool list leaves out starting, stopping, and

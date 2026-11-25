@@ -47,7 +47,7 @@ from test_api import (
     FakeLauncher,
     FakeStore,
     InlineJobs,
-    ScriptedModel,
+    ScriptedLoop,
     auth,
     config,
     events,
@@ -814,7 +814,7 @@ def stage() -> SimpleNamespace:
         config(anthropic_key="sk-ant-test"), PRODUCTS, store, launcher, jobs
     )
     jobs.sessions = sessions
-    agent = Agent(sessions, ScriptedModel(), None, [])
+    agent = Agent(sessions, ScriptedLoop(), None, [])
     with TestClient(create_app(sessions, sessions.config, PRODUCTS)) as client:
         yield SimpleNamespace(
             client=client,

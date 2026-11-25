@@ -13,6 +13,7 @@ user works in, and this directory is everything around it.
 | [`supabase/`](supabase) | Accounts, credits, sessions, API keys, projects, their libraries and conversations, and GitHub connections | A Supabase project |
 | [`catalog.json`](catalog.json) | The disciplines, apps, machine tiers, regions, prices, and the name | Read by the site and the control plane alike |
 | [`skills/`](skills) | What the Studio's agent knows of a craft, one `SKILL.md` per skill | Carried into the control plane's image |
+| [`agents/`](agents) | The subagents the Studio's agent hands jobs to, one definition per file | Carried into the control plane's image |
 
 `catalog.json` is the one place to change a price, switch an app from `soon`
 to `available`, or rename the service (`brand`).
@@ -49,18 +50,24 @@ reference images, start engines (sessions opened in the project's folder of
 the user's workspace) and drive them, and save the project's documents to a
 branch of its own in the GitHub repository the user linked. Each message runs one turn of the agent as a
 Modal function (`agent_turn`), which writes what it does to the project's event
-log as it goes; the page polls the log. The mechanism is in the docblocks of
-[`control/agent.py`](control/agent.py) and [`control/service.py`](control/service.py).
+log as it goes; the page polls the log. The agent's loop is the Claude Agent
+SDK: it hands jobs to subagents, opens a skill when the work calls for it,
+asks the person before a step that costs them, and keeps the conversation as
+a session in the database, so a turn resumes on any machine. The mechanism is
+in the docblocks of [`control/agent.py`](control/agent.py),
+[`control/loop.py`](control/loop.py), and
+[`control/service.py`](control/service.py).
 
 ## Setting it up
 
 **What to configure.** Each part below says how; this is the whole list.
 
-1. A Supabase project with the three migrations run, and its Site URL and
+1. A Supabase project with the four migrations run, and its Site URL and
    redirect URL.
 2. The Modal Secret `moody`: at least `SUPABASE_URL`, `SUPABASE_SECRET_KEY`,
    `MOODY_SITE_URL`, and `MOODY_SECRET_KEY`, then whichever integrations are
-   wanted (the table).
+   wanted (the table). The agent needs `ANTHROPIC_API_KEY` and nothing else:
+   every other setting of its loop has a default.
 3. A GitHub App, for "Connect GitHub": `GITHUB_APP_CLIENT_ID`,
    `GITHUB_APP_CLIENT_SECRET`, and `GITHUB_APP_SLUG`.
 4. A GitHub OAuth App, for "Connect Epic": `EPIC_GITHUB_CLIENT_ID` and
@@ -80,10 +87,19 @@ both need the Supabase project.
 which adds the Studio's tables and the private Storage bucket `library` its
 media is kept in, then
 [`20261125000000_github_app.sql`](supabase/migrations/20261125000000_github_app.sql),
-which keeps the GitHub App's expiring tokens and adds the Epic connection. A
-project that already ran the earlier ones runs only those it has not; the last
-deletes the GitHub connections an OAuth App made before, whose users connect
-again. Under Authentication, set the Site URL to the site's address and add
+which keeps the GitHub App's expiring tokens and adds the Epic connection, then
+[`20261126000000_agent_loop.sql`](supabase/migrations/20261126000000_agent_loop.sql),
+which adds what the agent's loop keeps: a project's session and its transcript
+(`agent_transcripts`), and what the person no longer wants to be asked about
+(`projects.permissions`). A project that already ran the earlier ones runs
+only those it has not. `github_app` deletes the GitHub connections an OAuth
+App made before, whose users connect again. `agent_loop` drops
+`agent_messages`, the conversation the agent replayed to the model before it
+kept a session: what was said in a project stays in its event log, which the
+page reads, and the first turn after the migration starts the project's
+session with a recap of it. Run it with no turn running and deploy the control
+plane with it, since each side needs the other. Under Authentication, set the
+Site URL to the site's address and add
 `<site>/app/` to the redirect URLs; turn on the Google and GitHub providers if
 the sign-in buttons for them should work.
 
@@ -100,7 +116,18 @@ and set:
 | `MOODY_PIN_REGIONS` | `false` to let Modal place every session; unset, a session whose user picked a region is pinned to it, which Modal bills at a higher rate, and one left on automatic is not |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Stripe's, to sell credit packs; point a Stripe webhook for `checkout.session.completed` at `<api>/v1/billing/webhook` |
 | `ANTHROPIC_API_KEY` | The Anthropic API key the Studio's agent runs on; without it a message to the agent is refused with 503. Its default model, Claude Fable 5.2, needs the key's organization to keep 30-day data retention (not zero data retention) |
-| `MOODY_AGENT_MODEL` | The agent's model, `claude-fable-5-2` unless set; another must take adaptive thinking, mid-conversation system messages, and the betas `control/agent.py` names |
+| `MOODY_AGENT_MODEL` | The agent's model, `claude-fable-5-2` unless set; another must be one the Claude Agent SDK's program knows, since it prices a turn's budget from its own table |
+| `MOODY_AGENT_MODEL_BALANCED`, `MOODY_AGENT_MODEL_LIGHT` | The models a subagent runs on when its definition says `model: balanced` or `light`, `claude-sonnet-5-5` and `claude-haiku-5-5` unless set; `inherit` is the agent's own |
+| `MOODY_AGENT_FALLBACK_MODEL` | A model the loop asks instead where the agent's own is overloaded or declines a request; none unless set |
+| `MOODY_AGENT_EFFORT` | How hard the model works on each step: `low`, `medium`, `high`, `xhigh`, or `max`; `high` unless set |
+| `MOODY_AGENT_THINKING` | `false` to run the agent without thinking; unset, it thinks as much as a step needs and the conversation shows a summary |
+| `MOODY_TURN_BUDGET_USD` | What one turn may spend on the model, in dollars as the loop prices it, `10` unless set; `0` for no limit. Generation and engines are not in it |
+| `MOODY_TURN_LIMIT` | The most steps one turn may take, `200` unless set; `0` for no limit |
+| `MOODY_APPROVAL_SECONDS` | How long a step waits for the person's approval before the agent is told to end its turn and ask, `600` unless set. A waiting turn holds its worker |
+| `ANTHROPIC_BASE_URL` | Where the loop reaches the Messages API where not Anthropic's own address: a proxy that holds the key, in which case `ANTHROPIC_API_KEY` is whatever the proxy takes |
+| `MOODY_LOOP_ENV` | Variables of this Secret, comma-separated, the loop's program also gets (a proxy's address, a certificate bundle). It gets `ANTHROPIC_API_KEY` and nothing else of the Secret unless named here |
+| `MOODY_LOOP_ROOT` | Under which a turn's working directory is made, `/tmp/moody-loop` unless set. The loop keys a project's session by that path, so changing it starts every project's conversation anew |
+| `MOODY_LOOP_CLI` | The `claude` program the loop runs, where not the one the SDK's package carries |
 | `FAL_KEY` | fal.ai's key, for the agent's image and video generation; without it those tools say generation is not configured |
 | `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | The client ID and a client secret of the GitHub App users connect their accounts through (below) |
 | `GITHUB_APP_SLUG` | That app's name in its address, `https://github.com/apps/<slug>`, where "Don't see your repository?" sends a user to install it |
@@ -220,6 +247,11 @@ addons/modal/selkies-modal modal deploy moody/control/app.py
 The deploy prints the API's address. A change to the Secret reaches new
 containers; deploy again to have it take effect at once.
 
+The control plane's image installs ffmpeg beside its Python packages: a turn's
+worker makes with it the small pictures the agent looks at what it generated
+or at the library by (`control/looking.py`). A worker without ffmpeg still
+runs; a look then says no picture could be made.
+
 **Netlify.** Connect the repository; `netlify.toml` holds the build. Set
 `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` (the project's
 publishable key, `sb_publishable_...`; a legacy `anon` key works too),
@@ -243,14 +275,37 @@ pip install -r moody/control/requirements.txt pytest && pytest moody/control
 runs the API, the MCP endpoint, and the agent against stand-ins for Supabase,
 Modal, Anthropic, fal, and GitHub: who a credential names, what each route and
 tool returns and refuses, that one user's sessions, projects, and connections do not exist
-for another, the agent's loop driven by a scripted model through every tool,
-that its conversation only ever grows, that `ask_user` ends a turn and a second
-message waits for the first, Nuke's gate and seats, Unreal Engine's gate on an
+for another, the agent driven by a scripted model through every tool, its
+subagents, approvals, and skills, that `ask_user` ends a turn and a second
+message waits for the first, the pictures the agent looks at its generations
+and the library by (made by a real ffmpeg, so those tests skip where there is
+none) and that the ffmpeg which makes them gets nothing of the worker's
+environment, Nuke's gate and seats, Unreal Engine's gate on an
 Epic connection the registry lets pull it and the user's own credential it is
 pulled with, the GitHub App's token refreshed before it expires and its
 repositories read from its installations, the clone an Unreal engine of a
 linked project starts with and that no row keeps its token, and that GitHub's
 callbacks refuse a state they did not sign and a page off the site.
+`test_api.py` stands in for the Claude Agent SDK at its boundary
+(`scripted_loop.py`) and runs in seconds. `test_loop.py` runs the SDK as it
+ships, with the `claude` program its package carries as a child process and
+only the Messages API scripted (`scripted_api.py`): that Moody's tools run and
+the program's file and shell tools are not offered, what the program's process
+has in its environment, a subagent's steps, a session resumed in a fresh
+process from the database's rows, an approval answered and one that runs out,
+a stop while the model answers, a skill opened on demand. Its tests skip, with
+the reason, where the program cannot start.
+
+```bash
+modal run moody/control/trial.py::scripted
+```
+
+runs those turns on Modal in the control plane's image, as the throwaway app
+`moody-trial-loop` with no Secret: the scripted model, two workers, the answer
+to a question resuming the session on the second, then both suites inside the
+image. It prints how long a worker took to start and each turn to run. `::real`
+in place of `::scripted` runs the same checks with a real model and the Secret
+`moody`'s `ANTHROPIC_API_KEY`, and spends a few model calls.
 
 ```bash
 BLENDER=/path/to/blender pytest addons/modal/unreal
@@ -268,8 +323,9 @@ applies the migrations to a Postgres that runs in the test's own process and
 calls every function: what is refused and by which name, how a minute is
 charged and that a balance never goes below zero, that a payment delivered
 twice is credited once, that a project runs one agent turn at a time and a dead
-turn does not hold it, and that the keys a browser holds reach no row and no
-function.
+turn does not hold it, that the agent's transcript keeps its order and a batch
+sent twice is kept once, that an approval is answered once, and that the keys
+a browser holds reach no row and no function.
 
 ## What is not here yet
 
@@ -279,9 +335,15 @@ pick one. The GPU tiers are switched off until the Modal account can start
 GPUs, and the session has not been run on one.
 
 The Studio's backend has run only against its tests' stand-ins: not yet against
-Anthropic, fal, GitHub, or Supabase Storage. The agent's model and generation
-are not billed in credits yet, a conversation that outgrows the model's context
-window has no compaction yet, and only an Unreal engine clones the project's
+Anthropic, fal, GitHub, or Supabase Storage. The agent's loop has run as it
+ships, on Modal too, with the model scripted; no turn has been answered by a
+real model, so how the model uses its subagents, skills, and approvals, what a
+turn costs, and how the loop summarizes a conversation that outgrows the
+model's context window are unmeasured (`trial.py::real` is the first step).
+The transcript's store has run against the tests' database and the SDK's
+conformance suite, not against Supabase, and neither has the read of a library
+file the agent looks at (`Store.download`). The agent's model and generation are
+not billed in credits yet, and only an Unreal engine clones the project's
 repository as it starts. The MCP endpoint has no project tools.
 
 The GitHub App and the Epic connection have run only against stand-ins too.
