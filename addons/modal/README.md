@@ -107,6 +107,31 @@ unsaved scene still unsaved and a saved file under its own path with the
 changes that were not saved. A Sandbox that is killed outright, at its
 lifetime or from Modal's dashboard, keeps only the last auto-save.
 
+### Between two running sessions
+
+A session sees the Volume as it was when its Sandbox started. What it writes
+is on the Volume within seconds (1.5 to 5 s, with or without a `sync`), and a
+session started after that has it, but a session already running never sees
+it: Modal cannot reload a Volume under an application that holds files open
+on it (`Sandbox.reload_volumes` answers that open files prevent it), and a
+session's application always does. `send` carries a file or a folder from one
+running session into the other instead:
+
+```bash
+addons/modal/selkies-modal send --name score --to cut /home/ubuntu/workspace/projects/trailer/handoff/mix.wav
+```
+
+The bytes pass through the machine that runs the command, 8 MiB in hand at a
+time, from a command of the sending session to a command of the receiving one
+(`send_file` in `sandbox.py`); the file appears under its name only once all
+of it arrived, as the session's user's, and a folder goes as a tar stream. A
+second path names where it goes in the receiving session when that is not the
+same path. Between two CPU sessions, from a machine outside Modal: 1 MB in
+1.7 s, 100 MB in 5.6 s, 1 GB in 42.7 s (24 MB/s), each with the same SHA-256 on
+both sides. What the receiving session got is in its own mount, so it reaches
+the Volume from there too. A FilmCraft session running since before a
+SoundCraft session bounced a WAV imported it once `send` had brought it.
+
 ## Nuke
 
 `--app nuke` starts a session for Foundry's Nuke instead. Foundry hands Nuke
@@ -364,8 +389,9 @@ open there (`Sandbox.reload_volumes` answers that open files prevent it). A
 file is on the Volume about 5 s after it was written (one of 368 MB as soon
 as one of a few bytes), and a session started 4 s after an export did not
 have it, while one started a minute later did. So work moves between two
-applications by exporting in one, waiting until the file has reached the
-Volume, and starting the other: a frame FilmCraft exported
+applications by exporting in one and either carrying the file into the other
+while it runs (`send`, under Files) or waiting until the file has reached the
+Volume and starting the other: a frame FilmCraft exported
 (`file.exportFrame`) opened as a poster's key art in a PhotoCraft session
 started after it, and that poster, saved as a 2048 by 3072 PNG, loaded as a
 texture in a Blender session started after that.
@@ -442,7 +468,8 @@ Two sessions on one workspace do not see each other's new files while both
 run: a Sandbox sees the Volume as it was when it started (a file written 13 s
 before a start was there, one written 1 s before was not, one written after
 never appeared, and `reload_volumes` is refused while the session has files
-open). A hand-off is therefore export, then start the session that reads it.
+open). A hand-off is therefore export, then `send` the file to the session
+that reads it, or start that session after the export.
 
 ### Graphics and speed
 
@@ -937,7 +964,8 @@ Sandboxes, in either direction (not after a minute), and
 `Sandbox.reload_volumes()` is refused while an application holds files open in
 the folder, which each does. A session that is stopped and started again sees
 them: 13 s after a write in the running SoundCraft session, a restarted
-FilmCraft session listed the file and imported the WAV.
+FilmCraft session listed the file and imported the WAV. Without a restart,
+`send` carries the file across (Files, "Between two running sessions").
 
 ## The session
 
