@@ -10,10 +10,13 @@
  * the hero's display, the landing page's illustration of the app). Layout stays in the markup as
  * Tailwind utilities.
  *
- * The identity is the wordmark's: near-black, white, and neutral grays, drawn pixel-precise with
- * hard edges and offset block shadows instead of blurs and glows. The one color is the green of a
- * status LED (`--color-led`), which says that something is on: the agent, a live engine. Red is
- * kept for errors and destructive actions alone. Photographs rest in grayscale behind a pixel
+ * The identity is the wordmark's, colored by Moody's Color Bible: Obsidian for the environment,
+ * Charcoal for structure, Chalk for what is read, and pure white for the wordmark and mascot
+ * alone, drawn pixel-precise with hard edges and offset block shadows instead of blurs and glows.
+ * Two accents carry meaning and are used sparingly. Electric Lime (`--color-lime`) is what the
+ * person does: the primary action, a selection, focus, and the status LED of something ready.
+ * Soft Lavender (`--color-lavender`) is what the intelligence does: the agent working, asking, or
+ * suggesting. Success, warning, error, and information have their own colors and no other use. Photographs rest in grayscale behind a pixel
  * screen and bloom to color under the pointer (`.bloom`). An engine's catalog accent appears only
  * as a dot (`--accent`).
  */
@@ -26,19 +29,30 @@
     'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
 
+  /* The Color Bible's neutral scale: Obsidian, then the navigation, elevated, and Charcoal surfaces. */
   --color-ink-950: #080808;
-  --color-ink-900: #0e0e0e;
-  --color-ink-800: #141414;
-  --color-ink-700: #191919;
-  --color-fg: #ffffff;
+  --color-ink-900: #101010;
+  --color-ink-800: #181818;
+  --color-ink-700: #252525;
+  /* Chalk for what is read; pure white for the wordmark and the mascot alone. */
+  --color-fg: #f2f0e8;
+  --color-white: #ffffff;
+  --color-soft: #bbbbbb;
   --color-muted: #999999;
   --color-faint: #868686;
-  --color-line: #262626;
+  --color-line: #333333;
   --color-line-strong: #444444;
-  --color-led: #3dff8b;
-  --color-ok: #3dff8b;
-  --color-warn: #d9d9d9;
-  --color-bad: #ff7b7b;
+  /* Electric Lime is what the person does: the primary action, a selection, focus, ready. */
+  --color-lime: #d6fa72;
+  --color-lime-hover: #e2ff99;
+  --color-lime-pressed: #b9dc59;
+  /* Soft Lavender is what the intelligence does: the agent thinking, suggesting, asking. */
+  --color-lavender: #c6c0f5;
+  --color-led: #d6fa72;
+  --color-ok: #6dd6a0;
+  --color-warn: #eac46b;
+  --color-bad: #f07878;
+  --color-info: #83b9f4;
 
   --animate-rise: rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
@@ -46,6 +60,9 @@
 @layer base {
   :root {
     --accent: var(--color-fg);
+    --selection-bg: rgb(214 250 114 / 0.1);
+    --ai-bg: rgb(198 192 245 / 0.06);
+    --ai-line: rgb(198 192 245 / 0.25);
     /* A square of the page's pixel grid: one lit cell every 24 pixels. */
     --pixel-grid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Crect width='2' height='2' fill='%23fff'/%3E%3C/svg%3E");
     color-scheme: dark;
@@ -75,12 +92,12 @@
   }
 
   ::selection {
-    background: #fff;
-    color: #000;
+    background: var(--color-lime);
+    color: var(--color-ink-950);
   }
 
   :focus-visible {
-    outline: 2px solid #fff;
+    outline: 2px solid var(--color-lime);
     outline-offset: 3px;
     border-radius: 0.375rem;
   }
@@ -212,19 +229,21 @@
     font-size: 1rem;
   }
 
-  /* The primary action is the brightest thing on the page: white, with black words. */
+  /* The primary action is the one lime thing in view, with Obsidian words. */
   .btn-primary {
-    color: #000;
-    background: #fff;
+    color: var(--color-ink-950);
+    background: var(--color-lime);
   }
 
   /* It lifts off a block shadow, the way a pixel sprite is given depth. */
   .btn-primary:not(:disabled):hover {
+    background: var(--color-lime-hover);
     transform: translate(-2px, -2px);
     box-shadow: 4px 4px 0 var(--color-line-strong);
   }
 
   .btn-primary:not(:disabled):active {
+    background: var(--color-lime-pressed);
     transform: translate(0, 0);
     box-shadow: none;
   }
@@ -236,7 +255,7 @@
   }
 
   .btn-ghost:not(:disabled):hover {
-    background: #222;
+    background: var(--color-line);
     border-color: #777;
   }
 
@@ -292,6 +311,30 @@
     box-shadow: 4px 4px 0 var(--color-line);
   }
 
+  /* What the intelligence says or offers: a question, a suggestion, a state of its work. */
+  .ai-card {
+    border: 1px solid var(--ai-line);
+    background: var(--ai-bg);
+  }
+
+  .ai-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-lavender);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .ai-label::before {
+    content: '';
+    width: 0.4rem;
+    height: 0.4rem;
+    background: var(--color-lavender);
+  }
+
   .pill {
     display: inline-flex;
     align-items: center;
@@ -334,9 +377,9 @@
     animation: led 2.4s ease-in-out infinite;
   }
 
-  /* Something is in progress: the LED is white until it is on. */
+  /* Something is in progress: the LED is lavender while the agent or an engine is still working. */
   .dot-busy {
-    --dot: #fff;
+    --dot: var(--color-lavender);
   }
 
   .dot-warn {
@@ -478,8 +521,8 @@
 
   .tile:hover .tile-arrow,
   .tile:focus-visible .tile-arrow {
-    background: #fff;
-    color: #000;
+    background: var(--color-lime);
+    color: var(--color-ink-950);
   }
 
   /* The landing page's hero. */
@@ -595,7 +638,7 @@
   }
 
   .prompt-box:focus-within {
-    border-color: #fff;
+    border-color: var(--color-lime);
     box-shadow: 6px 6px 0 var(--color-line-strong);
   }
 
@@ -649,13 +692,13 @@
   }
 
   .chip:has(input:checked) {
-    border-color: #fff;
-    background: #fff;
-    color: #000;
+    border-color: var(--color-lime);
+    background: var(--selection-bg);
+    color: var(--color-fg);
   }
 
   .chip:has(input:focus-visible) {
-    outline: 2px solid #fff;
+    outline: 2px solid var(--color-lime);
     outline-offset: 2px;
   }
 
@@ -720,8 +763,8 @@
     width: 4.5rem;
     height: 4.5rem;
     border-radius: 0.75rem;
-    background: #fff;
-    color: #000;
+    background: var(--color-lime);
+    color: var(--color-ink-950);
     box-shadow: 5px 5px 0 rgb(0 0 0 / 0.65);
     transform: translate(-50%, -50%);
     transition:
@@ -831,9 +874,9 @@
   }
 
   .mock-choice-on {
-    border-color: #fff;
-    background: #fff;
-    color: #000;
+    border-color: var(--color-lime);
+    background: var(--selection-bg);
+    color: var(--color-fg);
   }
 
   /* An empty frame of the examples gallery. */
@@ -866,7 +909,7 @@
     border: 1px solid var(--color-line-strong);
     border-radius: 0.5rem;
     background: var(--color-ink-700);
-    color: #fff;
+    color: var(--color-fg);
     transform: translate(-50%, -50%);
   }
 
@@ -918,7 +961,7 @@
 
   .field:focus-visible {
     outline: none;
-    border-color: #fff;
+    border-color: var(--color-lime);
     box-shadow: 0 0 0 3px rgb(255 255 255 / 0.18);
   }
 
@@ -963,12 +1006,12 @@
   }
 
   .choice:has(input:checked) {
-    border-color: #fff;
+    border-color: var(--color-lime);
     background: var(--color-ink-700);
   }
 
   .choice:has(input:focus-visible) {
-    outline: 2px solid #fff;
+    outline: 2px solid var(--color-lime);
     outline-offset: 3px;
   }
 
@@ -1002,8 +1045,8 @@
   }
 
   .choice:has(input:checked) .choice-mark {
-    border-color: #fff;
-    background: #fff;
+    border-color: var(--color-lime);
+    background: var(--color-lime);
   }
 
   .choice:has(input:checked) .choice-mark::after {
@@ -1058,7 +1101,7 @@
     position: absolute;
     inset: 0;
     width: 30%;
-    background: #fff;
+    background: var(--color-lime);
     animation: slide 1.6s steps(12) infinite;
   }
 
@@ -1116,7 +1159,7 @@
 
   .faq[open] .faq-chevron {
     transform: rotate(180deg);
-    color: #fff;
+    color: var(--color-fg);
   }
 }
 

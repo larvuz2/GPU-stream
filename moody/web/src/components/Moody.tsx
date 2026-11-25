@@ -59,7 +59,7 @@ export function MoodyLogo({ label, className, reactive = false, idleSeconds }: M
   return (
     <canvas
       ref={canvas}
-      className={cx('block', className)}
+      className={cx('block text-white', className)}
       style={{ aspectRatio: `${LOGO_VIEW.cols} / ${LOGO_VIEW.rows}` }}
       role={label === undefined ? undefined : 'img'}
       aria-label={label}
@@ -104,7 +104,7 @@ export function MoodyFace({ className, busy, idle = false }: MoodyFaceProps) {
   return (
     <canvas
       ref={canvas}
-      className={cx('block', className)}
+      className={cx('block text-white', className)}
       style={{ aspectRatio: `${FACE_VIEW.cols} / ${FACE_VIEW.rows}` }}
       aria-hidden="true"
     />
@@ -172,7 +172,7 @@ export function MoodyMotion({
   return (
     <canvas
       ref={canvas}
-      className={cx('block', className)}
+      className={cx('block text-white', className)}
       role={label === undefined ? undefined : 'img'}
       aria-label={label}
       aria-hidden={label === undefined ? true : undefined}

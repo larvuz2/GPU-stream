@@ -283,8 +283,9 @@ function Conversation() {
             />
           )}
         </div>
-        <div className="rounded-xl border border-line-strong bg-ink-800 p-3.5">
-          <p className="font-semibold">Before I cut the trailer: how should the film end?</p>
+        <div className="ai-card rounded-xl p-3.5">
+          <p className="ai-label">Moody asks</p>
+          <p className="mt-1.5 font-semibold">Before I cut the trailer: how should the film end?</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {['Hopeful', 'Bittersweet', 'Leave it open'].map((option, index) => (
               <span key={option} className={cx('mock-choice', index === 0 && 'mock-choice-on')}>
