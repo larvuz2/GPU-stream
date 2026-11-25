@@ -354,9 +354,9 @@ Written by `app.save`, by extension:
 | `.ora` | layers | For Krita and GIMP. Moves the document |
 | `.png` | flat, transparency, profile, pixels an inch | Lossless |
 | `.jpg` | flat, profile, pixels an inch | `quality` 0 to 12, `jpegFormat: "progressive"`. At 2048 by 2048: 12 gave 1.7 MB, 8 gave 250 KB, 5 gave 185 KB |
-| `.tif` | flat (`tiffLayers: true` keeps layers), profile | `tiffCompression: "lzw"\|"zip"` |
+| `.tif` | flat (`tiffLayers: true` keeps layers), profile, pixels an inch | `tiffCompression: "lzw"\|"zip"`. The print file |
 | `.webp` | flat, transparency | Lossless only: a 1080 by 1920 picture was 531 KB against JPEG's 87 KB |
-| `.pdf` | flat, one page at the document's size | No marks, no live text |
+| `.pdf` | flat, one page at the document's size | RGB without a profile; no marks, no trim or bleed boxes, not PDF/X |
 | `.exr`, `.jxl`, `.gif`, `.bmp`, `.tga`, `.dds`, `.hdr` | flat | GIF is cut to 256 colors |
 
 Refused: `.avif`, `.heic`, `.svg`, `.jp2`, `.xcf`, `.kra`, and `.ico` above 256 pixels. Every

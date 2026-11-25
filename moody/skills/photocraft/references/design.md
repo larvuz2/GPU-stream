@@ -187,8 +187,8 @@ Always from a flat copy, so the master stays layered and at full size:
 engine_exec(e, "mkdir -p <project folder>/exports <project folder>/social")
 
 Print, RGB with bleed already in the canvas:
-  app.save {"path": "exports/dusk-poster-print.tif", "tiffCompression": "lzw"}        4 s, 41 MB
-  app.save {"path": "exports/dusk-poster-print.pdf"}                                   5 s, one flat page at the document's size
+  app.save {"path": "exports/dusk-poster-print.tif", "tiffCompression": "lzw"}        4 s, 41 MB: profile and 300 px/in inside
+  app.save {"path": "exports/dusk-poster-print.pdf"}                                   5 s, one flat page at the document's size, no profile
   app.save {"path": "exports/dusk-poster.psd"}, then app.save {"path": "dusk-poster.pcraft"}     for a designer; then back to the master
 
 A platform size, cut from the master (here 4:5 from a 7200 by 10800 poster):

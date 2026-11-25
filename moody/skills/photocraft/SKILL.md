@@ -216,7 +216,8 @@ Offer the alternative; never present one of these as working.
   profile. Deliver RGB with its profile embedded and let the printer convert (most ask for
   exactly that), and say so. See design.md.
 - **PDF for print with marks.** `app.save` writes a flattened one-page PDF at the document's
-  size: no crop marks, no bleed boxes, no PDF/X, no live text. Build the bleed into the canvas.
+  size, in RGB without a color profile: no crop marks, no trim or bleed boxes, no PDF/X. Build
+  the bleed into the canvas, and send the TIFF, which carries the profile, as the print file.
 - **AVIF and HEIC**, read or written. Convert first, or use WebP, JPEG, or PNG. Camera raw
   files were not tested here: open one and read the answer before promising it.
 - **WebP and JPEG quality.** WebP is written lossless (large); JPEG takes `quality` 0 to 12
@@ -245,12 +246,11 @@ says. What is particular to PhotoCraft, each verified:
 **An engine only sees files written before it started.** A FilmCraft engine that had been
 running for minutes never saw a PhotoCraft export, and the reverse, and nothing refreshes a
 running engine's view. So the receiving engine is started after the export, and after a short
-wait: a file reaches the shared folder about 5 s after it is written (longer for hundreds of
-megabytes), and an engine started 4 s after an export did not have it. The order that works:
+wait: a file reaches the shared folder about 5 s after it is written (a 368 MB one too), and
+an engine started 4 s after an export did not have it. The order that works:
 
 1. Export in the sending engine. `engine_files` there shows the file and its size.
-2. Save the sending engine's work. Do something else for 15 s (take the screenshot, write the
-   note); for a file over 100 MB, a minute.
+2. Save the sending engine's work, and let 15 s pass (take the screenshot, write the note).
 3. `engine_start` the receiving engine (or `engine_stop` and `engine_start` it, if it was
    already running), then `engine_files` on it for the hand-off folder.
 4. If the file is not listed, the engine started too soon: stop it, wait, start it again. Never

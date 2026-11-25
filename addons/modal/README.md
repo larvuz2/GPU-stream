@@ -357,8 +357,9 @@ A session sees the project folder as it was when the session started: a file
 another session writes afterwards does not appear in it, and Modal cannot
 reload the Volume under a running session while its application holds files
 open there (`Sandbox.reload_volumes` answers that open files prevent it). A
-file is on the Volume about 5 s after it was written (more for a large one),
-and a session started after that has it. So work moves between two
+file is on the Volume about 5 s after it was written (one of 368 MB as soon
+as one of a few bytes), and a session started 4 s after an export did not
+have it, while one started a minute later did. So work moves between two
 applications by exporting in one, waiting until the file has reached the
 Volume, and starting the other: a frame FilmCraft exported
 (`file.exportFrame`) opened as a poster's key art in a PhotoCraft session
