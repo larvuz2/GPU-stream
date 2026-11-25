@@ -106,10 +106,13 @@ Two facts measured on Moody's engines decide the order of every hand-off:
   running together did not see each other's new files in 90 seconds.
 - **An engine that starts afterwards sees it**, including files written seconds before.
 
-So: export, confirm with `engine_files` on the LightCraft engine, then **start the receiving
-engine** (or stop and start it if it was running), and confirm with `engine_files` there before it
-opens the file. The same holds for LightCraft as the receiver. Stopping LightCraft loses nothing:
-every edit is already in the library.
+- **`engine_send(from_engine_id, path, to_engine_id)` carries a file or a folder into a running
+  engine's folder**, at the same path, so neither engine has to stop.
+
+So: export, confirm with `engine_files` on the LightCraft engine, then `engine_send` the file to
+the receiving engine if it is running, or **start the receiving engine** if it is not, and confirm
+with `engine_files` there before it opens the file. The same holds for LightCraft as the receiver.
+Stopping LightCraft loses nothing, where a stop is simpler: every edit is already in the library.
 
 ### To PhotoCraft: retouching and compositing
 

@@ -229,6 +229,10 @@ Checked with VectorCraft, Blender, and PhotoCraft engines on one project folder:
   VectorCraft did not see what they had written either.
 - After a stop and a start, an engine sees everything all of them wrote.
 
-So: export, confirm with `engine_files` on the VectorCraft engine, start the receiver (or stop it
-and start it again), confirm there, then open. When work comes back (a render from Blender to
-place in a layout), the same holds the other way: stop and start VectorCraft, after saving.
+- `engine_send(from_engine_id, path, to_engine_id)` carries a file or a folder from one running
+  engine into another's folder, with no stop.
+
+So: export, confirm with `engine_files` on the VectorCraft engine, then `engine_send` the file to
+a receiver that is running, or start the receiver; confirm there, then open. "Started after the
+export" in the recipes above covers both. When work comes back (a render from Blender to place in
+a layout), the same holds the other way: `engine_send` it to VectorCraft.

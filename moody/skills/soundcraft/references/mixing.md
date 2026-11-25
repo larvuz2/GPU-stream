@@ -243,8 +243,8 @@ Scoring or sound for a film cut in FilmCraft, in the same project folder.
    mix against dialogue and effects at the film's loudness target.
 
 SoundCraft does not export video and does not know FilmCraft's project: the hand-off is files
-and times. Two engines running at once do not see each other's new files (SKILL.md, "Working
-with the other engines").
+and times. Two engines running at once do not see each other's new files, so `engine_send`
+carries them across (SKILL.md, "Working with the other engines").
 
 ## Podcasts and voice
 

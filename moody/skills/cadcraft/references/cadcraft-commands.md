@@ -128,7 +128,8 @@ geometry}]}`. `type` is the name `counts` uses: `Line`, `Polyline`, `Circle`, `A
 - **Text in PDFs is drawn, not typed**: CADCraft's stroke font becomes lines, so a PDF's text
   cannot be searched or selected. A text style with a TrueType font (`style {"name": "NOTES",
   "font": "DejaVu Sans", "current": true}`) is the way to try for real text; not checked.
-- **Two engines running at once do not see each other's new files** (handoff.md).
+- **Two engines running at once do not see each other's new files** until `engine_send` carries
+  them across (handoff.md).
 
 ## Drawing
 

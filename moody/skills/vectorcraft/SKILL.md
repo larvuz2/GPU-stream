@@ -226,9 +226,10 @@ at length; these are the ones to check on every screenshot.
 
 ## What is not possible yet
 
-- **You cannot see a file, only the window.** There is no tool that shows you an exported PNG.
-  Look at the artboard with `engine_screenshot`, and check exported files by their listing and by
-  opening them in VectorCraft (`app.open`).
+- **You see the window, and a file only through `preview`.** `engine_screenshot` shows the
+  artboard as the window draws it; `preview(..., look: true)` shows you an exported PNG as it is
+  (see Show your work). An SVG or a PDF is shown to the person, but not to you: check those by
+  their listing and by opening them in VectorCraft (`app.open`).
 - **No favicon `.ico`, no Android or iOS icon sets as such.** VectorCraft writes PNG, SVG, PDF,
   and the formats in the reference. delivery.md makes the `.ico` with `engine_exec`.
 - **Few fonts.** The engine has the open families listed in the reference, and no commercial
@@ -242,7 +243,7 @@ at length; these are the ones to check on every screenshot.
   each.
 - **Two engines running at once do not see each other's new files.** A file VectorCraft writes
   is seen by an engine started afterwards, not by one already running (checked for five minutes,
-  both ways). See Hand-offs.
+  both ways), until `engine_send` carries it there. See Hand-offs.
 - **Type on a path, a repeat, or a symbol is live in VectorCraft only.** `object.expand` or
   `type.createOutlines` it before a hand-off.
 - **Colors on screen are sRGB.** A CMYK document converts for press (`file.documentColorMode`);
@@ -262,6 +263,31 @@ file checks are in delivery.md.
 VectorCraft takes back SVG, PDF, `.ai`, EPS, and pictures (`app.open` as a document, `file.place`
 into one).
 
-Order, always: export, `engine_files` on the VectorCraft engine, **then** start the receiving
-engine (or stop and start it again if it was already running), `engine_files` there, and only
-then open the file.
+Order, always: export, `engine_files` on the VectorCraft engine, **then** get it to the receiving
+engine: `engine_send(vectorcraft_engine, path, receiving_engine)` if that engine is already
+running, or start it now. `engine_files` there, and only then open the file.
+
+## Show your work
+
+The person sees the window on the Screen, with its panels and guides; a mark is judged on its own.
+After each step that changed the design (a direction drawn, the mark built, the lockup, a color
+version) and before each checkpoint, export the artboard and `preview` it (the studio skill has
+the tool's rules):
+
+```text
+engine_exec(engine_id, "mkdir -p <project folder>/previews")
+engine_call(engine_id, "document.export", {"path": "previews/direction-a-v2.png", "artboard": 0, "width": 2000, "background": "transparent"})
+preview(engine_id, path="previews/direction-a-v2.png", caption="Direction A with the heavier wave, in black")
+```
+
+- One artboard as a PNG is the usual preview, at a width that suits the question: 2000 px for a
+  mark, smaller for a sheet of icons. `document.export` does not make folders; make `previews/`
+  first. An SVG of the artboard previews as well, and the person sees it sharp at any size.
+- Several directions for one decision go in one preview, in the order the caption names them.
+  A change to one mark is two exports, before and after, with `compare: true`.
+- The small test is worth showing: export the icon artboard at 64 and 32 px wide and preview the
+  pair, so the person judges the favicon at its own size.
+- `look: true` shows you the exported PNG itself, which the window's screenshot does not: use it
+  to check an export before you call it done.
+- One preview per step, with what changed in the caption; the deliverables themselves are
+  delivery.md's, exported in full when the person has approved.

@@ -240,25 +240,57 @@ What was checked with a SoundCraft and a FilmCraft engine on one project:
 - **Two running engines do not see each other's new files.** A file written in one did not
   appear in the other after a minute, in either direction, and the folder cannot be refreshed
   under a running application.
-- **So the receiver starts after the sender has written.** Bounce and save in SoundCraft,
-  confirm with `engine_files(soundcraft_engine)`, then `engine_start` the other engine, or if
-  it is already running, save its work, `engine_stop` it, and start it again: 13 seconds after
-  a write, a restarted FilmCraft listed the file and imported the WAV (`file.import`). Confirm
-  with `engine_files(other_engine, path)` before importing.
+- **So a file goes to a running engine with `engine_send`.** Bounce and save in SoundCraft,
+  confirm with `engine_files(soundcraft_engine)`, then
+  `engine_send(soundcraft_engine, path, other_engine)`: its answer is the file as the other
+  engine lists it. A FilmCraft engine that had been running since before the bounce imported
+  an 11 MB WAV sent this way (`file.import`), the send taking 2 seconds. An engine you start
+  after the bounce needs no send; confirm with `engine_files(other_engine, path)` before
+  importing either way. Send again after each new bounce: the other engine keeps the file it
+  was sent.
 - Don't run two engines when one will do: finish the bounce, stop SoundCraft (after
   `session.save`), then open the editor.
 
 **From a film (FilmCraft) to you.** You need the cut with its dialogue as one movie file
 (FilmCraft's `file.exportMedia`, H.264 or ProRes, in the project folder), its frame rate, and
 the times that matter (scene starts, hits) from the shot list or the edit. Start SoundCraft
-after the export is written. Import with `file.import_video`, match the frame rate, mark the
-hits. Details: mixing.md, "To picture".
+after the export is written, or `engine_send` the export to a SoundCraft that is already
+running. Import with `file.import_video`, match the frame rate, mark the hits. Details:
+mixing.md, "To picture".
 
 **From you to the film.** Into `score/` (or `sfx/`): each cue's mix and stems as 48 kHz 24-bit
 WAV starting at a stated time, not normalized, and `score/cues.md` with one line per cue: file,
 start in the film (seconds and timecode), length, tempo, what it is. Save the same list with
-`github_save`. Then the film's engine, started after, imports and places them at those starts,
-and FilmCraft makes the final mix and the film's loudness.
+`github_save`. Then the film's engine (sent the `score/` folder with `engine_send` if it is
+running, or started after) imports and places them at those starts, and FilmCraft makes the
+final mix and the film's loudness.
+
+## Show your work
+
+The person cannot see a mix. After each stage that changed the sound (a new part, an
+arrangement, a mix pass, a master) and before you ask them to choose, bounce what shows the
+change and `preview` it (the studio skill has the tool's rules):
+
+```text
+engine_exec(engine_id, "mkdir -p previews")
+engine_call(engine_id, "engine.execute", {"command": "file.bounce_mix", "params":
+  {"path": "previews/chorus-v2.wav", "start": "bars_beats:17|1|000", "end": "bars_beats:25|1|000"}})
+preview(engine_id, path="previews/chorus-v2.wav", caption="The chorus with the new bass line, bars 17 to 24")
+```
+
+- The range is yours to choose for the moment: two seconds of one fill or one effect's tail, one
+  section, a transition with a bar either side, or the whole track when the arrangement or the
+  master is the question. `start` and `end` take samples, `{"seconds": x}`, or bars and beats;
+  leave them out for the whole session, and give `end` past the last clip to keep a reverb tail.
+- One part or one bus alone: `source: "Drums"` bounces that bus; a soloed track bounces alone.
+  `mix.clear_solos {}` afterwards.
+- Two bounces of the same range, before and after a change, go in one preview with
+  `compare: true`.
+- The preview's answer gives the length, the loudness, and the true peak, measured by ffmpeg; they
+  agree with the bounce's own `lufs` within 0.1 LU. A waveform comes back with `look: true`.
+- A long WAV is shown as a compressed copy, so bounce previews as WAV and let the tool lighten
+  them; the WAV in `previews/` is untouched.
+- Say in the caption what to listen for. One preview per stage, not per command.
 
 **Cover art** is PhotoCraft's or `generate_image`'s (3000x3000, no small text); a lyric or
 visualizer video is FilmCraft's, with your master as its audio.

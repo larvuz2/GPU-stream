@@ -244,21 +244,22 @@ Offer the alternative; never present one of these as working.
 Work moves as files in the project folder, in `handoff/<from>-to-<to>/`, as the studio skill
 says. What is particular to PhotoCraft, each verified:
 
-**An engine only sees files written before it started.** A FilmCraft engine that had been
-running for minutes never saw a PhotoCraft export, and the reverse, and nothing refreshes a
-running engine's view. So the receiving engine is started after the export, and after a short
-wait: a file reaches the shared folder about 5 s after it is written (a 368 MB one too), and
-an engine started 4 s after an export did not have it. The order that works:
+**An engine only sees files written before it started, and what it is sent.** A FilmCraft
+engine that had been running for minutes never saw a PhotoCraft export, and the reverse, and
+nothing refreshes a running engine's view. So:
 
 1. Export in the sending engine. `engine_files` there shows the file and its size.
-2. Save the sending engine's work, and let 15 s pass (take the screenshot, write the note).
-3. `engine_start` the receiving engine (or `engine_stop` and `engine_start` it, if it was
-   already running), then `engine_files` on it for the hand-off folder.
-4. If the file is not listed, the engine started too soon: stop it, wait, start it again. Never
-   tell an engine to open a file its own listing does not show.
+2. **The receiving engine is already running:** `engine_send(sending_engine, path,
+   receiving_engine)` carries the file into its folder at the same path; the answer is the file
+   as that engine lists it. Send again after each new export.
+3. **The receiving engine is not running yet:** save the sending engine's work, let 15 s pass
+   (a file reaches the shared folder about 5 s after it is written, a 368 MB one too, and an
+   engine started 4 s after an export did not have it), then `engine_start` it and
+   `engine_files` on it for the hand-off folder. Not listed: `engine_send` it.
+4. Never tell an engine to open a file its own listing does not show.
 
-Two engines can run at once on different files of one project; they just cannot pass work
-between them while both stay up.
+"Started afterwards" in the recipes below means either: started after the export, or sent the
+file while running.
 
 **FilmCraft to PhotoCraft: a frame becomes key art.** In the FilmCraft engine:
 
@@ -338,6 +339,31 @@ master, for when the title changes.
 keep their range (it opens as a 32-bit document), PSD for layers. A PNG with a transparent
 background opens with its transparency, as a layer rather than a locked Background, which
 saves cutting the subject out.
+
+## Show your work
+
+The Screen shows PhotoCraft's window, not the picture at its own size, so after each stage that
+changed the picture (the composition, the grade, the type) and before each checkpoint, write a
+flat copy and `preview` it (the studio skill has the tool's rules):
+
+```text
+engine_exec(engine_id, "mkdir -p <project folder>/previews")
+engine_call(engine_id, "app.save", {"path": "previews/dusk-poster-v3.jpg", "quality": 10})
+engine_call(engine_id, "app.save", {"path": "dusk-poster.pcraft"})     the master again, so it stays the open document
+preview(engine_id, path="previews/dusk-poster-v3.jpg", caption="The poster with the title set in Demi, version 3")
+```
+
+- A JPEG at quality 10 of a 7200 by 10800 poster is about 2 MB and takes about 6 s to write; a
+  PNG of it is 39 MB, which the tool would have to lighten. Use a PNG only where transparency is
+  the point.
+- How much to show is your judgment: the whole poster for composition, or a crop at full size
+  where the question is a face, an edge, or the type (duplicate merged, crop, save, close, as in
+  the hand-off recipe above).
+- Before and after one change (a retouch, a grade): save a copy before, make the change, save a
+  copy after, and preview both with `compare: true`.
+- Several directions for one decision go in one preview, named in the caption in the order shown.
+- `look: true` hands you the picture when you have to check it yourself at a glance; for the
+  100% checks, `engine_screenshot` at 100% zoom is still the tool.
 
 ## Credits
 

@@ -112,6 +112,27 @@ Everyone on the game works in this repository; the person you work with is one o
   files are binary; never write them. In a running engine, run no `git` command that commits,
   pushes, resets, or cleans: the person commits from the GitHub client.
 
+## Show your work
+
+You do not drive the editor, so most of what happens in Unreal the person watches live on the
+Screen. What you add to the conversation (the studio skill has `preview`'s rules):
+
+- **After each step of yours** (the engine started, the clone done, a project opened, a compile
+  that failed), `engine_screenshot(engine_id)`: it shows the Desktop view as a card in the
+  conversation, so the person scrolling back sees what the machine looked like then. The Unreal
+  view is a stream of its own that a screenshot does not capture: `engine_show` it and say what
+  to look at.
+- **A file is previewed like any other**, whatever made it: `preview(engine_id, path, caption)`
+  takes a picture, a video, a sound, or a document anywhere in the project's folder, the clone
+  included. Find it first with `engine_files`. That covers a render from the Desktop's Blender
+  before Send to Unreal, and a screenshot or a capture the person made in the editor, which
+  Unreal writes under the project's `Saved/` folder (where exactly was not checked here: list
+  it).
+- A compile error is text: quote the lines that matter in your message rather than previewing a
+  log.
+- How much to show is your judgment: one view of a model, a turn of it, a frame of a level. One
+  preview per step, with what it shows in the caption.
+
 ## Not possible yet
 
 Say so plainly when one of these comes up; never present it as done or work around it quietly.

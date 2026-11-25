@@ -20,13 +20,16 @@ decides whether it arrives, measured on the cloud machines:
 - **A newly started engine sees everything written about 15 seconds or more before its
   start** (a start 1 s after the write did not see the file; 13 s after did).
 
-So the order is: export, save, then start the receiving engine (or stop it and start it
-again). Before you import, confirm with
+- **`engine_send(from_engine_id, path, to_engine_id)` carries a file or a folder into a running
+  engine's folder**, at the same path, whole or not at all.
+
+So the order is: export, save, then either `engine_send` the file to the receiving engine if it
+is already running, or start the receiving engine. Before you import, confirm with
 `engine_files(receiving_engine_id, "handoff/cadcraft-to-blender")` that the file is listed with
-the size the export reported; if it is not, the engine started too soon after the export: stop
-it and start it again. To send a later revision, save the receiving engine's own work, stop
-it, export, and start it again. Never tell the person a file was handed over on the strength
-of the sender's listing alone.
+the size the export reported; if it is not (an engine started too soon after the export),
+`engine_send` it. To send a later revision, export it under a new name and `engine_send` that:
+the receiving engine keeps its own work and stays up. Never tell the person a file was handed
+over on the strength of the sender's listing alone.
 
 ## CADCraft to Blender: the recipe
 
@@ -264,7 +267,8 @@ project folder (the unreal skill). The road from a drawing is drawing → Blende
 
 1. Export the DXF and save, as above.
 2. `engine_start("unreal", …)` after the export (the same rule: it sees the folder as of its
-   start). It needs a GPU tier, and the editor itself needs the person's Epic link.
+   start), or `engine_send` the DXF to an Unreal engine that is already running. It needs a GPU
+   tier, and the editor itself needs the person's Epic link.
 3. In that machine's Blender (`engine_exec(unreal_id, "selkies-modal-blender 300 < …")`), run
    the import script: the model is built there, at true size.
 4. **Send to Unreal** (Blender's 3D viewport sidebar, tab Unreal; operator

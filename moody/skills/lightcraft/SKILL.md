@@ -224,8 +224,9 @@ Say these plainly when they come up; never present one as working.
 - **No generative fill, no layers, no type, no reshaping.** Those are PhotoCraft's.
 - **No video.** LightCraft does not import or edit it.
 - **No direct printing.** Export a file for the lab.
-- **Engines do not see each other's new files while both run.** Start the receiver after the
-  export (the delivery reference has the order).
+- **Engines do not see each other's new files while both run.** `engine_send` the export to a
+  receiver that is running, or start the receiver after the export (the delivery reference has
+  the order).
 - **One LightCraft engine per project.** A second one would open the same library and one of the
   two would lose its work.
 - **The command channel has no password.** It is reachable only from inside the engine's own
@@ -245,5 +246,31 @@ for LightCraft's side are in the delivery reference; in short:
 
 Each was run on Moody's engines: PhotoCraft 0.23.1 opened LightCraft's TIFF at 16 bits with its
 profile, and FilmCraft imported the PNG as a still and played it back unchanged. The order is
-always the same: export, confirm on the LightCraft engine, start the receiving engine, confirm
-there, then open.
+always the same: export, confirm on the LightCraft engine, `engine_send` the file to the
+receiving engine if it is running or start it if it is not, confirm there, then open.
+
+## Show your work
+
+The renders you already make to measure an edit are what the person should see. After the
+correction, after the look, and before every approval, `preview` them (the studio skill has the
+tool's rules):
+
+```text
+engine_call(id, "ui.render", {"id": 1, "size": 1600, "path": "<project>/renders/1-before.png"})     before you change anything
+... the edit ...
+engine_call(id, "ui.render", {"id": 1, "size": 1600, "path": "<project>/renders/1-after.png"})
+preview(id, paths=["renders/1-before.png", "renders/1-after.png"],
+        caption="Frame 1: white balance and exposure corrected, before the look", compare=true)
+```
+
+- **Before and after is the default** for a develop step: `compare: true` puts the two renders
+  under one slider. Render the "before" at the start of the step, not from memory.
+- `size` is the long edge and yours to choose: 1600 shows a look, a larger render or a crop shows
+  skin, sharpening, and noise. Say in the caption which.
+- A set is shown as a set: render the frames that matter after `develop.sync` and put them in one
+  preview, in order, so a frame that jumps is visible.
+- Proofs for a choice (two looks, color and black and white) go in one preview, named in the
+  caption in the order shown.
+- With the picture goes the measurement: give the numbers from `selkies-modal-histogram` in your
+  message, since the preview carries the picture and not the histogram.
+- One preview per step. The exports themselves are delivery's, made in full after approval.

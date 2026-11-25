@@ -174,6 +174,31 @@ project's folder, and CADCraft opens the newest `.dxf` or `.dwg` there.
    - **Delivery:** `exportpdf` per sheet, `export` for DXF and DWG, into `exports/`; verify each
      file exists (`engine_files`) and report the paths.
 
+## Show your work
+
+The Screen shows CADCraft's window; a drawing is read as a drawing. At the end of each stage
+above, and before each checkpoint, render the drawing without the interface and `preview` it
+(the studio skill has the tool's rules):
+
+```text
+engine_call(engine_id, "engine.execute", {"command": "ui.render", "params":
+  {"path": "previews/plan-geometry-v2.png", "width": 2400, "height": 1600, "background": "white", "plot_style": "monochrome.ctb"}})
+preview(engine_id, path="previews/plan-geometry-v2.png", caption="The plan with the bathroom moved to the north wall, as it prints")
+```
+
+- `background: "white"` with `plot_style: "monochrome.ctb"` is the drawing as it prints, which is
+  how line weights are judged; leave them out for the dark canvas as it looks on screen. Always
+  give `path`. `width` and `height` are yours to choose for what has to be legible.
+- How much to show is your judgment: the whole plan, or with `window` one room or one detail
+  where the question is there. A revision is two renders of the same window, before and after,
+  with `compare: true`.
+- A sheet for approval is its PDF (`exportpdf {"path": "previews/A-101-plan.pdf", "layout": "A-101
+  Plan"}`): the person opens it from the card. Put a render of it beside it in the same preview,
+  so they see it without opening anything.
+- Give the measured numbers in your message (areas, the closing dimension); the picture does not
+  carry them. `look: true` hands you the render when you need to check it yourself.
+- One preview per stage, with what changed in the caption.
+
 ## Taste
 
 - **Line weight is the drawing's grammar.** What is cut is heaviest (0.5 mm), what is seen
