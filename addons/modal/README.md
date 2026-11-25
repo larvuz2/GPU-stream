@@ -32,6 +32,7 @@ writes after you approve it in a browser.
 | `exec -- <command>` | Runs a command in the session's environment: on its display, with its GPU |
 | `blender` | Runs the Python on standard input inside the session's Blender, the one the page shows |
 | `filmcraft` | Sends the JSON requests on standard input, one per line, to a FilmCraft session's control channel and prints each reply |
+| `vectorcraft` | Sends the JSON requests on standard input, one per line, to a VectorCraft session's control channel and prints each reply |
 | `ls` | Lists the running sessions |
 | `down` | Stops a session, with the scene Blender has open kept for the next one |
 | `drive-login` | Opens Google's sign-in on a Nuke session's screen and keeps the Drive access it grants as a Modal Secret, which `up --secret` hands to a session as rclone's `gdrive:` |
@@ -255,6 +256,110 @@ for the session's own token, and reads and writes the project folder alone. A
 connection authenticates first, `{"method": "auth", "params": {"token": ...}}`
 from inside the Sandbox, where `PHOTOCRAFT_CONTROL_TOKEN` holds it; the
 launcher has no verb for it yet.
+
+## VectorCraft
+
+`--app vectorcraft` starts a session for
+[VectorCraft](https://github.com/storytold/vectorcraft), the same team's vector
+illustration application, for logos, identities, icons, and patterns, which an
+agent drives through its command channel while a person works in the same
+window:
+
+```bash
+addons/modal/selkies-modal up --app vectorcraft --name mark --gpu none --env SELKIES_MODAL_PROJECT=projects/brand
+```
+
+The image installs the Debian package of VectorCraft's GitHub release, checked
+against the hash the release's `SHA256SUMS.txt` lists (`VECTORCRAFT_VERSION` and
+`VECTORCRAFT_SHA256` in `sandbox.py`; updating is a bump of both, and a run of
+the VectorCraft skill's recipes, `moody/skills/vectorcraft`). VectorCraft opens
+in the session's project folder, the one every engine of the project shares:
+
+- Its data folder (preferences, logs, recovery copies, the fonts folder a
+  project names) is `.vectorcraft` in the project folder, so it stays with the
+  project and outlives the Sandbox.
+- A start opens the newest `.vectorcraft` document of the folder. A folder with
+  none starts on the welcome screen: a document's size and color mode are a
+  design decision, not a default. VectorCraft answers its channel a second or
+  more before that document is open, so requests are held until it is
+  (`vectorcraft/control.sh`), and the first answer already lists what the
+  project has.
+- Unsaved changes outlive the session. VectorCraft keeps recovery copies of
+  modified documents, by itself every two minutes; the session asks it for one
+  every 10 s (`vectorcraft/resume.sh`), since nothing that ends a Sandbox quits
+  the application. The next start restores them as modified documents named
+  `<name> [Recovered]`, which stand in for the saved file they came from and
+  have no file of their own until saved to one (`file.saveAs` with a `path`).
+  Measured: an object added and left unsaved was in a recovery copy 4 s later,
+  and was there, with the document's artboards, layers, and swatches, after
+  `down` (4 s) and `up` (8 s) on the same workspace and project folder.
+
+### Its command channel
+
+Every menu item and tool of VectorCraft is one of its 1,430 commands, which its
+control channel runs as the window does
+([VectorCraft's protocol](https://github.com/storytold/vectorcraft/blob/main/docs/control-protocol.md)).
+The channel listens on the Sandbox's loopback only (port 7979) and reads and
+writes the project folder alone: a path outside it is refused, and a relative
+path is read against it. `vectorcraft` sends JSON requests from inside the
+Sandbox, one per line, and prints each reply:
+
+```bash
+addons/modal/selkies-modal vectorcraft --name mark <<'EOF'
+{"method": "engine.execute", "params": {"command": "file.new", "params": {"name": "mark", "width": 512, "height": 512}}}
+{"method": "engine.execute", "params": {"command": "shape.ellipse", "params": {"x": 96, "y": 96, "width": 320, "height": 320}}}
+{"method": "engine.execute", "params": {"command": "paint.setFill", "params": {"color": "#14213d", "ids": [2]}}}
+{"method": "engine.execute", "params": {"command": "file.saveAs", "params": {"path": "mark.vectorcraft"}}}
+{"method": "engine.execute", "params": {"command": "document.export", "params": {"path": "mark.svg", "artboard": 0}}}
+{"method": "engine.execute", "params": {"command": "document.export", "params": {"path": "/tmp/mark.svg"}}}
+EOF
+```
+
+```text
+{"id":null,"ok":true,"result":{"index":0,"previewMode":"default"}}
+{"id":null,"ok":true,"result":{"id":2}}
+{"id":null,"ok":true,"result":{"objects":1}}
+{"id":null,"ok":true,"result":{"background":true,"format":"vectorcraft","path":"mark.vectorcraft","status":"Saving mark.vectorcraft…","warnings":[]}}
+{"id":null,"ok":true,"result":{"bytes":346,"format":"svg","path":"mark.svg","warnings":[]}}
+{"error":"automation path rejected: outside the write root .../projects/brand: /tmp/mark.svg","id":null,"ok":false}
+```
+
+A refused request comes back as `{"ok": false, "error": "..."}` with
+VectorCraft's reason, and the status is then 1. The first request waits for
+VectorCraft to listen (`--wait`, 60 s unless given), which it does about a
+second after Selkies. From Python, the control plane's way in,
+`vectorcraft_call(sandbox, method, params, timeout)` sends one request and
+returns its result, raising `RuntimeError` with VectorCraft's message; it is
+what Moody's `engine_call` reaches for a VectorCraft engine. Lengths are points,
+from the top left corner of the first artboard, with y down.
+
+The release pinned here, 0.24.1, has no sign-in on its channel (its protocol
+says so: "the port has no authentication"), so what guards it is where it
+listens: the loopback of a Sandbox that is one person's. VectorCraft's main
+branch signs each connection in with a token (an `auth` request first), and the
+session is ready for the release that brings it: `up` makes
+`VECTORCRAFT_CONTROL_TOKEN` with the session's other tokens, and the client
+(`vectorcraft/control.sh`) sends the sign-in on every connection, which 0.24.1
+answers as an unknown method and the client skips.
+
+### Graphics and speed
+
+No graphics variable is set. VectorCraft rasterizes its canvas on the CPU and
+only composites the window through wgpu, and it lists the adapters that can
+present into the display itself: on a T4 its log lists the Tesla T4 as
+"can't show the window" and it draws on `llvmpipe (Vulkan, Cpu)`, the adapter
+it also takes with no GPU. A GPU adds nothing to it, so `--gpu none`
+is the machine. Measured on Moody's Starter shape (2 cores reserved, 4 at
+most, 4 GiB), on a three-artboard identity document of 99 objects:
+
+| | `--gpu none` |
+| --- | --- |
+| `up` until Selkies listens, then until VectorCraft answers | 4 to 5 s, then 1 s |
+| One command through `vectorcraft_call`, median of 77 | 0.31 s, nearly all of it Modal's round trip |
+| A request from inside the Sandbox (`ui.inspect`, which waits for a frame) | 108 ms with the client's start; the frame itself 2 ms |
+| The canvas redrawn while an object is dragged (62 pointer events) | 2.6 ms a frame |
+| The whole document at 2880x1800 (`vectorcraft-cli bench`) | 14 ms a frame |
+| Export: SVG, a three-page PDF, a 2000 px PNG, seven icon files | 0.3 s, 0.3 s, 0.5 s, 0.5 s |
 
 ## Unreal
 
