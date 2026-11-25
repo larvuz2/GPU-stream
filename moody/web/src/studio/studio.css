@@ -22,7 +22,7 @@
   .studio {
     --side-w: 16.25rem;
     --pane-w: 26rem;
-    --studio-line: rgb(255 255 255 / 0.075);
+    --studio-line: var(--color-line);
     position: relative;
     display: grid;
     height: 100dvh;
@@ -34,9 +34,7 @@
     grid-template-areas:
       'side center stage'
       'side center pane';
-    background:
-      radial-gradient(60rem 30rem at 50% -12rem, rgb(255 122 26 / 0.06), transparent 70%),
-      radial-gradient(50rem 30rem at 100% 0, rgb(139 92 246 / 0.07), transparent 70%), var(--color-ink-950);
+    background: var(--color-ink-950);
   }
 
   @media (max-width: 1279.98px) {
@@ -74,7 +72,7 @@
     min-height: 0;
     flex-direction: column;
     border-right: 1px solid var(--studio-line);
-    background: rgb(10 10 17 / 0.72);
+    background: var(--color-ink-900);
   }
 
   .studio-center {
@@ -92,7 +90,7 @@
     min-height: 0;
     flex-direction: column;
     border-left: 1px solid var(--studio-line);
-    background: rgb(10 10 17 / 0.72);
+    background: var(--color-ink-900);
   }
 
   .studio-pane {
@@ -101,7 +99,7 @@
     min-height: 0;
     overflow-y: auto;
     border-left: 1px solid var(--studio-line);
-    background: rgb(10 10 17 / 0.72);
+    background: var(--color-ink-900);
     overscroll-behavior: contain;
   }
 
@@ -147,7 +145,7 @@
   .resize-handle:hover::after,
   .resize-handle:focus-visible::after,
   .resize-handle[data-dragging='true']::after {
-    background: rgb(255 168 97 / 0.55);
+    background: rgb(255 255 255 / 0.6);
   }
 
   .resize-handle:focus-visible {
@@ -201,8 +199,7 @@
       grid-auto-columns: 1fr;
       padding-bottom: env(safe-area-inset-bottom);
       border-top: 1px solid var(--studio-line);
-      background: rgb(8 8 13 / 0.94);
-      backdrop-filter: blur(18px);
+      background: var(--color-ink-950);
     }
 
     .resize-handle {
@@ -229,7 +226,7 @@
   }
 
   .studio-tab[aria-selected='true'] svg {
-    color: var(--color-ember-300);
+    color: var(--color-fg);
   }
 
   /* Thin scrollbars that stay out of the way of the panes they scroll. */
@@ -273,8 +270,7 @@
     top: 0.55rem;
     bottom: 0.55rem;
     width: 2px;
-    border-radius: 9999px;
-    background: var(--color-ember-300);
+    background: var(--color-fg);
   }
 
   /* The row's end: when it changed, which gives way to the row's menu on hover or focus. */
@@ -337,10 +333,8 @@
     padding: 0.35rem;
     border: 1px solid var(--color-line-strong);
     border-radius: 0.9rem;
-    background: linear-gradient(180deg, #17171f, #111118);
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.06),
-      0 24px 60px -20px rgb(0 0 0 / 0.9);
+    background: var(--color-ink-700);
+    box-shadow: 6px 6px 0 rgb(0 0 0 / 0.55);
     animation: fade-in 0.12s ease;
   }
 
@@ -494,9 +488,7 @@
     aspect-ratio: 16 / 9;
     border: 1px solid var(--color-line);
     border-radius: 0.85rem;
-    background:
-      radial-gradient(80% 90% at 20% 0%, rgb(255 122 26 / 0.1), transparent 60%),
-      radial-gradient(70% 80% at 100% 100%, rgb(139 92 246 / 0.12), transparent 60%), #07070c;
+    background: #050505;
   }
 
   .studio[data-focus='true'] .stream-box {
@@ -534,7 +526,7 @@
 
   /*
    * A row of options of which one is chosen: the repository picker's tabs, and the switch between
-   * an engine's pictures (Desktop and Unreal), whose chosen one carries the accent.
+   * an engine's pictures (Desktop and Unreal), whose chosen one is lit.
    */
   .segmented {
     display: inline-flex;
@@ -572,9 +564,8 @@
   }
 
   .segment[aria-pressed='true'] {
-    background: color-mix(in oklab, var(--color-ember) 22%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-ember) 55%, transparent);
-    color: var(--color-fg);
+    background: #fff;
+    color: #000;
   }
 
   /* The layer over the small stream that turns a click into focus mode. */
@@ -583,7 +574,7 @@
     inset: 0;
     display: grid;
     place-items: center;
-    background: rgb(5 5 10 / 0);
+    background: rgb(8 8 8 / 0);
     color: #fff;
     transition: background-color 0.2s ease;
   }
@@ -598,7 +589,7 @@
 
   .stream-focus-layer:hover,
   .stream-focus-layer:focus-visible {
-    background: rgb(5 5 10 / 0.45);
+    background: rgb(8 8 8 / 0.5);
   }
 
   .stream-focus-layer:hover > span,
@@ -616,9 +607,9 @@
     max-width: min(36rem, 85%);
     margin-left: auto;
     padding: 0.65rem 0.95rem;
-    border: 1px solid rgb(255 255 255 / 0.09);
-    border-radius: 1.1rem 1.1rem 0.35rem 1.1rem;
-    background: linear-gradient(180deg, rgb(255 255 255 / 0.075), rgb(255 255 255 / 0.045));
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.75rem 0.75rem 0.15rem 0.75rem;
+    background: var(--color-ink-700);
     font-size: 0.9375rem;
     line-height: 1.6;
     white-space: pre-wrap;
@@ -636,15 +627,16 @@
     height: 1.75rem;
     flex: none;
     border: 1px solid var(--color-line-strong);
-    border-radius: 0.6rem;
-    background: radial-gradient(120% 120% at 20% 0%, rgb(255 122 26 / 0.22), rgb(139 92 246 / 0.12));
+    border-radius: 0.4rem;
+    background: var(--color-ink-700);
+    color: var(--color-fg);
   }
 
   /* The agent's prose: the Markdown subset at reading size. */
   .prose-studio {
     font-size: 0.9375rem;
     line-height: 1.68;
-    color: #e9e9f0;
+    color: #e6e6e6;
     overflow-wrap: anywhere;
   }
 
@@ -719,7 +711,7 @@
     padding: 0.8rem 0.95rem;
     border: 1px solid var(--color-line);
     border-radius: 0.75rem;
-    background: #08080d;
+    background: #050505;
   }
 
   .prose-studio pre code {
@@ -731,7 +723,7 @@
 
   .prose-studio blockquote {
     padding-left: 0.9rem;
-    border-left: 2px solid rgb(255 168 97 / 0.45);
+    border-left: 2px solid var(--color-line-strong);
     color: var(--color-muted);
   }
 
@@ -745,23 +737,23 @@
     display: inline;
     padding: 0.05em 0.35em;
     border-radius: 0.35rem;
-    background: rgb(255 122 26 / 0.1);
-    color: var(--color-ember-200);
+    background: rgb(255 255 255 / 0.1);
+    color: var(--color-fg);
     font-family: var(--font-mono);
     font-size: 0.85em;
     white-space: nowrap;
   }
 
   .tag-chip-live {
-    box-shadow: inset 0 0 0 1px rgb(255 168 97 / 0.25);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.25);
     transition:
       background-color 0.15s ease,
       box-shadow 0.15s ease;
   }
 
   .tag-chip-live:hover {
-    background: rgb(255 122 26 / 0.2);
-    box-shadow: inset 0 0 0 1px rgb(255 168 97 / 0.55);
+    background: rgb(255 255 255 / 0.18);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.6);
   }
 
   /* A tool call, folded to one line. */
@@ -810,8 +802,8 @@
   }
 
   .ask-option:not(:disabled):hover {
-    border-color: rgb(255 168 97 / 0.6);
-    background: rgb(255 122 26 / 0.08);
+    border-color: #fff;
+    background: var(--color-ink-700);
   }
 
   .ask-option:disabled {
@@ -819,8 +811,8 @@
   }
 
   .ask-option[data-chosen='true'] {
-    border-color: rgb(255 168 97 / 0.7);
-    background: rgb(255 122 26 / 0.1);
+    border-color: #fff;
+    background: var(--color-ink-700);
     color: var(--color-fg);
   }
 
@@ -846,7 +838,7 @@
     font-weight: 600;
   }
 
-  /* The agent at work: three dots breathing in turn. */
+  /* The agent at work: three pixels lighting in turn. */
   .typing-dots {
     display: inline-flex;
     gap: 0.25rem;
@@ -855,8 +847,7 @@
   .typing-dots i {
     width: 0.35rem;
     height: 0.35rem;
-    border-radius: 9999px;
-    background: var(--color-ember-300);
+    background: var(--color-fg);
     animation: typing 1.2s ease-in-out infinite;
   }
 
@@ -872,20 +863,15 @@
   .composer {
     border: 1px solid var(--color-line-strong);
     border-radius: 1.1rem;
-    background: linear-gradient(180deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0.035));
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.05),
-      0 20px 50px -30px rgb(0 0 0 / 0.9);
+    background: var(--color-ink-800);
     transition:
       border-color 0.15s ease,
       box-shadow 0.15s ease;
   }
 
   .composer:focus-within {
-    border-color: rgb(255 168 97 / 0.55);
-    box-shadow:
-      0 0 0 3px rgb(255 122 26 / 0.16),
-      0 20px 50px -30px rgb(0 0 0 / 0.9);
+    border-color: #fff;
+    box-shadow: 4px 4px 0 var(--color-line-strong);
   }
 
   .composer textarea {
@@ -915,15 +901,15 @@
     width: 2.1rem;
     height: 2.1rem;
     border-radius: 0.7rem;
-    color: #1c0d02;
-    background: linear-gradient(135deg, #ffbe85 0%, #ff8a2e 50%, #ff6a2a 100%);
+    color: #000;
+    background: #fff;
     transition:
       filter 0.15s ease,
       opacity 0.15s ease;
   }
 
   .send-btn:not(:disabled):hover {
-    filter: brightness(1.08);
+    background: #d9d9d9;
   }
 
   .send-btn:disabled {
@@ -933,7 +919,7 @@
 
   .send-btn-stop {
     color: var(--color-fg);
-    background: rgb(255 255 255 / 0.12);
+    background: var(--color-ink-700);
     box-shadow: inset 0 0 0 1px var(--color-line-strong);
   }
 
@@ -960,9 +946,7 @@
     position: relative;
     aspect-ratio: 4 / 3;
     overflow: hidden;
-    background:
-      radial-gradient(90% 80% at 15% 0%, rgb(255 122 26 / 0.16), transparent 60%),
-      radial-gradient(90% 80% at 100% 100%, rgb(139 92 246 / 0.16), transparent 60%), var(--color-ink-800);
+    background: var(--color-ink-800);
   }
 
   .asset-thumb img,
@@ -1000,13 +984,13 @@
 
   .chip[aria-pressed='true'],
   .chip:has(input:checked) {
-    border-color: rgb(255 168 97 / 0.6);
-    background: rgb(255 122 26 / 0.1);
-    color: var(--color-fg);
+    border-color: #fff;
+    background: #fff;
+    color: #000;
   }
 
   .chip:has(input:focus-visible) {
-    outline: 2px solid var(--color-ember-300);
+    outline: 2px solid #fff;
     outline-offset: 2px;
   }
 
@@ -1033,29 +1017,27 @@
   }
 
   .discipline-card:hover {
-    border-color: rgb(255 168 97 / 0.5);
-    background: rgb(255 122 26 / 0.05);
-    box-shadow: 0 16px 40px -28px var(--color-ember);
+    border-color: #777;
+    background: var(--color-ink-700);
+    box-shadow: 4px 4px 0 var(--color-line);
   }
 
   .discipline-card[data-featured='true'] {
-    border-color: rgb(255 168 97 / 0.35);
-    background: linear-gradient(160deg, rgb(255 122 26 / 0.1), rgb(139 92 246 / 0.06));
+    border-color: var(--color-line-strong);
+    background: var(--color-ink-700);
   }
 
   /* The plan's progress. */
   .plan-bar {
     height: 0.25rem;
     overflow: hidden;
-    border-radius: 9999px;
-    background: rgb(255 255 255 / 0.08);
+    background: #2a2a2a;
   }
 
   .plan-bar > span {
     display: block;
     height: 100%;
-    border-radius: inherit;
-    background: linear-gradient(90deg, #ff8a2e, #c26bff);
+    background: var(--color-fg);
     transition: width 0.4s ease;
   }
 }

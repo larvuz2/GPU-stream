@@ -29,13 +29,14 @@ import {
   MonitorPlay,
   X,
 } from 'lucide-react';
-import { BrandMark } from '../components/Brand';
+import { MoodyFace } from '../components/Moody';
 import type { Asset, Media, PlanItem, Project, Session } from '../lib/api';
 import { findApp, findTier } from '../lib/catalog';
 import { cx } from '../lib/cx';
+import { ANIMATION } from '../lib/moody';
 import { MediaView } from './MediaView';
 import { ErrorNotice, Notice } from './Notice';
-import { DisciplineIcon } from './DisciplineIcon';
+import { DisciplineIcon } from '../components/DisciplineIcon';
 import { disciplineName } from './present';
 import { Prose } from './Prose';
 import { buildTranscript, openQuestion, type ToolState, type TranscriptItem } from './transcript';
@@ -158,7 +159,7 @@ export function Conversation(props: ConversationProps) {
               {working ? (
                 <li className="flex items-center gap-3" role="status" aria-label="The agent is working">
                   <span className="agent-mark">
-                    <BrandMark className="size-4" />
+                    <MoodyFace className="h-6" busy={ANIMATION.lookAround} />
                   </span>
                   <span className="typing-dots" aria-hidden="true">
                     <i />
@@ -219,7 +220,7 @@ function Welcome({ project, canSend, onSuggest }: WelcomeProps) {
   return (
     <div className="flex flex-col items-center pt-[12vh] text-center">
       <span className="icon-tile size-12 rounded-2xl">
-        <DisciplineIcon id={project.discipline} className="size-5" />
+        <DisciplineIcon id={project.discipline} className="size-6" />
       </span>
       <h2 className="display mt-5 text-2xl sm:text-3xl">{project.name}</h2>
       <p className="lede mt-2 max-w-md text-sm">
@@ -339,7 +340,7 @@ function AgentRow({ first, children }: AgentRowProps) {
       <span className="w-7 flex-none pt-0.5">
         {first ? (
           <span className="agent-mark" title="Agent">
-            <BrandMark className="size-4" />
+            <MoodyFace className="h-6" />
           </span>
         ) : null}
       </span>
@@ -350,7 +351,7 @@ function AgentRow({ first, children }: AgentRowProps) {
 
 /** How each state of a tool call is drawn and said. */
 const TOOL_STATES: Readonly<Record<ToolState, { label: string; className: string }>> = {
-  running: { label: 'Running', className: 'text-ember-300' },
+  running: { label: 'Running', className: 'text-fg' },
   ok: { label: 'Done', className: 'text-ok' },
   failed: { label: 'Failed', className: 'text-bad' },
   stopped: { label: 'Stopped', className: 'text-faint' },
@@ -505,7 +506,7 @@ function AskCard({ question, options, answer, live, onChoose }: AskCardProps) {
                 }}
               >
                 <span className="ask-key" aria-hidden="true">
-                  {chosen ? <Check className="size-3 text-ember-300" /> : index + 1}
+                  {chosen ? <Check className="size-3 text-fg" /> : index + 1}
                 </span>
                 <span className="min-w-0 flex-1">{option}</span>
                 {sending === option ? <span className="spinner size-3.5" aria-hidden="true" /> : null}

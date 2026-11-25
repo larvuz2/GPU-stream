@@ -33,7 +33,7 @@ import type { EpicReturn, GitHubReturn } from './EnvironmentPanel';
 import { useMediaQuery, usePreference } from './hooks';
 import { NewProjectDialog, type ProjectDraft } from './NewProjectDialog';
 import { ErrorNotice, Notice } from './Notice';
-import { DisciplineIcon } from './DisciplineIcon';
+import { DisciplineIcon } from '../components/DisciplineIcon';
 import { Sidebar } from './Sidebar';
 import type { StreamStandIn } from './Stage';
 import { connected, useAccount, useEpic, useGitHub, useProjects } from './useAccount';
@@ -367,7 +367,7 @@ function EmptyCenter({ status, error, connectedPlane, mobileHidden, onNewProject
                     onNewProject({ discipline: discipline.id });
                   }}
                 >
-                  <DisciplineIcon id={discipline.id} className="size-3.5" />
+                  <DisciplineIcon id={discipline.id} className="size-3" />
                   {discipline.name}
                 </button>
               </li>

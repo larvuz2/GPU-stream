@@ -14,7 +14,8 @@
  * film project shows: the live Screen of an engine, the Environment with its engines and Connect
  * GitHub, the Plan, and the Library with its characters. Nothing in it is interactive, and it is
  * labeled as an illustration with example content: the project, its people, and its art are made
- * up, while every engine, tier, discipline, and figure is the catalog's.
+ * up, while every engine, tier, discipline, and figure is the catalog's. Its pictures rest in
+ * grayscale, as the page's art does, and bloom to color while the pointer is over the window.
  *
  * On a narrow screen the sidebar is left out and the panes stack, the conversation first.
  * @module
@@ -34,12 +35,13 @@ import {
   Square,
   type LucideIcon,
 } from 'lucide-react';
+import { DisciplineIcon } from '../components/DisciplineIcon';
+import { MoodyFace } from '../components/Moody';
 import { brand, catalog, liveApps, type CatalogApp } from '../lib/catalog';
 import { cx } from '../lib/cx';
 import { creditCount } from '../lib/format';
 import { characterImage, engineImage } from '../lib/media';
 import { SectionHeading } from './SectionHeading';
-import { DisciplineIcon } from './DisciplineIcon';
 
 /** The example project the picture shows. */
 const PROJECT = 'Night Shift';
@@ -115,12 +117,12 @@ export function Workspace() {
           lede="Projects on the left. The conversation in the middle, where the agent asks before every decision that is yours. On the right, the engine's live screen, the plan, and the library it builds as it goes."
         />
         <figure className="mt-12">
-          <div className="mock-window">
-            <div className="flex h-10 items-center gap-3 border-b border-line bg-white/[0.03] px-4" aria-hidden="true">
+          <div className="mock-window bloom">
+            <div className="flex h-10 items-center gap-3 border-b border-line bg-ink-800 px-4" aria-hidden="true">
               <span className="flex gap-1.5">
-                <i className="size-2.5 rounded-full bg-white/15" />
-                <i className="size-2.5 rounded-full bg-white/15" />
-                <i className="size-2.5 rounded-full bg-white/15" />
+                <i className="size-2 bg-line-strong" />
+                <i className="size-2 bg-line-strong" />
+                <i className="size-2 bg-line-strong" />
               </span>
               <span className="mx-auto truncate text-xs text-faint">
                 {brand} · {PROJECT}
@@ -154,7 +156,7 @@ function Sidebar() {
         <Plus className="size-4" />
         New project
       </span>
-      <span className="flex h-9 items-center gap-2 rounded-xl border border-line bg-white/[0.03] px-3 text-xs text-faint">
+      <span className="flex h-9 items-center gap-2 rounded-lg border border-line bg-ink-800 px-3 text-xs text-faint">
         <Search className="size-3.5" />
         Search projects
       </span>
@@ -162,7 +164,7 @@ function Sidebar() {
       <ProjectGroup label="Recent" projects={RECENT} />
       <div className="mt-auto grid gap-2 border-t border-line pt-3.5 text-xs">
         <span className="flex items-center gap-2.5">
-          <span className="grid size-7 place-items-center rounded-full bg-gradient-to-br from-ember-300 to-iris text-[0.6875rem] font-bold text-ink-950">
+          <span className="grid size-7 place-items-center rounded-md border border-line-strong bg-ink-700 text-[0.6875rem] font-bold text-fg">
             A
           </span>
           <span className="min-w-0">
@@ -207,10 +209,10 @@ function ProjectGroup({ label, projects }: ProjectGroupProps) {
               key={project.name}
               className={cx(
                 'flex items-center gap-2 truncate rounded-lg px-2 py-1.5 text-[0.8125rem]',
-                project.name === PROJECT ? 'bg-white/[0.07] font-semibold text-fg' : 'text-muted',
+                project.name === PROJECT ? 'bg-ink-700 font-semibold text-fg' : 'text-muted',
               )}
             >
-              <DisciplineIcon discipline={project.discipline} className="size-3.5 flex-none" />
+              <DisciplineIcon id={project.discipline} className="size-3" />
               <span className="truncate">{project.name}</span>
             </li>
           );
@@ -241,11 +243,14 @@ function Conversation() {
         )}
       </div>
       <div className="flex flex-1 flex-col gap-4 p-4 text-[0.8125rem] leading-relaxed sm:p-5">
-        <p className="ml-auto max-w-[85%] rounded-2xl rounded-br-md border border-line bg-white/[0.06] px-3.5 py-2.5">
+        <p className="ml-auto max-w-[85%] rounded-xl rounded-br-sm border border-line-strong bg-ink-700 px-3.5 py-2.5">
           A short film about a night-shift mechanic who builds a robot to keep her company. Rainy city, warm
           light.
         </p>
         <div className="grid gap-2.5">
+          <span className="grid size-7 place-items-center rounded-md border border-line-strong bg-ink-700">
+            <MoodyFace className="h-6" />
+          </span>
           <p className="text-muted">
             <span className="font-semibold text-fg">Here is the outline and the cast.</span> Mara is the mechanic,
             Theo her old mentor, and Iris the courier who finds the robot. I made reference images for each of them.
@@ -262,7 +267,7 @@ function Conversation() {
                   height={256}
                   loading="lazy"
                   decoding="async"
-                  className="aspect-square w-full rounded-xl border border-line object-cover"
+                  className="bloom-image aspect-square w-full rounded-lg border border-line object-cover"
                 />
                 <span className="mono absolute bottom-1 left-1 rounded bg-black/60 px-1 text-[0.625rem] text-fg">
                   @{character.tag}
@@ -278,7 +283,7 @@ function Conversation() {
             />
           )}
         </div>
-        <div className="rounded-2xl border border-ember/30 bg-ember/[0.06] p-3.5">
+        <div className="rounded-xl border border-line-strong bg-ink-800 p-3.5">
           <p className="font-semibold">Before I cut the trailer: how should the film end?</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {['Hopeful', 'Bittersweet', 'Leave it open'].map((option, index) => (
@@ -288,9 +293,9 @@ function Conversation() {
             ))}
           </div>
         </div>
-        <div className="mt-auto flex items-center gap-2 rounded-2xl border border-line-strong bg-white/[0.03] py-2 pr-2 pl-3.5 text-faint">
+        <div className="mt-auto flex items-center gap-2 rounded-xl border border-line-strong bg-ink-800 py-2 pr-2 pl-3.5 text-faint">
           <span className="flex-1 truncate">Reply, or tell the agent what to change…</span>
-          <span className="grid size-8 flex-none place-items-center rounded-full bg-ember text-ink-950">
+          <span className="grid size-8 flex-none place-items-center rounded-md bg-fg text-ink-950">
             <ArrowUp className="size-4" />
           </span>
         </div>
@@ -317,11 +322,11 @@ interface ToolRowProps {
  */
 function ToolRow({ state, title, detail }: ToolRowProps) {
   return (
-    <p className="flex min-w-0 items-center gap-2.5 rounded-xl bg-black/30 px-3 py-2 text-xs">
+    <p className="flex min-w-0 items-center gap-2.5 rounded-lg border border-line bg-ink-950 px-3 py-2 text-xs">
       {state === 'done' ? (
-        <Check className="size-3.5 flex-none text-ok" />
+        <Check className="size-3.5 flex-none text-fg" />
       ) : (
-        <LoaderCircle className="size-3.5 flex-none animate-spin text-ember-300" />
+        <LoaderCircle className="size-3.5 flex-none animate-spin text-fg" />
       )}
       <span className="font-semibold">{title}</span>
       <span className="mono min-w-0 flex-1 truncate text-faint">{detail}</span>
@@ -338,7 +343,7 @@ function Panels() {
   const [editor, ...others] = liveApps;
   const tier = catalog.tiers.find((entry) => entry.gpu !== null);
   return (
-    <div className="mock-pane grid content-start gap-3 border-line bg-black/20 p-3 max-md:border-t md:border-l">
+    <div className="mock-pane grid content-start gap-3 border-line bg-ink-950 p-3 max-md:border-t md:border-l">
       <Panel title="Screen" aside={editor === undefined ? undefined : <LiveBadge app={editor} />}>
         <div className="art relative aspect-video overflow-hidden rounded-lg" style={{ '--accent': editor?.accent }}>
           {editor === undefined ? null : (
@@ -349,10 +354,10 @@ function Panels() {
               height={720}
               loading="lazy"
               decoding="async"
-              className="absolute inset-0 size-full object-cover"
+              className="bloom-image absolute inset-0 size-full object-cover"
             />
           )}
-          <span className="absolute right-1.5 bottom-1.5 grid size-6 place-items-center rounded-md bg-black/60 text-muted">
+          <span className="absolute right-1.5 bottom-1.5 z-10 grid size-6 place-items-center rounded-md bg-black/60 text-muted">
             <Maximize2 className="size-3" />
           </span>
         </div>
@@ -383,8 +388,7 @@ function Panels() {
                 <Icon
                   className={cx(
                     'size-3.5 flex-none',
-                    task.state === 'done' && 'text-ok',
-                    task.state === 'active' && 'text-ember-300',
+                    task.state !== 'pending' && 'text-fg',
                   )}
                 />
                 {task.title}
@@ -409,7 +413,7 @@ function Panels() {
                 height={256}
                 loading="lazy"
                 decoding="async"
-                className="aspect-square w-full rounded-lg border border-line object-cover"
+                className="bloom-image aspect-square w-full rounded-lg border border-line object-cover"
               />
               <p className="mt-1 truncate text-[0.6875rem] font-semibold">{character.name}</p>
               <p className="mono truncate text-[0.625rem] text-faint">@{character.tag}</p>
@@ -439,7 +443,7 @@ interface PanelProps {
  */
 function Panel({ title, aside, children }: PanelProps) {
   return (
-    <div className="rounded-xl border border-line bg-ink-900/80 p-3">
+    <div className="rounded-lg border border-line bg-ink-900 p-3">
       <div className="mb-2.5 flex items-center justify-between gap-2">
         <p className="text-[0.6875rem] font-semibold tracking-[0.14em] text-faint uppercase">{title}</p>
         {aside}
@@ -463,7 +467,7 @@ interface LiveBadgeProps {
  */
 function LiveBadge({ app }: LiveBadgeProps) {
   return (
-    <span className="flex items-center gap-1.5 text-[0.6875rem] font-semibold text-ok">
+    <span className="flex items-center gap-1.5 text-[0.6875rem] font-semibold text-fg">
       <span className="dot dot-live" />
       {app.name}
     </span>
@@ -488,7 +492,7 @@ interface EngineRowProps {
  */
 function EngineRow({ app, running, detail }: EngineRowProps) {
   return (
-    <li className="flex items-center gap-2 rounded-lg bg-white/[0.03] px-2.5 py-2" style={{ '--accent': app.accent }}>
+    <li className="flex items-center gap-2 rounded-md bg-ink-800 px-2.5 py-2">
       <span className={cx('dot', !running && 'dot-idle')} />
       <span className="font-semibold">{app.name}</span>
       <span className="min-w-0 flex-1 truncate text-faint">{detail}</span>

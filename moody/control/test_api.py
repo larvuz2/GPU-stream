@@ -32,6 +32,7 @@ import hashlib
 import hmac
 import itertools
 import json
+import re
 import sys
 import time
 import uuid
@@ -58,6 +59,7 @@ from agent import (
     replace_tags,
     skills_directory,
     skills_for,
+    system_prompt,
 )
 from api import create_app
 from generation import IMAGE_MODELS, VIDEO_MODELS, Fal, GenerationStopped, video_kilotokens
@@ -349,7 +351,9 @@ class FakeLauncher:
         self.exits: dict[str, int] = {}
         self.fail_start = False
         self.commands: list[tuple[str, str]] = []
-        self.calls: list[tuple[str, str, Any]] = []
+        self.calls: list[tuple[str, str, str, Any]] = []
+        # The apps whose engines have a command channel
+        self.channels = {"filmcraft"}
         # The .uproject files each Sandbox's workspace holds, as the machine reports them
         self.uprojects: dict[str, list[dict[str, Any]]] = {}
         self.project_reads: list[str] = []
@@ -406,9 +410,14 @@ class FakeLauncher:
         self.commands.append((sandbox_id, command))
         return next((answer for text, answer in self.answers if text in command), (0, f"ran in {sandbox_id}\n"))
 
-    def filmcraft(self, sandbox_id: str, method: str, params: dict[str, Any] | None) -> dict[str, Any]:
-        self.calls.append((sandbox_id, method, params))
-        return {"ok": True, "method": method}
+    def has_channel(self, app: str) -> bool:
+        return app in self.channels
+
+    def engine_call(self, sandbox_id: str, app: str, method: str, params: dict[str, Any] | None) -> dict[str, Any]:
+        if app not in self.channels:
+            raise RuntimeError(f"This deployment's launcher has no command channel for {app}.")
+        self.calls.append((sandbox_id, app, method, params))
+        return {"ok": True, "app": app, "method": method}
 
 
 class InlineJobs:
@@ -1440,7 +1449,7 @@ def test_the_engine_tools_act_in_the_projects_own_running_engine(studio):
 
     session, _, _ = launcher.started[1]
     assert session["app"] == "filmcraft" and session["project_id"] == film["id"]
-    assert launcher.calls == [("sb-2", "engine.execute", {"command": "file.save", "params": {}})]
+    assert launcher.calls == [("sb-2", "filmcraft", "engine.execute", {"command": "file.save", "params": {}})]
     (sandbox, script), (_, listing) = launcher.commands
     assert sandbox == "sb-2" and listing == "ls library"
     folder = f"/home/ubuntu/workspace/projects/{film['id']}/library/mara/"
@@ -1454,6 +1463,138 @@ def test_the_engine_tools_act_in_the_projects_own_running_engine(studio):
     assert launcher.stopped == ["sb-2"], "the other project's engine was left alone"
     engine_events = [e["data"]["engine"]["status"] for e in events(client, film["id"])["events"] if e["kind"] == "engine"]
     assert engine_events == ["starting", "running", "ended"]
+
+
+def start_engine(studio: SimpleNamespace, project_id: str, app: str = "filmcraft", token: str = "alice-token", runs: str | None = None) -> dict[str, Any]:
+    """Start an engine of a project; `runs` makes it one of an app that is not on offer yet, by its row."""
+    response = studio.client.post(f"/v1/projects/{project_id}/engines", headers=auth(token), json={"app": app, "tier": "cpu"})
+    assert response.status_code == 200, response.text
+    engine = response.json()["engine"]
+    if runs:
+        studio.store.sessions[engine["id"]]["app"] = runs
+    return engine
+
+
+def tools_shown(client: TestClient, project_id: str) -> list[tuple[str, str, bool]]:
+    """Each call the page was shown, in order: its title, its summary, and whether it worked."""
+    shown = events(client, project_id)["events"]
+    ends = {event["data"]["call_id"]: event["data"] for event in shown if event["kind"] == "tool_end"}
+    return [
+        (event["data"]["title"], ends[event["data"]["call_id"]]["summary"], ends[event["data"]["call_id"]]["ok"])
+        for event in shown
+        if event["kind"] == "tool_start"
+    ]
+
+
+def test_engine_call_reaches_the_command_channel_of_whichever_app_an_engine_runs(studio):
+    client, model, launcher, store = studio.client, studio.model, studio.launcher, studio.store
+    for user in (ALICE, BOB):
+        store.moody_ensure_profile(user.id, user.email, 60)["max_sessions"] = 5
+    launcher.channels = {"filmcraft", "soundcraft", "cadcraft"}
+    film = new_project(client)
+    cut = start_engine(studio, film["id"])
+    score = start_engine(studio, film["id"], runs="soundcraft")
+    plan = start_engine(studio, film["id"], runs="cadcraft")
+    scene = start_engine(studio, film["id"], app="blender")
+    bobs = start_engine(studio, new_project(client, "bob-token")["id"], token="bob-token")
+    model.script(
+        reply(
+            use("engine_call", engine_id=cut["id"], method="timeline.place", params={"clip": "a"}),
+            use("engine_call", engine_id=score["id"], method="transport.play"),
+            use("engine_call", engine_id=plan["id"], method="document.export", params={"format": "step"}),
+            use("engine_call", engine_id=scene["id"], method="scene.save"),
+            use("engine_call", engine_id=bobs["id"], method="timeline.place"),
+            use("filmcraft", engine_id=score["id"], method="timeline.place"),
+            use("engine_list"),
+        ),
+        reply(say("Done.")),
+    )
+    message(client, film["id"], "Play it")
+
+    assert launcher.calls == [
+        ("sb-1", "filmcraft", "timeline.place", {"clip": "a"}),
+        ("sb-2", "soundcraft", "transport.play", None),
+        ("sb-3", "cadcraft", "document.export", {"format": "step"}),
+    ], "each call went to its engine's own app, and none to the engine without a channel or to another user's"
+    results = list(tool_results(model.requests[1]).values())
+    assert [r.get("is_error", False) for r in results] == [False, False, False, True, True, True, False]
+    assert json.loads(results[1]["content"]) == {"ok": True, "app": "soundcraft", "method": "transport.play"}
+    assert "This engine has no command channel" in results[3]["content"] and "engine_exec" in results[3]["content"]
+    assert "No such" in results[4]["content"]
+    assert results[5]["content"] == "That engine is not FilmCraft."
+    listed = {engine["id"]: engine["command_channel"] for engine in json.loads(results[6]["content"])}
+    assert listed == {cut["id"]: True, score["id"]: True, plan["id"]: True, scene["id"]: False}
+    assert tools_shown(client, film["id"])[:6] == [
+        ("FilmCraft: timeline.place", "FilmCraft: timeline.place done", True),
+        ("SoundCraft: transport.play", "SoundCraft: transport.play done", True),
+        ("CADCraft: document.export", "CADCraft: document.export done", True),
+        ("Blender: scene.save", results[3]["content"], False),
+        ("Engine: timeline.place", results[4]["content"], False),
+        ("FilmCraft: timeline.place", "That engine is not FilmCraft.", False),
+    ]
+
+
+def test_engine_files_lists_the_project_folder_as_an_engine_sees_it(studio):
+    client, model, launcher = studio.client, studio.model, studio.launcher
+    film = new_project(client)
+    engine = start_engine(studio, film["id"])
+    folder = f"/home/ubuntu/workspace/projects/{film['id']}"
+    launcher.answers += [
+        ("./handoff/missing", (44, "")),
+        ("find", (0, "f\t2048\t1795582875.75\tplan v2.glb\nd\t4096\t1795582800.0\ttextures\nf\t17\t1795582000.0\tNOTES.md\nnot an entry\n")),
+    ]
+    model.script(
+        reply(
+            use("engine_files", engine_id=engine["id"], path="handoff/cadcraft-to-blender"),
+            use("engine_files", engine_id=engine["id"]),
+            use("engine_files", engine_id=engine["id"], path=f"{folder}/handoff/cadcraft-to-blender/"),
+            use("engine_files", engine_id=engine["id"], path="handoff/missing"),
+            use("engine_files", engine_id=engine["id"], path="../another-project"),
+            use("engine_files", engine_id=engine["id"], path="/etc"),
+        ),
+        reply(say("It is there.")),
+    )
+    message(client, film["id"], "Is the plan there?")
+
+    results = list(tool_results(model.requests[1]).values())
+    assert [r.get("is_error", False) for r in results] == [False, False, False, True, True, True]
+    assert json.loads(results[0]["content"]) == {
+        "folder": folder,
+        "path": "handoff/cadcraft-to-blender",
+        "entries": [
+            {"name": "NOTES.md", "kind": "file", "size": 17, "modified": "2026-11-25T04:46:40+00:00"},
+            {"name": "plan v2.glb", "kind": "file", "size": 2048, "modified": "2026-11-25T05:01:15+00:00"},
+            {"name": "textures", "kind": "folder", "modified": "2026-11-25T05:00:00+00:00"},
+        ],
+    }
+    assert json.loads(results[1]["content"])["path"] == "" and json.loads(results[2]["content"])["path"] == "handoff/cadcraft-to-blender"
+    assert "There is no handoff/missing" in results[3]["content"]
+    assert "outside the project's folder" in results[4]["content"] and "outside the project's folder" in results[5]["content"]
+    commands = [command for _, command in launcher.commands]
+    assert len(commands) == 4, "a path outside the folder never reaches the machine"
+    assert all(command.startswith(f"cd {folder} ") for command in commands)
+    assert "find ./handoff/cadcraft-to-blender -mindepth 1 -maxdepth 1" in commands[0] and "find ./ -mindepth 1" in commands[1]
+    assert tools_shown(client, film["id"])[0] == ("Listing handoff/cadcraft-to-blender", "3 entries in handoff/cadcraft-to-blender", True)
+
+
+def test_a_turn_starts_knowing_each_engines_app_its_command_channel_and_the_shared_folder(studio):
+    client, model, launcher, store = studio.client, studio.model, studio.launcher, studio.store
+    store.moody_ensure_profile(ALICE.id, ALICE.email, 60)["max_sessions"] = 3
+    film = new_project(client)
+    cut = start_engine(studio, film["id"])
+    started = use("engine_start", app="blender", tier="cpu")
+    model.script(reply(started), reply(say("Blender is open.")), reply(say("Both run.")))
+    message(client, film["id"], "Open Blender beside the edit")
+    scene = json.loads(tool_results(model.requests[1])[started["id"]]["content"])
+    assert [session["project_id"] for session, _, _ in launcher.started] == [film["id"], film["id"]], (
+        "the engine the agent starts opens on the project the running one is on")
+    assert f"/home/ubuntu/workspace/projects/{film['id']}" in model.requests[0]["system"][0]["text"]
+
+    message(client, film["id"], "What runs?")
+    state = turn_state(model.requests[2]).splitlines()
+    assert f"Project folder, which every engine of this project opens in and shares: /home/ubuntu/workspace/projects/{film['id']}" in state
+    assert f"- {cut['id']}: FilmCraft (app `filmcraft`), running, tier cpu, has a command channel (engine_call)" in state
+    assert f"- {scene['id']}: Blender (app `blender`), running, tier cpu, no command channel (engine_exec, or the person on its screen)" in state
 
 
 def test_the_agent_saves_only_to_a_branch_of_its_own_made_from_the_default_head(studio):
@@ -2499,13 +2640,50 @@ def test_the_launcher_starts_each_app_from_its_own_image_in_the_users_workspace(
     assert ModalLauncher(module, app="modal-app").frame_ancestor == "", "no site, no frame allowed"
     assert origin("javascript:alert(1)") == "" and origin("http://localhost:5173/x") == "http://localhost:5173"
 
+
+
+def test_the_launcher_finds_an_apps_command_channel_by_the_apps_id_and_says_where_there_is_none():
+    module = FakeSandboxModule()
+    launcher = ModalLauncher(module, app="modal-app")
     launcher.sandbox = lambda sandbox_id: f"sandbox:{sandbox_id}"
-    with pytest.raises(RuntimeError, match="no FilmCraft command channel"):
-        launcher.filmcraft("sb-1", "engine.commands", {})
+    assert not launcher.has_channel("filmcraft")
+    with pytest.raises(RuntimeError, match="no command channel for filmcraft"):
+        launcher.engine_call("sb-1", "filmcraft", "engine.commands", {})
     calls = []
-    module.filmcraft_call = lambda sandbox, method, params=None, timeout=60: calls.append((sandbox, method, params, timeout)) or {"ok": True}
-    assert launcher.filmcraft("sb-1", "engine.commands", {}) == {"ok": True}
-    assert calls == [("sandbox:sb-1", "engine.commands", {}, 60)]
+
+    def channel(app: str) -> Callable[..., dict[str, Any]]:
+        return lambda sandbox, method, params=None, timeout=60: calls.append((app, sandbox, method, params, timeout)) or {"app": app}
+
+    for app in ("filmcraft", "soundcraft", "cadcraft", "craft_anything"):
+        setattr(module, f"{app}_call", channel(app))
+    # A name that is there but is no function is no channel
+    module.nuke_call = None
+    assert [launcher.has_channel(app) for app in ("filmcraft", "soundcraft", "cadcraft", "craft-anything", "blender", "nuke")] == [
+        True, True, True, True, False, False]
+    assert launcher.engine_call("sb-1", "filmcraft", "engine.commands", {}) == {"app": "filmcraft"}
+    assert launcher.engine_call("sb-2", "soundcraft", "transport.play", None) == {"app": "soundcraft"}
+    assert launcher.engine_call("sb-3", "cadcraft", "document.export", {"format": "step"}) == {"app": "cadcraft"}
+    assert launcher.engine_call("sb-4", "craft-anything", "ping", None) == {"app": "craft_anything"}
+    assert calls == [
+        ("filmcraft", "sandbox:sb-1", "engine.commands", {}, 60),
+        ("soundcraft", "sandbox:sb-2", "transport.play", None, 60),
+        ("cadcraft", "sandbox:sb-3", "document.export", {"format": "step"}, 60),
+        ("craft_anything", "sandbox:sb-4", "ping", None, 60),
+    ]
+    with pytest.raises(RuntimeError, match="no command channel for blender"):
+        launcher.engine_call("sb-5", "blender", "ping", None)
+
+
+def test_every_engine_of_a_project_opens_in_that_projects_folder_whatever_its_app():
+    module = FakeSandboxModule()
+    launcher = ModalLauncher(module, app="modal-app")
+    tier = {"gpu": None, "cpu": 2, "memory_gb": 4}
+    project, other = str(uuid.uuid4()), str(uuid.uuid4())
+    for app, project_id in (("filmcraft", project), ("blender", project), ("soundcraft", project), ("blender", other)):
+        launcher.start({"id": str(uuid.uuid4()), "user_id": ALICE.id, "app": app, "project_id": project_id}, tier, None)
+    folders = [settings["env"]["SELKIES_MODAL_PROJECT"] for _, settings in module.started]
+    assert folders == [f"projects/{project}"] * 3 + [f"projects/{other}"]
+    assert {settings["workspace"] for _, settings in module.started} == {f"/users/{ALICE.id}"}
 
 
 class FakeModal:
@@ -2719,6 +2897,34 @@ def test_skills_are_chosen_by_discipline_with_their_references(tmp_path):
     assert media == ["filmcraft", "studio-basics"] and music == ["songwriting", "studio-basics"] and games == ["studio-basics"]
     film = next(skill for skill in skills if skill.name == "filmcraft")
     assert film.description == "Editing films in FilmCraft." and "## references/prompting.md\n\n# Prompting" in film.body
+
+
+def test_a_skill_for_every_discipline_is_read_for_every_project_whatever_it_is_named(tmp_path):
+    for name, body in {
+        **SKILLS,
+        # Named after an engine, which alone would keep it to that engine's disciplines
+        "blender": "---\ndescription: Running a production.\ndisciplines: all\n---\nALWAYS-SKILL-TEXT\n",
+    }.items():
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "SKILL.md").write_text(body)
+    (tmp_path / "README.md").write_text("# Writing a skill\n\nNOT-A-SKILL")
+    skills = read_skills(tmp_path)
+    assert [skill.name for skill in skills] == ["blender", "filmcraft", "songwriting", "studio-basics"], "a file beside the skills is none"
+    for discipline in CATALOG.disciplines:
+        assert "blender" in [skill.name for skill in skills_for(skills, CATALOG, discipline)], discipline
+    assert [skill.name for skill in skills_for(skills, CATALOG, "music")] == ["blender", "songwriting", "studio-basics"]
+
+
+def test_the_studio_skill_is_read_for_every_project_and_names_only_tools_the_agent_has():
+    skills = read_skills(skills_directory())
+    studio_skill = next(skill for skill in skills if skill.name == "studio")
+    for discipline in CATALOG.disciplines:
+        assert "studio" in [skill.name for skill in skills_for(skills, CATALOG, discipline)], discipline
+    named = set(re.findall(r"`((?:engine|unreal|github|library|generate)_[a-z_]+|ask_user|update_plan|filmcraft)[`(]", studio_skill.body))
+    assert {"engine_call", "engine_files", "engine_show", "engine_exec", "engine_start", "engine_stop"} <= named
+    assert named <= set(TOOL_NAMES), f"the skill names tools the agent does not have: {named - set(TOOL_NAMES)}"
+    prompt = system_prompt(CATALOG, {"id": "p", "discipline": "music", "format": "Song"}, skills_for(skills, CATALOG, "music"), frozenset({"cpu"}))
+    assert "# Skill: studio" in prompt and "handoff/" in prompt
 
 
 def test_the_store_speaks_the_data_and_storage_apis():

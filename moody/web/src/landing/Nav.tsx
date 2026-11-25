@@ -5,8 +5,11 @@
  */
 
 /**
- * The landing page's navigation: a sticky, translucent bar with the logo, the section links, the
- * sign-in, and the call to action, which takes the visitor to the hero's prompt box.
+ * The landing page's navigation: a sticky bar with the wordmark, the section links, the sign-in,
+ * and the call to action, which takes the visitor to the hero's prompt box.
+ *
+ * The wordmark is the page's character: it blinks and looks around by itself, plays its next
+ * expression on a click, and reacts to what the visitor does in the prompt box (`lib/mood.ts`).
  * @module
  */
 import { useState } from 'react';
@@ -42,7 +45,7 @@ export function Nav({ signedIn }: NavProps) {
 
   return (
     <header
-      className="sticky top-0 z-40 border-b border-line bg-ink-950/70 backdrop-blur-xl"
+      className="sticky top-0 z-40 border-b border-line bg-ink-950"
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           closeMenu();
@@ -50,7 +53,7 @@ export function Nav({ signedIn }: NavProps) {
       }}
     >
       <nav aria-label="Main" className="shell flex h-16 items-center gap-3">
-        <Brand href="#top" />
+        <Brand href="#top" reactive />
         <ul className="ml-6 hidden items-center gap-1 md:flex">
           {LINKS.map((link) => (
             <li key={link.href}>

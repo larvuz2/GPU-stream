@@ -8,12 +8,21 @@
  * The end of the landing page: the last call to action, which sends the visitor back to the
  * prompt box, and the footer, which carries the notice that the product names on the page are their
  * owners' and that the art is illustrative.
+ *
+ * The call to action is where the wordmark falls into place: its pixels drop in under gravity and
+ * bounce to rest each time the block is scrolled to (`lib/moody.ts`, Gravity). The footer closes on
+ * the wordmark at the width of the page, as a static drawing.
  * @module
  */
 import { ArrowRight } from 'lucide-react';
 import { Brand } from '../components/Brand';
+import { MoodyMotion } from '../components/Moody';
 import { brand, catalog } from '../lib/catalog';
+import { ANIMATION, GRID_COLS, GRID_ROWS, RAW, type View } from '../lib/moody';
 import { CREATE_HASH } from './studio';
+
+/** The call to action's view of the wordmark: its width, and the height its pixels fall through. */
+const DROP_VIEW: View = { cx: 0, cy: -3, cols: GRID_COLS + 4, rows: 16 };
 
 /**
  * Renders the closing call to action.
@@ -22,29 +31,23 @@ import { CREATE_HASH } from './studio';
  */
 export function FinalCta() {
   return (
-    <section className="section pt-6" aria-labelledby="cta-title">
+    <section className="section" aria-labelledby="cta-title">
       <div className="shell">
-        <div className="relative isolate overflow-hidden rounded-[2rem] border border-line-strong bg-ink-900 px-6 py-16 text-center sm:px-12 sm:py-24">
-          <div
-            className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(60%_90%_at_50%_120%,rgb(255_122_26/0.5),rgb(139_92_246/0.28)_45%,transparent_75%)]"
-            aria-hidden="true"
+        <div className="stage px-6 pt-4 pb-14 text-center sm:px-12 sm:pb-20">
+          <MoodyMotion
+            animation={ANIMATION.gravity}
+            loop={false}
+            view={DROP_VIEW}
+            className="relative mx-auto aspect-[30/16] w-full max-w-xl"
           />
-          <div
-            className="pointer-events-none absolute top-full left-1/2 -z-10 size-[58rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/10"
-            aria-hidden="true"
-          />
-          <div
-            className="pointer-events-none absolute top-full left-1/2 -z-10 size-[40rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/10"
-            aria-hidden="true"
-          />
-          <h2 id="cta-title" className="display mx-auto max-w-3xl text-[2.2rem] sm:text-6xl">
-            What will you <span className="text-gradient">create?</span>
+          <h2 id="cta-title" className="display relative mx-auto mt-2 max-w-3xl text-[2.4rem] sm:text-6xl lg:text-7xl">
+            What will you make?
           </h2>
-          <p className="lede mx-auto mt-5 max-w-xl text-[1.0625rem] sm:text-lg">
-            Describe it in a sentence, and an agent starts building it with you. The first {catalog.signup_credits}{' '}
+          <p className="lede relative mx-auto mt-5 max-w-xl text-[1.0625rem] sm:text-lg">
+            Describe it in a sentence, and {brand} starts building it with you. The first {catalog.signup_credits}{' '}
             credits are on us.
           </p>
-          <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <div className="relative mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <a href={CREATE_HASH} className="btn btn-primary btn-lg w-full sm:w-auto">
               Start creating
               <ArrowRight className="size-4" aria-hidden="true" />
@@ -81,11 +84,14 @@ const FOOTER_LINKS = [
 export function Footer() {
   return (
     <footer className="relative border-t border-line">
-      <div className="shell py-12">
+      <div className="shell pt-12">
         <div className="flex flex-col gap-8 md:flex-row md:items-center md:justify-between">
           <div>
             <Brand href="#top" />
-            <p className="mt-3 max-w-xs text-sm text-muted">Describe it. An agent builds it with you.</p>
+            <p className="eyebrow mt-2 flex text-fg">
+              <span className="dot dot-live" aria-hidden="true" />
+              Made for the endlessly curious.
+            </p>
           </div>
           <nav aria-label="Footer">
             <ul className="flex flex-wrap gap-x-6 gap-y-3 text-sm text-muted">
@@ -108,6 +114,17 @@ export function Footer() {
             © {YEAR} {brand}
           </p>
         </div>
+        <svg
+          viewBox={`0 0 ${GRID_COLS} ${GRID_ROWS}`}
+          fill="currentColor"
+          shapeRendering="crispEdges"
+          className="mt-12 block w-full text-ink-700"
+          aria-hidden="true"
+        >
+          {RAW.map(([x, y]) => (
+            <rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" />
+          ))}
+        </svg>
       </div>
     </footer>
   );

@@ -36,7 +36,7 @@ import { usePreference } from './hooks';
 import { LibraryBody } from './LibraryPanel';
 import { Panel } from './Panel';
 import { PlanBody } from './PlanPanel';
-import { DisciplineIcon } from './DisciplineIcon';
+import { DisciplineIcon } from '../components/DisciplineIcon';
 import { disciplineName, planProgress } from './present';
 import { Stage, type StreamStandIn } from './Stage';
 import { connected, type Account, type Epic, type GitHub, type Projects } from './useAccount';
@@ -268,7 +268,7 @@ export function Workspace(props: WorkspaceProps) {
       <main className="studio-center" aria-label={project.name} data-mobile-hidden={narrow && tab !== 'chat'}>
         <header className="flex min-h-14 items-center gap-3 border-b border-[var(--studio-line)] px-4 py-2 sm:px-5">
           <span className="icon-tile size-8 rounded-lg">
-            <DisciplineIcon id={project.discipline} className="size-4" />
+            <DisciplineIcon id={project.discipline} className="size-6" />
           </span>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-[0.9375rem] leading-tight font-semibold tracking-tight">{project.name}</h1>
@@ -277,9 +277,14 @@ export function Workspace(props: WorkspaceProps) {
             </p>
           </div>
           {data.running ? (
-            <span className="hidden items-center gap-2 text-xs text-ember-200 sm:flex">
-              <span className="dot dot-ember dot-live" aria-hidden="true" />
+            <span className="hidden items-center gap-2 text-xs text-fg sm:flex">
+              <span className="dot dot-busy dot-live" aria-hidden="true" />
               Agent working
+            </span>
+          ) : blocked === null ? (
+            <span className="hidden items-center gap-2 text-xs text-muted sm:flex">
+              <span className="dot dot-live" aria-hidden="true" />
+              Agent online
             </span>
           ) : null}
           {project.github_repo === null ? null : (
