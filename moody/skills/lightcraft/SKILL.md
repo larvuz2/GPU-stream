@@ -105,7 +105,9 @@ Each step names its command; the exact parameters and answers are in the command
 
 ### 2. Bring the photographs in
 
-1. Find them: `engine_files(id)`. Uploads land in the workspace; library entries come with
+1. Find them: `engine_files(id)` lists the project folder. A file the person uploads through the
+   engine's page lands one level higher, at the top of the workspace
+   (`engine_exec(id, "ls -la $SELKIES_MODAL_WORKSPACE/")`); library entries come with
    `engine_import(id, tags)` into `library/<tag>/`. Put a shoot in one folder of the project
    (`photos/` or `photos/<shoot>/`) with `engine_exec` and `mv` or `cp`, and leave it there:
    LightCraft keeps the path.
@@ -181,14 +183,18 @@ what comes next.
 
 An engine costs credits every minute it runs; the system prompt has each tier's price.
 
-- **Use the tier without a GPU.** LightCraft develops on the processor on Moody's machines, and a
-  GPU tier was measured no faster for editing or for export. Never recommend one for LightCraft.
+- **Start on the tier without a GPU** (`cpu`). It does everything here: about a third of a second
+  from a slider change to the finished picture, a little over a second to open a photo, 2 to 3 s
+  for a web-size JPEG, 5 to 15 s for a full-size JPEG or 16-bit TIFF. The commands reference has
+  the measured table.
+- **Offer the first GPU tier only for comfort**, when the person will work the sliders by hand
+  for a long session: it answered about twice as fast (0.17 to 0.19 s a slider, 0.6 s a photo),
+  for three times the price, and its exports took about as long. Never start a larger tier for
+  LightCraft.
 - Before `engine_start`, say the tier, its price a minute, and your estimate: a cull and a hero
   look take 20 to 40 minutes with the person; carrying a look across a set and exporting, 10 to
   20.
-- The machine starts in about 10 seconds. LightCraft answers on the Starter tier in about a third
-  of a second per slider change and about a second and a half per photo opened; exports run at
-  STARTER_EXPORT_RATE. The commands reference has the measured table.
+- The machine starts and answers its first command in about 6 seconds.
 - A 16-bit TIFF is 140 to 170 MB for a 45-megapixel photo. Say what a batch will take in space
   before you make it.
 - Stop the engine while the person is choosing among proofs or away; the library keeps
@@ -204,9 +210,10 @@ Say these plainly when they come up; never present one as working.
   linear, brush, and range masks.
 - **AI Denoise and Super Resolution are not available** (no model installed). Use
   `detail.nrLuminance` and `detail.nrColor`.
-- **Some raw files open from their camera preview only** (`previewOnly`): some Canon CR3
-  variants, Nikon High Efficiency NEF, compressed Olympus ORF and Samsung SRW. They can be viewed
-  and exported at the preview's quality, not developed. Ask for a DNG or JPEG of those frames.
+- **Some raw files open from their camera preview only** (`previewOnly` in the import preview and
+  in `catalog.query`). LightCraft's own notes name some Canon CR3 variants, Nikon High Efficiency
+  NEF, and compressed Olympus ORF and Samsung SRW. They can be viewed and exported at the
+  preview's quality, not developed. Ask for a DNG or JPEG of those frames.
 - **Camera color is LightCraft's own**, not the camera maker's: a raw will not match the
   camera's JPEG exactly. Match by eye and by measurement when the person expects that look.
 - **Verified here**: Nikon NEF, Sony ARW, Fujifilm RAF, JPEG, PSD, and TIFF in; JPEG, PNG, TIFF,
@@ -214,7 +221,7 @@ Say these plainly when they come up; never present one as working.
   watermark: do not promise either.
 - **No LUT export.** A look leaves as a preset file (for LightCraft) or as a reference still and
   its numbers (for FilmCraft). LUTs come in, as profiles.
-- **No generative fill, no layers, no type, no liquify.** Those are PhotoCraft's.
+- **No generative fill, no layers, no type, no reshaping.** Those are PhotoCraft's.
 - **No video.** LightCraft does not import or edit it.
 - **No direct printing.** Export a file for the lab.
 - **Engines do not see each other's new files while both run.** Start the receiver after the

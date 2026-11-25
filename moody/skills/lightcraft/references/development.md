@@ -40,6 +40,10 @@ All values are 0 to 255 in the rendered picture.
 | `histogram` piled into the middle bins | Low contrast | Contrast, or an S-curve |
 | `histogram` with two piles and an empty middle | A contrasty scene: backlight, noon sun | Highlights down and shadows up before any contrast |
 
+With a person in the frame, the background can own the median: a profile portrait against a pale
+wall measured a median of 205 while the face sat at 95. Read the skin patch (see [Skin](#skin)),
+not the whole frame.
+
 The numbers describe; the picture's intent decides. A fog scene should have no black. A silhouette
 should clip its blacks. Say what you saw and why you left it.
 

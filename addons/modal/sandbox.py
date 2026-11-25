@@ -35,7 +35,9 @@ place it listens: Blender runs the Python it finds in a spool directory
 (`blender_python`), and FilmCraft answers JSON requests on a control channel
 bound to the Sandbox's loopback, for the session's own token only
 (`filmcraft_call`). Neither is exposed beyond the Sandbox, so driving one takes
-the Modal credentials that started it, as a link does. An Unreal session
+the Modal credentials that started it, as a link does. LightCraft answers the
+same requests on a loopback channel that takes no token (`lightcraft_call`),
+so there the Sandbox's boundary is the only guard. An Unreal session
 describes the projects cloned into its workspace the same way
 (`unreal_projects`), and has a second page beside its desktop on a port of its
 own, the Unreal view (`unreal_view_link`). One started for a project linked to
@@ -81,6 +83,7 @@ FILMCRAFT_VERSION = "0.20.1"
 FILMCRAFT_SHA256 = "5667c7505c91d2ad9de3c4acb15cb02fc9f138fae74dce9c7c5f08bc29edb3a8"
 PHOTOCRAFT_VERSION = "0.23.1"
 PHOTOCRAFT_SHA256 = "baabdcdbe46df2f72ccf6ecc2e98be00fbc33dbd4c1cd9426362a89a4b95f673"
+# LightCraft's, from its release's SHA256SUMS.txt as theirs are
 LIGHTCRAFT_VERSION = "0.21.1"
 LIGHTCRAFT_SHA256 = "c91ef47bec44995d99ce58e6c748af9fa6ab1ff1c11de9e290e0b8231176dad1"
 CRAFT_RELEASES = {
@@ -107,6 +110,7 @@ SHARE = "/usr/local/share/selkies-modal"
 # FilmCraft's and PhotoCraft's control channels, which each binds on the Sandbox's loopback only
 FILMCRAFT_CONTROL_PORT = 9876
 PHOTOCRAFT_CONTROL_PORT = 7878
+# LightCraft's, loopback only as theirs are, and the port its own documentation uses
 LIGHTCRAFT_CONTROL_PORT = 7980
 # The TCP port a session's TURN relay listens on (webrtc/turnserver.sh), exposed with `tcp_ports`
 TURN_PORT = 3478
@@ -171,7 +175,13 @@ APP_ENV = {
     },
     "lightcraft": {
         "SELKIES_MODAL_APP": "lightcraft",
+        # The control channel, which takes no token: loopback is what guards it (lightcraft/autostart)
         "LIGHTCRAFT_CONTROL_PORT": str(LIGHTCRAFT_CONTROL_PORT),
+        # As FilmCraft: the window draws through Mesa's Vulkan in software on every machine, and
+        # Vulkan is what reaches a GPU where there is one, for the develop pipeline. Without one
+        # LightCraft develops on the CPU, having found only a software adapter. OpenGL is left
+        # out: its window was no quicker than the spread between runs on the machine without a
+        # GPU, and on a GPU machine LightCraft's kernels fail to build on NVIDIA's OpenGL.
         "WGPU_BACKEND": "vulkan",
     },
     "unreal": {
@@ -238,7 +248,10 @@ def session_image(app: str = "blender") -> modal.Image:
     FilmCraft and PhotoCraft are the Debian packages of their GitHub releases,
     each checked against the hash its release publishes (`craft/install.sh`),
     with what finds the session's project folder (`craft/project.sh`); FilmCraft
-    adds the client of its control channel (`filmcraft/control.sh`). Unreal's
+    adds the client of its control channel (`filmcraft/control.sh`).
+    LightCraft is installed as they are and adds its channel's client
+    (`lightcraft/control.sh`) and the reader of a rendered picture's histogram
+    (`lightcraft/histogram.py`), which its channel has no command for. Unreal's
     is the desktop its editor runs beside, without the editor
     (`unreal_desktop`); `unreal_image` is the same desktop with the editor.
     """

@@ -77,7 +77,8 @@ engine_call(id, "engine.execute", {"command": "lens.databaseStatus"})
    -> {"download": {"state": "done", "files": 56}, "lenses": 1568, "dir": ".../.lightcraft/lensfun"}
 ```
 
-Where no dialog is open, `lens.downloadDatabase {}` starts the same download. It took about 8 s.
+Where no dialog is open, `lens.downloadDatabase {}` -> `{"started": true, "dir"}` starts the same
+download. It took about 8 s.
 The database stays in the project folder; later sessions have it.
 
 ## Library: import, find, organize
@@ -254,7 +255,7 @@ mask.invert {}    mask.visible {"visible": false}    mask.select {"id": 2}    ma
 ### Retouching that stays in LightCraft
 
 `spot.add {"mode": "heal", "points": [[0.9, 0.1]], "size": 0.01}` -> `{index}` removes a dust spot
-or a blemish (`spot.delete {}` takes the selected one away). More than a few spots, liquify,
+or a blemish (`spot.delete {}` takes the selected one away). More than a few spots, reshaping,
 frequency separation, or compositing is PhotoCraft's work.
 
 ### Crop and geometry
@@ -395,14 +396,26 @@ blown pixels.
 
 ## What was measured
 
-On the Starter machine (no GPU), with 24 to 45 megapixel raws:
+On the Starter tier's machine (no GPU), with raws of 24 to 33 megapixels and a 45-megapixel JPEG:
 
 | Step | Time |
 |---|---|
-| One `engine_call` round trip | about 0.3 s |
+| Engine start until the first command is answered | about 6 s |
+| One `engine_call` round trip | 0.2 to 0.4 s |
 | Import of 9 photos in place | 0.3 s |
-| A slider change until the finished picture is on the person's screen | STARTER_SLIDER |
-| Stepping to another photo until its finished picture | STARTER_STEP |
-| `ui.render` at 1600 px | 0.3 to 1.5 s |
-| Export, one 45 MP raw: JPEG 2048 px / JPEG full size / 16-bit TIFF full size | STARTER_EXPORTS |
-| Export, 9 photos to JPEG 2048 px | STARTER_BATCH |
+| `photo.analyze` of 9 photos | 4 s |
+| A slider change until the finished picture is on the person's screen | 0.3 to 0.4 s |
+| Opening another photo until its finished picture | 1.1 to 1.4 s |
+| `ui.render` at 600 to 1600 px | 0.4 to 2.6 s |
+| Export, one photo to JPEG at 2048 px | 2 to 3 s |
+| Export, one photo to JPEG at full size (33 MP) | 5 s |
+| Export, one photo to 16-bit TIFF at full size | 7 s (33 MP) to 15 s (45 MP) |
+| Export, 9 photos to JPEG at 2048 px | 12 s |
+| Export, 9 photos to JPEG at full size, in the background | about a minute |
+
+So that no call runs into LightCraft's 60 s limit: export with `background: true` whenever a call
+covers more than 15 resized photos or more than 3 at full size.
+
+The Studio tier (a T4, twice the processor, four times the memory) answered a slider in 0.17 to
+0.19 s and opened a photo in 0.6 s. Its exports took about as long as the Starter's, but for a
+full-size JPEG (3 s instead of 5).

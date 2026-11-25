@@ -550,8 +550,8 @@
     {
       "id": "lightcraft",
       "name": "LightCraft",
-      "version": "",
-      "status": "soon",
+      "version": "0.21",
+      "status": "available",
       "tagline": "Non-destructive photo development and grading.",
       "accent": "#ffd166",
       "disciplines": [

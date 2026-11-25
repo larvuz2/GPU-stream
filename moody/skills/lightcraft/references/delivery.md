@@ -113,14 +113,14 @@ every edit is already in the library.
 
 ### To PhotoCraft: retouching and compositing
 
-PhotoCraft does what a developer cannot: skin and blemish retouching, liquify, cut-outs,
+PhotoCraft does what a developer cannot: skin and blemish retouching, reshaping, cut-outs,
 composites, type, layers.
 
 ```text
 app.export {"ids": [9], "path": "<project>/handoff/lightcraft-to-photocraft/portrait-headwrap-v1.tif",
             "format": "tiff", "bitDepth": 16, "colorSpace": "adobeRgb", "tiffCompression": "zip",
             "longEdge": 0, "sharpen": "none"}
-   -> 8256 x 5504, 139 MB, 7 s
+   -> 8256 x 5504, 139 MB, 12 s
 ```
 
 | | |
@@ -147,7 +147,7 @@ the finish (grade, grain, vignette, crop). Do not paste the original's tone sett
 ```text
 app.export {"ids": [8], "path": "<project>/handoff/lightcraft-to-filmcraft/landscape-peyto-still-v1.png",
             "format": "png", "bitDepth": 8, "colorSpace": "srgb", "longEdge": 3840}
-   -> 3840 x 3072, 17 MB, 0.8 s
+   -> 3840 x 3072, 17 MB, 2 s
 ```
 
 | | |
