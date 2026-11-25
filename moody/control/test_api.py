@@ -1451,6 +1451,25 @@ def test_the_agent_works_through_its_tools_and_its_conversation_is_one_session_i
     assert ends[2]["summary"] == "2 images saved to @mara, about $0.30" and len(ends[2]["media"]) == 2
     assert ends[3]["summary"] == "1 image, about $0.15", "an image not saved anywhere"
     assert ends[4]["summary"] == "1 video saved to @s01-sh01-t1, about $2.84"
+
+    # Every file the conversation shows is kept by where it is and signed for each reading of the log
+    signed = "https://storage.example.test/"
+    assert all(set(item) == {"kind", "url"} and item["url"].startswith(signed) for end in ends[2:5] for item in end["media"])
+    entries = [e["data"]["asset"] for e in log["events"] if e["kind"] == "library" and "asset" in e["data"]]
+    assert [len(entry["media"]) for entry in entries] == [0, 2, 1], "an entry as each event left it"
+    assert all(set(item) == {"kind", "url", "name"} and item["url"].startswith(signed) for entry in entries for item in entry["media"])
+    assert entries[1]["thumbnail_url"] == entries[1]["media"][0]["url"] and entries[0]["thumbnail_url"] is None
+    kept = [row["data"] for row in store.tables["project_events"].values() if row["kind"] in ("tool_end", "library")]
+    files = [item for data in kept for item in [*data.get("media", []), *data.get("asset", {}).get("media", [])]]
+    assert len(files) == 7 and all("url" not in item and item["path"] in store.files for item in files), (
+        "the log keeps where a file is, never a link that expires"
+    )
+    assert "token=signed" not in json.dumps([row["data"] for row in store.tables["project_events"].values()])
+    unsaved = next(path for path in store.files if "/generations/" in path)
+    held = store.files.pop(unsaved)
+    again = [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "tool_end"]
+    assert again[3]["media"] == [] and len(again[2]["media"]) == 2, "a result whose file is gone is left out"
+    store.files[unsaved] = held
     starts = [e["data"] for e in log["events"] if e["kind"] == "tool_start"]
     assert starts[0] == {"call_id": starts[0]["call_id"], "tool": "set_library_sections", "title": "Arranging the library", "activity": "processing"}
     assert starts[2]["title"] == "Generating 2 images" and starts[2]["activity"] == "creating"

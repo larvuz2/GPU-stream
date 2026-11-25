@@ -1635,7 +1635,7 @@ class Agent:
         metadata: dict[str, Any] | None = None,
     ) -> Result:
         row, created = self.sessions.upsert_asset(turn.project, section, name, tag, description, metadata)
-        turn.event("library", {"asset": self.sessions.shown_assets([row])[0]})
+        turn.event("library", {"asset": self.sessions.kept_asset(row)})
         label = row["tag"] or row["name"]
         return Result(
             json.dumps({"id": row["id"], "tag": row["tag"], "section": row["section"], "name": row["name"], "created": created}),
@@ -1694,7 +1694,9 @@ class Agent:
     ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         """Store generated files in the library bucket: in the target entry where there is one, else beside the project.
 
-        Returns the entry as changed and the files as the page shows them.
+        Returns the entry as changed and the files as the log keeps them under
+        the call: each by its path, which is signed when the log is read
+        (`Sessions.shown_events`).
         """
         generator = self.require_generator()
         project = turn.project
@@ -1710,10 +1712,9 @@ class Agent:
                 path = f"{project['user_id']}/{project['id']}/generations/{uuid.uuid4().hex[:12]}-{name}"
                 self.store.upload(LIBRARY_BUCKET, path, data, content_type)
                 paths.append((path, content_type.split("/")[0]))
-        links = self.store.sign(LIBRARY_BUCKET, [path for path, _ in paths], SIGNED_URL_SECONDS)
         if target is not None:
-            turn.event("library", {"asset": self.sessions.shown_assets([target])[0]})
-        return target, [{"kind": kind, "url": links.get(path)} for path, kind in paths]
+            turn.event("library", {"asset": self.sessions.kept_asset(target)})
+        return target, [{"kind": kind, "path": path} for path, kind in paths]
 
     @staticmethod
     def labeled(prompt: str, chosen: list[tuple[dict[str, Any], dict[str, Any], str]]) -> tuple[str, dict[str, list[str]]]:

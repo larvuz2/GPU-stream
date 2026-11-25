@@ -238,10 +238,12 @@ Event    {id, turn_id, kind, data, created_at}, kind one of
            user_message  {text}
            text          {text}            a piece of the agent's reply, in order
            tool_start    {call_id, tool, title}
-           tool_end      {call_id, ok, summary, media?: [{kind, url}]}
+           tool_end      {call_id, ok, summary, media?: [{kind, url}]}  `media` are the files a
+                                              call made; one whose file is gone is left out
            ask           {question, options: [string]}
            plan          {items}
-           library       {asset}, or {sections} when the agent set the sections
+           library       {asset}, or {sections} when the agent set the sections; the asset
+                                              is the entry as that event left it
            engine        {engine: Session}
            screen        {engine_id, stream}  the agent puts an engine, in one of its
                                               streams ("Desktop", "Unreal"), on the Screen
@@ -261,7 +263,10 @@ route spawns; it writes events as it goes and the app polls `events`. Its model
 is the most capable Claude model by default (`MOODY_AGENT_MODEL`); it needs
 `ANTHROPIC_API_KEY`, and generation needs `FAL_KEY`, both in the Modal Secret
 `moody`. Library media is stored in Supabase Storage (bucket `library`,
-private); `url` fields are signed and expire.
+private); `url` fields are signed and expire. The log keeps a file by its
+path, so every `url` in an event (a call's `media`, the files of a `library`
+event's asset, a preview's items) is signed for the reading of the log that
+returned it, and reading the log again gives a fresh one.
 
 ## Contract: the agent on Anthropic's loop
 
@@ -401,8 +406,8 @@ Activity     one of catalog.json's `activities` ids: thinking, searching, proces
               creating, curious, confused, focused, surprised, satisfied (the pixel eyes' expressions)
 ```
 
-Additions to the events. Any event may carry `agent_id`: the subagent it
-belongs to, absent for the agent itself.
+Additions to the events. Any event may carry `agent_id` in its `data`: the
+subagent it belongs to, absent for the agent itself.
 
 ```text
 user_message     {text, ui?: {ui_id, value}}

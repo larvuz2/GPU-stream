@@ -1178,6 +1178,15 @@ class Sessions:
         asset["thumbnail_url"] = next((item["url"] for item in asset["media"] if item["kind"] == "image"), None)
         return asset
 
+    @staticmethod
+    def kept_asset(row: dict[str, Any]) -> dict[str, Any]:
+        """A library entry as an event of the log keeps it: its fields, and its files by their paths in the bucket.
+
+        `shown_events` turns it into the entry the API shows, with links
+        signed for that reading.
+        """
+        return {**{name: row[name] for name in ASSET_FIELDS}, "media": row["media"]}
+
     def links(self, rows: list[dict[str, Any]]) -> dict[str, str]:
         """Signed links to every file of these entries, by path, in one call to Storage."""
         paths = [item["path"] for row in rows for item in row["media"]]
@@ -1415,26 +1424,49 @@ class Sessions:
         )
         return {"events": self.shown_events(rows), "running": self.turn_running(project)}
 
-    def shown_events(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Events as the API shows them, each `preview`'s files under links signed for this reading.
+    @staticmethod
+    def event_files(row: dict[str, Any]) -> list[dict[str, Any]]:
+        """The files an event of the log shows, each kept by its path in the bucket.
 
-        A preview is kept in the log by its files' paths in the bucket, never by a link: a link
-        expires within the hour, and work in progress is what a person scrolls back to the next
-        day. So each page of events is signed as it is read, in one request for all of its
-        previews, and a file that is gone is left out of its preview.
+        A `preview`'s items, the results under a call (`tool_end`'s `media`),
+        and the files of the entry a `library` event carries.
         """
-        paths = [item["path"] for row in rows if row["kind"] == "preview" for item in row["data"].get("items", [])]
+        data = row["data"]
+        if row["kind"] == "preview":
+            return data.get("items", [])
+        if row["kind"] == "tool_end":
+            return data.get("media", [])
+        if row["kind"] == "library":
+            return data.get("asset", {}).get("media", [])
+        return []
+
+    def shown_events(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Events as the API shows them, every file in them under a link signed for this reading.
+
+        The log keeps a file by its path in the bucket, never by a link: a
+        link expires within the hour, and a conversation is what a person
+        scrolls back through the next day. So each page of events is signed
+        as it is read, in one request for all of its files (`event_files`). A
+        preview's file or a call's result that is gone is left out; a library
+        entry keeps its place with no link, as the library shows it.
+        """
+        paths = [item["path"] for row in rows for item in self.event_files(row)]
         links = self.store.sign(LIBRARY_BUCKET, paths, SIGNED_URL_SECONDS) if paths else {}
         shown = []
         for row in rows:
-            event = self.public_event(row)
+            event, data = self.public_event(row), row["data"]
             if row["kind"] == "preview":
                 items = [
                     {**{key: value for key, value in item.items() if key != "path"}, "url": links[item["path"]]}
-                    for item in row["data"].get("items", [])
+                    for item in data.get("items", [])
                     if item["path"] in links
                 ]
-                event["data"] = {**row["data"], "items": items}
+                event["data"] = {**data, "items": items}
+            elif row["kind"] == "tool_end" and "media" in data:
+                media = [{"kind": item["kind"], "url": links[item["path"]]} for item in data["media"] if item["path"] in links]
+                event["data"] = {**data, "media": media}
+            elif row["kind"] == "library" and "asset" in data:
+                event["data"] = {**data, "asset": self.public_asset(data["asset"], links)}
             shown.append(event)
         return shown
 
