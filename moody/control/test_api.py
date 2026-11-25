@@ -3818,7 +3818,7 @@ def test_a_message_can_lock_in_a_card_the_agent_showed_and_the_model_reads_which
 def test_a_card_that_waits_ends_the_turn_and_its_lock_resumes_the_session_with_what_was_chosen(studio):
     client, model = studio.client, studio.model
     film = new_project(client)
-    tuner = {"type": "stack", "children": [{"type": "slider", "id": "warmth", "label": "Warmth"}]}
+    tuner = {"type": "stack", "children": [{"type": "slider", "id": "warmth", "label": "Warmth", "value": 20}]}
     shown = use("show_ui", title="The look of shot 3", components=tuner, submit="Lock in this look", waits=True)
     model.script(reply(say("Tune it and lock it in."), shown), reply(say("This is never asked for.")))
     message(client, film["id"], "Find a look for shot 3")
