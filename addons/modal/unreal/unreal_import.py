@@ -35,7 +35,7 @@ from pathlib import Path
 import unreal
 
 DESTINATION_ROOT = "/Game/Blender"
-PLACED_TAG = "lathe-bridge:"
+PLACED_TAG = "moody-bridge:"
 NAME = re.compile(r"[A-Za-z0-9_]+")
 KINDS = {"static": "gltf", "skeletal": "fbx"}
 
@@ -129,7 +129,7 @@ def import_manifest(manifest_path: str) -> dict:
     if not imported:
         raise RuntimeError(f"Unreal imported nothing from {manifest['file']}; its Output Log says why")
     placed = place([unreal.EditorAssetLibrary.load_asset(item) for item in imported]) if manifest.get("place") else 0
-    unreal.log(f"Lathe bridge: {manifest['name']} imported from Blender into {DESTINATION_ROOT}/{manifest['name']}")
+    unreal.log(f"Moody bridge: {manifest['name']} imported from Blender into {DESTINATION_ROOT}/{manifest['name']}")
     return {
         "name": manifest["name"],
         "destination": f"{DESTINATION_ROOT}/{manifest['name']}",

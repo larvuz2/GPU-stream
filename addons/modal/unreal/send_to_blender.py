@@ -169,18 +169,18 @@ class Answer:
             reply = json.loads(self.answer.read_text())
             self.answer.unlink()
             if reply.get("ok"):
-                unreal.log(f"Lathe bridge: Blender imported {self.what}. {reply.get('output', '').strip()}")
+                unreal.log(f"Moody bridge: Blender imported {self.what}. {reply.get('output', '').strip()}")
             else:
-                unreal.log_error(f"Lathe bridge: Blender could not import {self.what}:\n{reply.get('error')}")
+                unreal.log_error(f"Moody bridge: Blender could not import {self.what}:\n{reply.get('error')}")
         elif self.request.is_file() and self.waited > CLAIM_SECONDS:
             self.stop()
             self.request.unlink(missing_ok=True)
             unreal.log_warning(
-                f"Lathe bridge: no Blender took {self.what} within {CLAIM_SECONDS} s; open Blender and send again."
+                f"Moody bridge: no Blender took {self.what} within {CLAIM_SECONDS} s; open Blender and send again."
             )
         elif self.waited > ANSWER_SECONDS:
             self.stop()
-            unreal.log_warning(f"Lathe bridge: Blender did not finish importing {self.what} within {ANSWER_SECONDS // 60} min.")
+            unreal.log_warning(f"Moody bridge: Blender did not finish importing {self.what} within {ANSWER_SECONDS // 60} min.")
 
 
 def send_selection() -> str:
@@ -200,7 +200,7 @@ def send_selection() -> str:
         files.append((name, path))
     what = ", ".join(name for name, _ in files)
     Answer(hand_to_blender(files), what).start()
-    unreal.log(f"Lathe bridge: sent {what} to Blender from {folder}")
+    unreal.log(f"Moody bridge: sent {what} to Blender from {folder}")
     return what
 
 
@@ -209,4 +209,4 @@ def menu_action() -> None:
     try:
         send_selection()
     except BridgeError as error:
-        unreal.log_error(f"Lathe bridge: {error}")
+        unreal.log_error(f"Moody bridge: {error}")

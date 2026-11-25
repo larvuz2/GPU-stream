@@ -2,13 +2,13 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-# Netlify builds the Lathe site (lathe/web) from this file alone: connecting the repository needs no
+# Netlify builds the Moody site (moody/web) from this file alone: connecting the repository needs no
 # setting in the dashboard. The Supabase project and the control plane's address are the site's
-# environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, VITE_LATHE_API_URL); the site
+# environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY, VITE_MOODY_API_URL); the site
 # builds and renders in full without them, with sign-up shown as opening soon.
 
 [build]
-  base = "lathe/web"
+  base = "moody/web"
   command = "npm run build"
   # Relative to the base directory.
   publish = "dist"

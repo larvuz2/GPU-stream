@@ -7,16 +7,16 @@
     selkies-modal-unreal-clone [FOLDER]
     selkies-modal-unreal-clone --status
 
-A Lathe project linked to a GitHub repository starts its Unreal session with
+A Moody project linked to a GitHub repository starts its Unreal session with
 that repository in the session's environment, from a Modal Secret made for the
 start (`start_session`'s `secrets` in `addons/modal/sandbox.py`):
-`LATHE_GIT_REPO` (`owner/name`), `LATHE_GIT_BRANCH` (else the repository's
-default branch), `LATHE_GIT_TOKEN` (a GitHub App user token that reads and
-writes that repository for eight hours), and `LATHE_GIT_NAME` and
-`LATHE_GIT_EMAIL`, whom the developer's commits are by. The session's autostart
+`MOODY_GIT_REPO` (`owner/name`), `MOODY_GIT_BRANCH` (else the repository's
+default branch), `MOODY_GIT_TOKEN` (a GitHub App user token that reads and
+writes that repository for eight hours), and `MOODY_GIT_NAME` and
+`MOODY_GIT_EMAIL`, whom the developer's commits are by. The session's autostart
 runs this in the background as the desktop comes up, so the developer finds
 their game there as they would at their desk, without signing in to GitHub in
-the machine. Without `LATHE_GIT_REPO` it does nothing (status 2), and the
+the machine. Without `MOODY_GIT_REPO` it does nothing (status 2), and the
 developer clones by hand as before.
 
 **Where.** The clone is `FOLDER/<name>`, FOLDER being the folder the GitHub
@@ -219,20 +219,20 @@ def explain(repository: str, error: GitError) -> str:
 
 
 def checked_repository(value: str) -> str:
-    """`LATHE_GIT_REPO` as `owner/name`, each part a name GitHub allows and neither `.` nor `..`."""
+    """`MOODY_GIT_REPO` as `owner/name`, each part a name GitHub allows and neither `.` nor `..`."""
     parts = value.split("/")
     if len(parts) != 2 or not all(NAME.fullmatch(part) and part not in (".", "..") for part in parts):
-        raise Failed(f"LATHE_GIT_REPO={value!r} is not a GitHub repository such as owner/name")
+        raise Failed(f"MOODY_GIT_REPO={value!r} is not a GitHub repository such as owner/name")
     return value
 
 
 def checked_branch(value: str, folder: Path) -> str:
-    """`LATHE_GIT_BRANCH` as Git takes a branch name, or empty for the repository's default branch."""
+    """`MOODY_GIT_BRANCH` as Git takes a branch name, or empty for the repository's default branch."""
     if value:
         try:
             git(["check-ref-format", "--branch", value], folder)
         except GitError:
-            raise Failed(f"LATHE_GIT_BRANCH={value!r} is not a branch name") from None
+            raise Failed(f"MOODY_GIT_BRANCH={value!r} is not a branch name") from None
     return value
 
 
@@ -277,7 +277,7 @@ def configure(clone: Path) -> None:
     session's start and 10 s alone on a new machine, and 0.3 s with this. The
     Volume keeps sizes and modification times to the nanosecond.
     """
-    for key, variable in (("user.name", "LATHE_GIT_NAME"), ("user.email", "LATHE_GIT_EMAIL")):
+    for key, variable in (("user.name", "MOODY_GIT_NAME"), ("user.email", "MOODY_GIT_EMAIL")):
         value = os.environ.get(variable, "").strip()
         if value:
             git(["config", key, value], clone)
@@ -434,7 +434,7 @@ def show_status() -> int:
     try:
         sys.stdout.write(status_file().read_text())
     except FileNotFoundError:
-        if not os.environ.get("LATHE_GIT_REPO"):
+        if not os.environ.get("MOODY_GIT_REPO"):
             print("selkies-modal: this session was not given a repository to clone", file=sys.stderr)
             return 2
         print(json.dumps({"state": "cloning", "path": None, "detail": "waiting for the desktop to start the clone"}))
@@ -448,7 +448,7 @@ def main(arguments: list[str]) -> int:
     if len(arguments) > 1 or arguments[:1] and arguments[0].startswith("-"):
         print(__doc__.split("\n\n")[1], file=sys.stderr)
         return 2
-    repository = os.environ.get("LATHE_GIT_REPO", "").strip()
+    repository = os.environ.get("MOODY_GIT_REPO", "").strip()
     if not repository:
         print("selkies-modal: this session was not given a repository to clone", file=sys.stderr)
         return 2
@@ -461,7 +461,7 @@ def main(arguments: list[str]) -> int:
             checked_repository(repository)
             folder = Path(arguments[0]) if arguments else clone_folder()
             folder.mkdir(parents=True, exist_ok=True)
-            branch = checked_branch(os.environ.get("LATHE_GIT_BRANCH", "").strip(), folder)
+            branch = checked_branch(os.environ.get("MOODY_GIT_BRANCH", "").strip(), folder)
             status.path = folder / repository.split("/")[1]
             if not status.path.exists() or (status.path.is_dir() and not any(status.path.iterdir())):
                 detail = clone(status.path, repository, branch, status)

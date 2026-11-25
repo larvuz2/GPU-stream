@@ -9,7 +9,7 @@
 # machine with GitHub Desktop.
 #
 # A session started for a project linked to a GitHub repository
-# (LATHE_GIT_REPO) clones it in the background as the client opens (clone.py),
+# (MOODY_GIT_REPO) clones it in the background as the client opens (clone.py),
 # with a progress line over the client saying how far it is, and then opens the
 # clone in the client. Where the clone fails, a line says why and to clone by
 # hand instead.
@@ -28,19 +28,19 @@ client_window() {
   timeout 30 xdotool search --sync --onlyvisible --class desktop-plus > /dev/null 2>&1
 }
 
-if [ -n "${LATHE_GIT_REPO-}" ]; then
+if [ -n "${MOODY_GIT_REPO-}" ]; then
   (
     selkies-modal-unreal-clone 2> /dev/null | {
       client_window
       GSK_RENDERER=cairo zenity --progress --pulsate --auto-close --no-cancel --title "Cloning" \
-        --text "Cloning ${LATHE_GIT_REPO}" > /dev/null 2>&1
+        --text "Cloning ${MOODY_GIT_REPO}" > /dev/null 2>&1
     }
     status="$(selkies-modal-unreal-clone --status)"
     if [ "$(printf '%s' "${status}" | jq -r .state)" = "done" ]; then
       exec selkies-modal-unreal-github --cli-open="$(printf '%s' "${status}" | jq -r .path)" > /dev/null 2>&1
     fi
     GSK_RENDERER=cairo zenity --warning --no-markup --width 520 --title "Not cloned" \
-      --text "${LATHE_GIT_REPO} could not be cloned: $(printf '%s' "${status}" | jq -r .detail)
+      --text "${MOODY_GIT_REPO} could not be cloned: $(printf '%s' "${status}" | jq -r .detail)
 
 Sign in to GitHub, then clone it here (File › Clone repository)." > /dev/null 2>&1
   ) &

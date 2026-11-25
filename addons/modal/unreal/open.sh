@@ -29,7 +29,7 @@
 # The editor is Epic's own, in /opt/unreal, started on the project with:
 #
 # - `-RenderOffScreen`: no window, since the GPU cannot present into the
-#   session's display in a Sandbox (lathe/UNREAL.md); "Run the Unreal Engine
+#   session's display in a Sandbox (moody/UNREAL.md); "Run the Unreal Engine
 #   application headless, without any visible rendering at all on the local
 #   computer" (Epic's Pixel Streaming reference).
 # - Editor streaming of the Pixel Streaming 2 plugin, which Epic's "Pixel
@@ -133,12 +133,12 @@ if [ ! -x "${EDITOR_BINARY}" ]; then
 selkies-modal-unreal-open: the Unreal Editor is not installed in this machine yet, so ${name} was not opened.
 
 Epic hands out the Linux editor only to people with an Epic Games account
-linked to GitHub, so Lathe pulls it for you, with your own GitHub account:
+linked to GitHub, so Moody pulls it for you, with your own GitHub account:
 
   1. Link your GitHub account to your Epic Games account, on
      https://www.unrealengine.com/en-US/ue-on-github, and accept the invitation
      to the EpicGames organization that GitHub then emails you.
-  2. In Lathe, connect GitHub again, so that Lathe may read Epic's packages.
+  2. In Moody, connect GitHub again, so that Moody may read Epic's packages.
   3. Start Unreal again. That machine comes with the editor, about 40 GB,
      fetched once for you and kept for your later starts.
 EOF

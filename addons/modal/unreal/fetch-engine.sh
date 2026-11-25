@@ -8,10 +8,10 @@
 #
 #   fetch-engine.sh IMAGE SOURCE_DIRECTORY TARGET_DIRECTORY
 #
-# The Unreal Editor reaches a Lathe image this way: Epic publishes it only in
+# The Unreal Editor reaches a Moody image this way: Epic publishes it only in
 # development images on ghcr.io/epicgames/unreal-engine, which pull with a
 # GitHub token of an account linked to Epic, and its license keeps each user on
-# their own copy (lathe/UNREAL.md). crane streams the image's filesystem
+# their own copy (moody/UNREAL.md). crane streams the image's filesystem
 # straight into tar, so only the directory asked for is written, never the
 # whole image. The credentials come from the build's secret as
 # REGISTRY_USERNAME and REGISTRY_PASSWORD; crane's login goes to a directory
