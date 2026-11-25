@@ -378,6 +378,27 @@ a process the model steers.
   locks in a card names it (`ui_id`, which must be a `ui` event of the
   project) and carries its state (`value`, JSON of at most 64 KiB); the
   model reads them as a line after the person's words.
+- **The agent recommends.** Every decision it puts to the person carries the
+  answer it would give, chosen for the project's taste and brief. A question
+  (`ask_user`) names one of its options as `recommended`. An interactive card
+  that sends an answer back opens on the agent's recommendation: an input that
+  chooses among options says which one is recommended, and an input that sets
+  a value (a slider, a color, an order) starts at the recommended value. The
+  page marks the recommendation with a quiet "(recommended)" and keeps the way
+  back to it one click away, so agreeing is one click and deciding otherwise
+  is never hidden.
+- **A long job ends with a report.** After work of many steps the agent's last
+  message is organized under short headings it chooses for what it has to
+  say (what was done, what there is now, decisions that are the person's,
+  what it needs from them, what it does not know), each a few bullets, the
+  most important first. A short exchange gets a short answer and no headings.
+- **Limits are the person's settings.** What one turn may spend on the model
+  and how many steps it may take are settings of the person's account
+  (`profiles.turn_budget_usd`, `profiles.turn_limit`), which they change in
+  the app. An account that has not set one runs on the deployment's default
+  (`MOODY_TURN_BUDGET_USD`, 15; `MOODY_TURN_LIMIT`, 200), and no account sets
+  one above the deployment's ceiling (`MOODY_TURN_BUDGET_MAX_USD`,
+  `MOODY_TURN_LIMIT_MAX`).
 - **Sessions.** A project's conversation is one SDK session
   (`projects.agent_session`), its transcript stored in the database
   (`agent_transcripts`) through the SDK's session store as the turn writes
@@ -411,6 +432,11 @@ GET    /v1/projects/{pid}/environment      {connectors: [Connector], agents: [Ag
 PATCH  /v1/projects/{pid}                  also {permissions?: {tool: "always"}}: what the person no longer
                                            wants to be asked about, the whole of it; a tool left out is
                                            asked again
+GET    /v1/me                              also {limits: Limits}
+PATCH  /v1/me                              {turn_budget_usd?: number | null, turn_limit?: number | null} -> the
+                                           same as GET /v1/me. `null` puts a limit back on the deployment's
+                                           default; 400 for a value that is not positive or is over the
+                                           deployment's ceiling
 ```
 
 ```text
@@ -420,6 +446,11 @@ Connector    {id, name, kind: "generation" | "repository" | "search" | "license"
               use, or could once the person connects it. The ids are `fal`, `github`, `web`, and,
               in a project whose discipline has Unreal Engine, `epic`; `off` is a service the
               deployment is not configured for
+Limits       {turn_budget_usd, turn_limit, own: {turn_budget_usd: number | null, turn_limit:
+              number | null}, default: {turn_budget_usd, turn_limit}, max: {turn_budget_usd,
+              turn_limit}}: what a turn of this person's may spend on the model, in dollars, and
+              how many steps it may take; `own` is what they set themselves, `null` where they
+              have not, and the two at the top are what applies
 AgentInfo    {name, title, description}: a subagent this project's agent can hand work to
 SkillInfo    {name, description}
 Activity     one of catalog.json's `activities` ids: thinking, searching, processing, analyzing,
@@ -431,6 +462,8 @@ subagent it belongs to, absent for the agent itself.
 
 ```text
 user_message     {text, ui?: {ui_id, value}}
+ask              {question, options: [string], recommended}   `recommended` is the option the agent
+                                            would choose, one of `options`
 text             {text, block?, partial?}   `block` names the block of the answer this is; a later
                                             event with the same `block` replaces it, which is how an
                                             answer appears while it is written (`partial: true`).
