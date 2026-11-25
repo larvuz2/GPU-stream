@@ -15,14 +15,15 @@
 # - The library, `lightcraft-library`: the catalog (`catalog.snap` and the
 #   journal `catalog.log`, which LightCraft appends and syncs before it answers
 #   each change, so nothing waits for a Save), with every photo's develop
-#   settings, history, versions, masks, ratings, and albums, the saved export,
-#   curve, and filter presets, and the preview cache. LightCraft is
-#   non-destructive: an edit is a catalog record, never a change to the photo.
-#   A new library starts empty (`--no-demo`), without LightCraft's 24
-#   procedural demo photos, which would sit among a person's own.
+#   settings, history, versions, masks, ratings, and albums; the user's develop
+#   presets (`presets.json`) and the saved export, curve, and filter presets
+#   (`prefs.json`); and the preview cache. LightCraft is non-destructive: an
+#   edit is a catalog record, never a change to the photo. A new library
+#   starts empty (`--no-demo`), without LightCraft's 24 procedural demo photos,
+#   which would sit among a person's own.
 # - The settings folder, `.lightcraft` (LIGHTCRAFT_CONFIG_DIR): the interface's
-#   state, the user's develop presets (`presets.json`), the lens database once
-#   downloaded, optional models, and the logs.
+#   state (`ui.json`), the lens database once downloaded, optional models, and
+#   the logs.
 #
 # Photos are imported in place (`library.import`, mode `add`) from wherever
 # they are in the project folder, so the originals stay where the project's

@@ -17,19 +17,25 @@
 # after a line it cannot read, which would lose the requests behind it.
 #
 # The first argument is how many seconds to wait, 60 unless given: for
-# LightCraft to listen, which it does once its library is open, and then for
-# each reply. The status is 0 when every request was answered `ok`, 1 when one
-# was refused (its reply says why), 2 for a line that is not a JSON object,
-# which is not sent, and 124 when LightCraft did not answer in time, which ends
-# the run.
+# LightCraft to listen and to draw, and then for each reply. LightCraft listens
+# once its library is open, a few seconds before its window draws its first
+# frame, and answers requests between frames: one that arrives in that gap is
+# refused after 5 s with "the app drew no frame for 5 s, so the request was not
+# run". LightCraft never runs such a request later, so it is sent again until
+# the wait is over, and then printed as the refusal it is.
+#
+# The status is 0 when every request was answered `ok`, 1 when one was refused
+# (its reply says why), 2 for a line that is not a JSON object, which is not
+# sent, and 124 when LightCraft did not answer in time, which ends the run.
 set -u
 
 port="${LIGHTCRAFT_CONTROL_PORT:?the image sets it}"
 wait_seconds="${1:-60}"
 
 # Sends one request and prints the reply. Returns 0 with a reply, 3 while
-# LightCraft does not listen yet, and 124 when a request that was taken got no
-# reply in time.
+# LightCraft does not listen yet, 4 with the reply of a request LightCraft did
+# not run because its window drew no frame, and 124 when a request that was
+# taken got no reply in time.
 send() {
   local reply
   exec 3<> "/dev/tcp/127.0.0.1/${port}" || return 3
@@ -40,6 +46,9 @@ send() {
   fi
   exec 3<&-
   printf '%s\n' "${reply}"
+  case "${reply}" in
+    *'the app drew no frame for 5 s, so the request was not run'*) return 4 ;;
+  esac
 }
 
 status=0
@@ -54,11 +63,11 @@ while IFS= read -r line || [ -n "${line}" ]; do
   while :; do
     reply="$(send "${request}" 2> /dev/null)"
     sent=$?
-    [ "${sent}" -eq 3 ] && [ "${SECONDS}" -lt "${deadline}" ] || break
+    { [ "${sent}" -eq 3 ] || [ "${sent}" -eq 4 ]; } && [ "${SECONDS}" -lt "${deadline}" ] || break
     sleep 0.5
   done
   case "${sent}" in
-    0) ;;
+    0 | 4) ;;
     3)
       echo "selkies-modal: LightCraft is not listening on 127.0.0.1:${port} after ${wait_seconds} s" >&2
       exit 124

@@ -256,7 +256,9 @@ def session_image(app: str = "blender") -> modal.Image:
         if app == "filmcraft":
             image = image.add_local_file(HERE / "filmcraft" / "control.sh", "/usr/local/bin/selkies-modal-filmcraft", copy=True)
         if app == "lightcraft":
-            image = image.add_local_file(HERE / "lightcraft" / "control.sh", "/usr/local/bin/selkies-modal-lightcraft", copy=True)
+            image = image.add_local_file(
+                HERE / "lightcraft" / "control.sh", "/usr/local/bin/selkies-modal-lightcraft", copy=True
+            ).add_local_file(HERE / "lightcraft" / "histogram.py", "/usr/local/bin/selkies-modal-histogram", copy=True)
     elif app == "nuke":
         image = (
             modal.Image.from_registry(BASE_IMAGE)
