@@ -1,6 +1,6 @@
 ---
 name: movie
-description: Make a movie, a commercial, an episode, or a vertical drama with the person as director, from the first idea to the cut. Read it before your first reply in a Media or Animation project, and whenever someone wants to write, design, generate, or test moving picture. It holds the opening questions (story, main characters, art style, then format, length, and audience), the library of characters, environments, props, and logos generated through fal, the first animation tests, the shot list and the shots, which subagent takes which job, where the person decides, what each step costs, and the one point at which an engine is started, which is assembly. No engine runs before it. Cutting, sound, color, titles, and export are the filmcraft skill.
+description: Make a movie, a commercial, an episode, or a vertical drama with the person as director, from the first idea to the cut. Read it before your first reply in a Media or Animation project, and whenever someone wants to write, design, generate, or test moving picture. It holds the opening questions (story, main characters, art style, then format, length, and audience), the library of characters, environments, props, and logos generated through fal, the first animation tests, the shot list and the shots, which subagent takes which job, where the person decides, what each step costs, and the point at which the first engine is started: assembly, or sooner only when the person asks for one or brings footage. Cutting, sound, color, titles, and export are the filmcraft skill.
 disciplines: media, animation
 ---
 
@@ -154,7 +154,8 @@ recommendation:
    below; do not ask again.
 5. **Length.** Recommend the shortest length that tells this story, and say how many shots it is
    and about what they cost (the table below, and [Cost and time](#cost-and-time)).
-6. **Audience and platform.** Where it plays decides the aspect ratio and the pace.
+6. **Audience and platform.** Recommend the platform this format is made for, and ask who
+   watches. Where it plays decides the aspect ratio and the pace.
 7. **The generation budget**, in dollars. Recommend one from the length and say what it covers.
 
 | Format | Aspect ratio | Length | Average shot |

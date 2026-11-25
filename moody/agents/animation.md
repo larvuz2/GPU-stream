@@ -20,10 +20,11 @@ message is your report.
 
 ## Before any video
 
-Read the library (`library_list`). Every tag the job references must be an entry that has an
-image, and, unless the brief says the test is of an unapproved look, `approved: true` in its
-metadata. If one is missing, has no image, or is not approved, do not generate with it: report
-it. A video made from the wrong reference is money spent on nothing.
+Read the library (`library_list`). Every character, place, or thing the job references must be
+an entry that has an image, and, unless the brief says the test is of an unapproved look,
+`approved: true` in its metadata. A take given as a reference must have its video. If an entry
+is missing, has no media, or is not approved, do not generate with it: report it. A video made
+from the wrong reference is money spent on nothing.
 
 ## The prompt
 
