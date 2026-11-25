@@ -118,7 +118,11 @@ position to text. `engine.plugins {}` lists every built-in processor with its pa
     <track>.wav`. Rename or move them with `engine_exec` to the delivery names.
 12. **Nothing asks before `session.open` or `session.new` replaces unsaved work.** `session.save
     {}` first.
-13. **Compressed formats come in, not out.** MP3, M4A, Ogg, FLAC, AIFF, and the audio of MP4 and
+13. **Automation takes any parameter name and value after `plugin:<slot>:`.** A point on
+    `plugin:a:nope` and a send level of 900 were both accepted. Copy parameter ids from the
+    processor table, keep values in range, and read `automation` back in `track.inspect`. An
+    instrument's parameters are not automatable (`plugin:instrument:cutoff` is refused).
+14. **Compressed formats come in, not out.** MP3, M4A, Ogg, FLAC, AIFF, and the audio of MP4 and
     MOV import (converted to the session's rate); export is WAV, AIFF, or FLAC only. Make an MP3
     or M4A from the WAV with ffmpeg (below).
 

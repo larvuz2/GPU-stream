@@ -55,8 +55,8 @@ make the others by taking parts away. Energy comes from contrast:
 - **Register.** Hold back the lowest and highest octaves until the section that should lift.
 - **Rhythm.** Halve the drum pattern for a pre-chorus or a break; drop the kick for the bar
   before a chorus; a fill or a silence in the last half bar announces the change.
-- **Transitions.** A riser is a note or noise whose filter opens over 2-4 bars (automate
-  `plugin:a:lpf_freq`, or the synth's level); a downlifter falls after the hit; a crash (note 49)
+- **Transitions.** A riser is a note or noise whose filter opens over 2-4 bars (automate an
+  `eq_7band` low-pass on its track, `plugin:a:lpf_freq`, and the track's `volume`); a downlifter falls after the hit; a crash (note 49)
   on the first beat of the new section; a reversed tail leading in (`audiosuite.process
   {process: "reverse"}` on a copy of a hit).
 - **One thing at a time.** No more than three or four parts carry attention at once: a rhythm, a
@@ -98,7 +98,8 @@ ear with the person, since you cannot hear them.
 | Mono lead | `osc1_wave: 0, osc2_wave: 1, osc2_detune: 8, cutoff: 3000, resonance: 20, glide: 60, amp_attack: 5, amp_sustain: 85, amp_release: 180` |
 | 808-style bass | `osc1_wave: 2, osc2_wave: 2, osc_mix: 0, cutoff: 800, filter_env_amount: 0, glide: 80, amp_attack: 2, amp_decay: 1500, amp_sustain: 30, amp_release: 300`, with a `saturator {drive: 8}` insert so it is heard on small speakers |
 
-A pad that should move: `chorus` after it, and slow automation of `cutoff`. A dull sound gets
+A pad that should move: `chorus` after it, and slow automation of an `eq_7band` low-pass on its
+track (an instrument's own parameters take no automation). A dull sound gets
 `cutoff` up before it gets EQ; a harsh one gets it down.
 
 ## Harmony and voicing
