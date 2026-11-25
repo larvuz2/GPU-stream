@@ -8,12 +8,15 @@
  * The agent's reasoning, as a quiet note the person can unfold (`thinking` in `moody/STUDIO.md`).
  *
  * It is not the answer and must not read as one: a single small line, folded, that says the agent
- * thought and how the thought begins. While the note is still being written the line follows its
- * latest words instead, so the person sees the reasoning move without it taking the page.
- * Unfolded, it is the whole note, small and muted, beside a lavender rule.
+ * thought and how the thought begins. While the note is still being written the line is the
+ * activity's own label from the catalog and follows the note's latest words instead, so the
+ * person sees the reasoning move without it taking the page; the conversation plays the pixel
+ * eyes beside it ({@link ThinkingEyes}). Unfolded, it is the whole note, small and muted, beside
+ * a lavender rule.
  * @module
  */
 import { ChevronRight, Sparkle } from 'lucide-react';
+import { MoodyEyes } from '../components/MoodyEyes';
 import { Prose } from './Prose';
 import { showActivity } from './activity';
 
@@ -49,6 +52,15 @@ function tail(text: string): string {
   return `…${cut.slice(cut.indexOf(' ') + 1)}`;
 }
 
+/**
+ * Renders the eyes of an agent that is thinking, lavender as the intelligence at work is.
+ *
+ * @returns The eyes.
+ */
+export function ThinkingEyes() {
+  return <MoodyEyes expression={showActivity(THINKING).expression} tone="active" />;
+}
+
 /** Props of {@link ThinkingNote}. */
 interface ThinkingNoteProps {
   /** The reasoning, in the Markdown subset. */
@@ -65,9 +77,9 @@ interface ThinkingNoteProps {
  */
 export function ThinkingNote({ text, streaming }: ThinkingNoteProps) {
   return (
-    <details className="thinking-note">
+    <details className="thinking-note" data-streaming={streaming ? true : undefined}>
       <summary>
-        <Sparkle className="size-3 flex-none" aria-hidden="true" />
+        {streaming ? null : <Sparkle className="size-3 flex-none" aria-hidden="true" />}
         <span className="thinking-label">{streaming ? `${showActivity(THINKING).label}…` : 'Thought'}</span>
         <span className="thinking-preview">{streaming ? tail(text) : head(text)}</span>
         <ChevronRight className="tool-chevron size-3.5 flex-none" aria-hidden="true" />

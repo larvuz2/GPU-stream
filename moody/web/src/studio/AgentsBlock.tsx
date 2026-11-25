@@ -31,7 +31,7 @@ import { cx } from '../lib/cx';
 import { spanText, tokenCount } from '../lib/format';
 import { showActivity } from './activity';
 import { Prose } from './Prose';
-import { ThinkingNote } from './ThinkingNote';
+import { ThinkingEyes, ThinkingNote } from './ThinkingNote';
 import { ToolCard } from './ToolCard';
 import type { Subagent } from './transcript';
 
@@ -210,7 +210,12 @@ function AgentCard({ agent, open, onToggle, tags, onTag }: AgentCardProps) {
                       compact
                     />
                   ) : entry.type === 'thinking' ? (
-                    <ThinkingNote text={entry.text} streaming={entry.streaming} />
+                    <div className="flex items-start gap-2">
+                      {entry.streaming ? <ThinkingEyes /> : null}
+                      <div className="min-w-0 flex-1">
+                        <ThinkingNote text={entry.text} streaming={entry.streaming} />
+                      </div>
+                    </div>
                   ) : (
                     <Prose text={entry.text} tags={tags} onTag={onTag} streaming={entry.streaming} />
                   )}

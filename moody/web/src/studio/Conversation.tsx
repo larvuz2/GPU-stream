@@ -14,6 +14,18 @@
  * its tools produced, inline. A change the agent made to the plan, the library, or an engine reads
  * as a line that leads to it. A message just sent shows at once, dimmed until the log has it.
  *
+ * What the agent reasons is a quiet note that unfolds (`ThinkingNote.tsx`), with the eyes beside
+ * it in the gutter while it is being written, and its answer grows while it is written, ending
+ * in a caret until it is whole. Before a tool that costs or changes
+ * something it asks, as a card with three answers (`ApprovalCard.tsx`), and a turn ends on one
+ * small line of what it took: time, tokens, cost, and subagents.
+ *
+ * An interactive card (`ui`) is drawn by `ui/UiCard.tsx`. This module decides when it can be
+ * answered (it is the newest thing the agent showed, no turn is running, and it is not locked
+ * in), sends its state as the person's next message when they lock it in, and shows it locked
+ * from that moment, before the log has the message. The message itself reads as one compact line
+ * naming the card and what was chosen, never as the state's JSON.
+ *
  * While a turn runs, one line under the newest entry says what the agent is doing right now: the
  * pixel eyes playing the activity, its label from the catalog, and the tool it is running
  * (`agentActivity`). The line is lavender, the color of the intelligence at work, and gives way
@@ -27,33 +39,40 @@
  * The view follows the newest entry while the person is at the bottom, and stays where they are
  * when they have scrolled up to read, offering a way back down instead. It also stays where it is
  * when the person unfolds something (a subagent's card, a tool call): what they opened grows under
- * their pointer rather than being pushed out of view by a jump to the end.
+ * their pointer rather than being pushed out of view by a jump to the end. An approval is the
+ * exception: the agent's turn waits on it, so it comes into view when it arrives, wherever the
+ * person is reading.
  * @module
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowDown, Check, ChevronRight, CircleAlert, ListChecks, MonitorPlay } from 'lucide-react';
+import { ArrowDown, Check, ChevronRight, CircleAlert, ListChecks, Lock, MonitorPlay } from 'lucide-react';
 import { MoodyFace } from '../components/Moody';
 import { MoodyEyes } from '../components/MoodyEyes';
-import type { Asset, PlanItem, Project, Session } from '../lib/api';
+import type { ApprovalDecision, Asset, PlanItem, Project, Session, UiData } from '../lib/api';
 import { findApp, findTier } from '../lib/catalog';
 import { cx } from '../lib/cx';
+import { price, spanText, tokenCount } from '../lib/format';
 import { showActivity } from './activity';
 import { AgentsBlock } from './AgentsBlock';
+import { ApprovalCard } from './ApprovalCard';
 import { ErrorNotice, Notice } from './Notice';
 import { DisciplineIcon } from '../components/DisciplineIcon';
-import { disciplineName } from './present';
+import { disciplineName, valueSummary } from './present';
 import { PreviewCard } from './PreviewCard';
 import { Prose } from './Prose';
+import { ThinkingEyes, ThinkingNote } from './ThinkingNote';
 import { ToolCard } from './ToolCard';
+import { UiCard } from './ui/UiCard';
 import {
   agentActivity,
   buildTranscript,
   foldPreviews,
   openQuestion,
   type Activity,
+  type Locked,
   type TranscriptItem,
 } from './transcript';
-import type { ProjectData } from './useProject';
+import type { PendingMessage, ProjectData } from './useProject';
 
 /** How close to the bottom, in pixels, still counts as following the conversation. */
 const FOLLOW_SLACK_PX = 96;
@@ -84,6 +103,10 @@ interface ConversationProps {
   onShowPlan: () => void;
   /** Sends a choice the agent offered. */
   onChoose: (text: string) => Promise<void>;
+  /** Answers an approval the running turn waits on. */
+  onApprove: (approvalId: string, decision: ApprovalDecision) => Promise<void>;
+  /** Locks an interactive card in with its state, as the person's next message. */
+  onLock: (ui: UiData, value: unknown) => Promise<void>;
   /** Puts a suggestion in the composer. */
   onSuggest: (text: string) => void;
 }
@@ -113,6 +136,19 @@ export function Conversation(props: ConversationProps) {
       element.scrollTop = element.scrollHeight;
     }
   }, [items, data.pending, activity, following]);
+
+  const waiting = useMemo(
+    () => items.findLast((item) => item.type === 'approval' && item.outcome === null)?.key ?? null,
+    [items],
+  );
+  const [shownWaiting, setShownWaiting] = useState<string | null>(null);
+  if (waiting !== shownWaiting) {
+    setShownWaiting(waiting);
+    if (waiting !== null) {
+      // Following again brings the conversation's end, where the approval is, into view.
+      setFollowing(true);
+    }
+  }
 
   // The view keeps to the bottom when its height changes too: focus mode resizing it, or an image
   // loading above the newest entry.
@@ -204,12 +240,14 @@ export function Conversation(props: ConversationProps) {
                   <Entry key={item.key} item={item} open={item === question} {...props} />
                 );
               })}
-              {data.pending === null ? null : (
+              {data.pending === null ? null : data.pending.ui === undefined ? (
                 <li className="mt-5">
                   <div className="message-user" data-pending="true">
                     {data.pending.text}
                   </div>
                 </li>
+              ) : (
+                <LockLine title={lockedTitle(items, data.pending)} value={data.pending.ui.value} pending />
               )}
               {activity === null ? null : <ActivityLine activity={activity} />}
             </ol>
@@ -258,6 +296,121 @@ function ActivityLine({ activity }: ActivityLineProps) {
       </span>
       <span className="text-lavender">{shown.label}…</span>
       {activity.detail === null ? null : <span className="min-w-0 truncate text-faint">{activity.detail}</span>}
+    </li>
+  );
+}
+
+/**
+ * The title of the card a message just sent locks in.
+ *
+ * @param items The conversation.
+ * @param pending The message.
+ * @returns The card's title, or `null` where the conversation holds no such card.
+ */
+function lockedTitle(items: readonly TranscriptItem[], pending: PendingMessage): string | null {
+  const card = items.find((item) => item.type === 'ui' && item.ui.ui_id === pending.ui?.ui_id);
+  return card?.type === 'ui' ? card.ui.title : null;
+}
+
+/** Props of {@link LockLine}. */
+interface LockLineProps {
+  /** The title of the card that was locked in, or `null` where the log does not hold the card. */
+  title: string | null;
+  /** The card's state, as the person left it. */
+  value: unknown;
+  /** Whether the message is sent but not in the log yet. */
+  pending?: boolean;
+}
+
+/**
+ * Renders the person's message that locked an interactive card in, as one compact line.
+ *
+ * @param props The component's props.
+ * @returns The list item.
+ */
+function LockLine({ title, value, pending = false }: LockLineProps) {
+  const summary = valueSummary(value);
+  return (
+    <li className="mt-5 first:mt-0">
+      <div className="lock-line" data-pending={pending ? true : undefined}>
+        <Lock className="size-3.5 flex-none text-lime" aria-hidden="true" />
+        <span className="flex-none">
+          Locked in{title === null ? '' : ' '}
+          {title === null ? null : <span className="font-medium text-fg">{title}</span>}
+        </span>
+        {summary === '' ? null : <span className="min-w-0 truncate text-faint">{summary}</span>}
+      </div>
+    </li>
+  );
+}
+
+/** Props of {@link UiEntry}. */
+interface UiEntryProps {
+  /** The card. */
+  ui: UiData;
+  /** What the person locked in, as the log or a message just sent has it, or `null`. */
+  locked: Locked | null;
+  /** Whether the card can be answered now. */
+  live: boolean;
+  /** Locks the card in. */
+  onLock: (ui: UiData, value: unknown) => Promise<void>;
+}
+
+/**
+ * Renders an interactive card, and what locking it in failed with, if it did.
+ *
+ * @param props The component's props.
+ * @returns The card.
+ */
+function UiEntry({ ui, locked, live, onLock }: UiEntryProps) {
+  const [error, setError] = useState<unknown>(null);
+  return (
+    <>
+      <UiCard
+        ui={ui}
+        locked={locked}
+        live={live}
+        onSubmit={(value) => {
+          setError(null);
+          onLock(ui, value).catch((failure: unknown) => {
+            setError(failure);
+          });
+        }}
+      />
+      {error === null ? null : (
+        <div className="mt-2">
+          <ErrorNotice error={error} />
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Props of {@link UsageLine}. */
+interface UsageLineProps {
+  /** What the turn took. */
+  usage: Extract<TranscriptItem, { type: 'usage' }>;
+}
+
+/**
+ * Renders what a turn took, as one line of small print at its end.
+ *
+ * @param props The component's props.
+ * @returns The list item.
+ */
+function UsageLine({ usage }: UsageLineProps) {
+  const tokens = usage.inputTokens + usage.outputTokens;
+  const parts = [
+    spanText(usage.seconds * 1000),
+    `${tokenCount(tokens)} tokens`,
+    price(usage.costUsd),
+    usage.agents === 0 ? null : `${usage.agents} ${usage.agents === 1 ? 'subagent' : 'subagents'}`,
+  ].filter((part) => part !== null);
+  return (
+    <li className="usage-line pl-10">
+      <span title={`${tokenCount(usage.inputTokens)} tokens read, ${tokenCount(usage.outputTokens)} written`}>
+        {parts.join(' · ')}
+      </span>
     </li>
   );
 }
@@ -342,20 +495,59 @@ function Entry({
   onShowEngine,
   onShowPlan,
   onChoose,
+  onApprove,
+  onLock,
 }: EntryProps) {
   switch (item.type) {
     case 'user':
-      return (
+      return item.lock === null ? (
         <li className="mt-5 first:mt-0">
           <div className="message-user">{item.text}</div>
         </li>
+      ) : (
+        <LockLine title={item.lock.title} value={item.lock.value} />
       );
     case 'agent':
       return (
         <AgentRow first={item.first}>
-          <Prose text={item.text} tags={tags} onTag={onTag} />
+          <Prose text={item.text} tags={tags} onTag={onTag} streaming={item.streaming} />
         </AgentRow>
       );
+    case 'thinking':
+      return (
+        <AgentRow first={item.first} mark={item.streaming ? <ThinkingEyes /> : undefined}>
+          <ThinkingNote text={item.text} streaming={item.streaming} />
+        </AgentRow>
+      );
+    case 'approval':
+      return (
+        <AgentRow first={item.first}>
+          <ApprovalCard
+            title={item.title}
+            detail={item.detail}
+            tool={item.tool}
+            outcome={item.outcome}
+            live={canSend && data.running}
+            onDecide={(decision) => onApprove(item.approvalId, decision)}
+          />
+        </AgentRow>
+      );
+    case 'ui': {
+      const sent = data.pending?.ui?.ui_id === item.ui.ui_id ? { value: data.pending.ui.value } : null;
+      const locked = item.locked ?? sent;
+      return (
+        <AgentRow first={item.first}>
+          <UiEntry
+            ui={item.ui}
+            locked={locked}
+            live={item.current && locked === null && canSend && !data.running}
+            onLock={onLock}
+          />
+        </AgentRow>
+      );
+    }
+    case 'usage':
+      return <UsageLine usage={item} />;
     case 'tool':
       return (
         <AgentRow first={item.first}>
@@ -412,6 +604,8 @@ function Entry({
 interface AgentRowProps {
   /** Whether it starts a run of the agent's entries, which shows its mark. */
   first: boolean;
+  /** What stands in the gutter instead of the mark: the eyes, for an entry still under way. */
+  mark?: ReactNode;
   /** The entry. */
   children: ReactNode;
 }
@@ -422,16 +616,20 @@ interface AgentRowProps {
  * @param props The component's props.
  * @returns The list item.
  */
-function AgentRow({ first, children }: AgentRowProps) {
+function AgentRow({ first, mark, children }: AgentRowProps) {
   return (
     <li className={cx('flex gap-3', first && 'mt-5 first:mt-0')}>
-      <span className="w-7 flex-none pt-0.5">
-        {first ? (
-          <span className="agent-mark" title="Agent">
-            <MoodyFace className="h-6" />
-          </span>
-        ) : null}
-      </span>
+      {mark === undefined ? (
+        <span className="w-7 flex-none pt-0.5">
+          {first ? (
+            <span className="agent-mark" title="Agent">
+              <MoodyFace className="h-6" />
+            </span>
+          ) : null}
+        </span>
+      ) : (
+        <span className="flex w-7 flex-none justify-center">{mark}</span>
+      )}
       <div className="min-w-0 flex-1">{children}</div>
     </li>
   );

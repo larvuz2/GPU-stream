@@ -659,8 +659,8 @@ export interface Activity {
  *
  * A tool it is running says so, the latest one where several run at once; with none running it
  * is thinking, which is also what it does between two steps. There is nothing to say while
- * something else on screen already says it: an approval waiting for the person, the answer being
- * written, or subagents still at work, whose block counts them.
+ * something else on screen already says it: an approval waiting for the person, the answer or a
+ * note of its reasoning being written, or subagents still at work, whose block counts them.
  *
  * @param items The conversation.
  * @returns The activity, or `null` while another entry shows what is going on.
@@ -675,7 +675,7 @@ export function agentActivity(items: readonly TranscriptItem[]): Activity | null
     return { activity: running.activity, detail: running.title };
   }
   const last = since.at(-1);
-  if (last?.type === 'agent' && last.streaming) {
+  if ((last?.type === 'agent' || last?.type === 'thinking') && last.streaming) {
     return null;
   }
   if (since.some((item) => item.type === 'agents' && item.agents.some((agent) => agent.state === 'working'))) {

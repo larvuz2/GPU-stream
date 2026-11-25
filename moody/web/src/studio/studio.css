@@ -1009,6 +1009,11 @@
     visibility: hidden;
   }
 
+  /* A note still being written reads at the size of the line that says what the agent is doing. */
+  .thinking-note[data-streaming] {
+    font-size: 0.875rem;
+  }
+
   .thinking-note[open] .tool-chevron {
     transform: rotate(90deg);
   }
@@ -1023,6 +1028,34 @@
     color: var(--color-muted);
     font-size: 0.8125rem;
     line-height: 1.6;
+  }
+
+  /* The person's message that locked an interactive card in: one compact line, on their side. */
+  .lock-line {
+    display: flex;
+    width: fit-content;
+    max-width: min(36rem, 85%);
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.6rem 0.6rem 0.15rem 0.6rem;
+    background: var(--color-ink-700);
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+  }
+
+  .lock-line[data-pending] {
+    opacity: 0.7;
+  }
+
+  /* What a turn took: small print under its last entry. */
+  .usage-line {
+    color: var(--color-faint);
+    font-size: 0.6875rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
   }
 
   /* The agent at work: its eyes, what they are doing, and the tool it is running. */
