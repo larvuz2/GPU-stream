@@ -126,6 +126,8 @@ MEGABYTE = 1024 * 1024
 MEDIA_LIMIT_BYTES = 200 * MEGABYTE
 # The folder of a project's files in the bucket that holds the agent's previews, which are not library entries
 PREVIEWS = "previews"
+# The events that carry files, by kind, and the field of each that lists them by their paths in the bucket
+SIGNED_FILES = {"preview": "items", "ui": "media"}
 MESSAGE_LIMIT = 20000
 PROJECT_FIELDS = (
     "id",
@@ -1367,25 +1369,26 @@ class Sessions:
         return {"events": self.shown_events(rows), "running": self.turn_running(project)}
 
     def shown_events(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Events as the API shows them, each `preview`'s files under links signed for this reading.
+        """Events as the API shows them, each `preview`'s and each `ui` card's files under links signed for this reading.
 
-        A preview is kept in the log by its files' paths in the bucket, never by a link: a link
-        expires within the hour, and work in progress is what a person scrolls back to the next
-        day. So each page of events is signed as it is read, in one request for all of its
-        previews, and a file that is gone is left out of its preview.
+        A preview and an interactive card are kept in the log by their files' paths in the
+        bucket, never by a link: a link expires within the hour, and what the agent showed is what
+        a person scrolls back to the next day. So each page of events is signed as it is read, in
+        one request for all of its files, and a file that is gone is left out of its event.
         """
-        paths = [item["path"] for row in rows if row["kind"] == "preview" for item in row["data"].get("items", [])]
+        files = {row["id"]: row["data"].get(SIGNED_FILES[row["kind"]], []) for row in rows if row["kind"] in SIGNED_FILES}
+        paths = [item["path"] for items in files.values() for item in items]
         links = self.store.sign(LIBRARY_BUCKET, paths, SIGNED_URL_SECONDS) if paths else {}
         shown = []
         for row in rows:
             event = self.public_event(row)
-            if row["kind"] == "preview":
+            if row["id"] in files:
                 items = [
                     {**{key: value for key, value in item.items() if key != "path"}, "url": links[item["path"]]}
-                    for item in row["data"].get("items", [])
+                    for item in files[row["id"]]
                     if item["path"] in links
                 ]
-                event["data"] = {**row["data"], "items": items}
+                event["data"] = {**row["data"], SIGNED_FILES[row["kind"]]: items}
             shown.append(event)
         return shown
 

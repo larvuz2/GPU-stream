@@ -213,6 +213,12 @@ def nearest(name: Any, known: list[str]) -> str:
     return f' Did you mean "{close[0]}"?' if close else ""
 
 
+def stored_kind(catalog: UiCatalog, item: dict[str, Any]) -> str:
+    """What a library entry's file is to a card: what its name's ending says, else what the library holds it as."""
+    named = catalog.kind_of(item.get("name", ""))
+    return named if named != "file" else item.get("kind", "file")
+
+
 def key(value: Any) -> str:
     """A value as it compares to another: by its JSON, so 1, true, and "1" stay three values."""
     return json.dumps(value, sort_keys=True)

@@ -8,19 +8,54 @@ here is that the two cannot drift: every kind of property the catalog uses has
 a check, a card that uses every component passes, and the tool's reference
 names all of them. The check is held by what it tells the model, since a
 refusal is only worth as much as what it lets the model fix: each case is a
-card with one mistake and the words its problem has to carry. Run with
-`pytest moody/control`.
+card with one mistake and the words its problem has to carry.
+
+The tool is called as a turn calls it, over the fakes of `test_api.py`: a
+card's files are the project's own and are signed at each reading of the log,
+a card that is not valid costs no read of any file, and one that waits says
+the turn ends. The cards skill is held to the catalog too: every call it
+writes out passes the check. Run with `pytest moody/control`.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import re
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
+from agent import (
+    TOOL_NAMES,
+    TOOLS,
+    Agent,
+    Turn,
+    read_skills,
+    skills_directory,
+    skills_for,
+)
+from api import create_app
 from genui import ID, Check, Invalid, MediaRequest, card, catalog, media_requests
+from service import Refused, Sessions
+from test_api import (
+    ALICE,
+    PNG,
+    FakeLauncher,
+    FakeStore,
+    InlineJobs,
+    ScriptedModel,
+    auth,
+    config,
+    events,
+    new_project,
+    probe,
+    start_engine,
+)
+from test_api import CATALOG as PRODUCTS
 
 CATALOG = catalog()
 # The files the sample card carries, by name, each with its kind
@@ -766,3 +801,411 @@ def test_the_tools_reference_is_written_from_the_catalog():
     for name, spec in CATALOG.adjustments.items():
         assert f"{name} {spec['min']}..{spec['max']}" in reference
     assert "finishes: original, clay, metal, gloss, wire." in reference
+
+
+# The tool, over the service with every outside party stood in for (`test_api.py`'s fakes)
+
+
+@pytest.fixture
+def stage() -> SimpleNamespace:
+    """A project's backend with an agent whose tools are called directly, as a turn would call them."""
+    store, launcher, jobs = FakeStore(), FakeLauncher(), InlineJobs()
+    sessions = Sessions(
+        config(anthropic_key="sk-ant-test"), PRODUCTS, store, launcher, jobs
+    )
+    jobs.sessions = sessions
+    agent = Agent(sessions, ScriptedModel(), None, [])
+    with TestClient(create_app(sessions, sessions.config, PRODUCTS)) as client:
+        yield SimpleNamespace(
+            client=client,
+            sessions=sessions,
+            store=store,
+            launcher=launcher,
+            agent=agent,
+        )
+
+
+def turn_of(stage: SimpleNamespace, project_id: str) -> Turn:
+    """A turn of a project, as the worker that runs one would hold it."""
+    row = stage.store.rows("projects", id=f"eq.{project_id}")[0]
+    return Turn(stage.sessions, row, "turn-card", 3600)
+
+
+def library_entry(
+    stage: SimpleNamespace,
+    project_id: str,
+    name: str,
+    files: list[tuple[str, bytes, str]],
+) -> dict[str, Any]:
+    """A library entry tagged with its name, holding these files, the last one newest."""
+    base = f"/v1/projects/{project_id}/library"
+    entry = stage.client.post(
+        base,
+        headers=auth("alice-token"),
+        json={"section": "Characters", "name": name, "tag": name},
+    ).json()["asset"]
+    for file in files:
+        posted = stage.client.post(
+            f"{base}/{entry['id']}/media",
+            headers=auth("alice-token"),
+            files={"file": file},
+        )
+        assert posted.status_code == 200, posted.text
+    return entry
+
+
+def cards(stage: SimpleNamespace, project_id: str) -> list[dict[str, Any]]:
+    """The cards the page is shown, in order."""
+    log = events(stage.client, project_id)["events"]
+    return [event["data"] for event in log if event["kind"] == "ui"]
+
+
+LOOK = {
+    "type": "stack",
+    "children": [
+        {
+            "type": "compare",
+            "before": "shot",
+            "after": "shot",
+            "adjust": {"warmth": "$warmth"},
+        },
+        {"type": "image", "src": "mara"},
+        {"type": "slider", "id": "warmth", "label": "Warmth", "min": -100, "max": 100},
+    ],
+}
+
+
+def test_show_ui_is_a_tool_whose_definition_carries_the_catalog():
+    definition = next(tool for tool in TOOLS if tool["name"] == "show_ui")
+    schema = definition["input_schema"]
+    assert schema["required"] == ["title"]
+    assert set(schema["properties"]) == {
+        "title",
+        "components",
+        "html",
+        "submit",
+        "waits",
+        "media",
+        "height",
+    }
+    assert schema["properties"]["components"]["description"] == CATALOG.reference()
+    assert "moody.setState" in schema["properties"]["html"]["description"]
+    assert str(CATALOG.limits["media"]) in schema["properties"]["media"]["description"]
+
+
+def test_a_card_shows_library_and_engine_files_under_links_signed_at_each_reading(
+    stage,
+):
+    client, store, launcher, agent = (
+        stage.client,
+        stage.store,
+        stage.launcher,
+        stage.agent,
+    )
+    film = new_project(client)
+    library_entry(
+        stage,
+        film["id"],
+        "Mara",
+        [("mara.png", b"\x89PNG mara", "image/png"), ("walk.mp4", b"mp4", "video/mp4")],
+    )
+    engine = start_engine(stage, film["id"])
+    launcher.answers.append(probe("previews/shot03.png", 240_000, PNG))
+    turn = turn_of(stage, film["id"])
+
+    result = agent.tool_show_ui(
+        turn,
+        title="The look of shot 3",
+        components=LOOK,
+        submit="Lock in this look",
+        waits=True,
+        media=[
+            {"tag": "@mara"},
+            {"name": "shot", "engine_id": engine["id"], "path": "previews/shot03.png"},
+        ],
+    )
+    assert result.ok and result.ends_turn is True
+    assert result.summary == "Showed The look of shot 3"
+    told = json.loads(result.content)
+    assert told["kind"] == "components" and told["files"] == ["mara", "shot"]
+    assert told["answers_with"] == {"warmth": "slider: a number"}
+    assert "Your turn ends here" in told["note"]
+
+    (kept,) = [
+        row["data"]
+        for row in store.tables["project_events"].values()
+        if row["kind"] == "ui"
+    ]
+    folder = f"{ALICE.id}/{film['id']}"
+    assert [(file["name"], file["kind"]) for file in kept["media"]] == [
+        ("mara", "image"),
+        ("shot", "image"),
+    ]
+    entry_file, engine_file = (file["path"] for file in kept["media"])
+    assert entry_file.endswith("-mara.png") and "/previews/" not in entry_file
+    assert engine_file.startswith(f"{folder}/previews/") and engine_file.endswith(
+        "-shot03.png"
+    )
+    assert store.files[engine_file] == (b"bytes of shot03.png", "image/png")
+    assert all("url" not in file for file in kept["media"]), (
+        "the log keeps paths, never links"
+    )
+
+    (shown,) = cards(stage, film["id"])
+    assert shown["ui_id"] == told["ui_id"] and shown["spec"] == LOOK
+    assert (shown["submit"], shown["waits"]) == ("Lock in this look", True)
+    assert [set(file) for file in shown["media"]] == [{"name", "kind", "url"}] * 2
+    for file, path in zip(shown["media"], (entry_file, engine_file)):
+        assert file["url"] == f"https://storage.example.test/{path}?token=signed"
+
+    # A file that is gone is left out of the card, which then shows its placeholder
+    del store.files[engine_file]
+    assert [file["name"] for file in cards(stage, film["id"])[0]["media"]] == ["mara"]
+    assert any(
+        "rm -rf /tmp/moody-preview/" in command for _, command in launcher.commands
+    )
+
+
+def test_a_card_that_is_not_valid_is_refused_before_any_file_is_read(stage):
+    client, store, launcher, agent = (
+        stage.client,
+        stage.store,
+        stage.launcher,
+        stage.agent,
+    )
+    film = new_project(client)
+    library_entry(stage, film["id"], "Mara", [("mara.png", b"\x89PNG", "image/png")])
+    engine = start_engine(stage, film["id"])
+    turn = turn_of(stage, film["id"])
+    files = [
+        {"tag": "@mara"},
+        {"name": "shot", "engine_id": engine["id"], "path": "previews/shot03.png"},
+    ]
+    commands = len(launcher.commands)
+
+    wrong = copy.deepcopy(LOOK)
+    wrong["children"][2]["labels"] = "Warmth"
+    wrong["children"][1]["src"] = "shot03"
+    with pytest.raises(Refused) as refused:
+        agent.tool_show_ui(
+            turn, title="The look", components=wrong, submit="Lock in", media=files
+        )
+    assert refused.value.status == 400
+    message = refused.value.message
+    assert message.startswith(
+        "The card was not shown. Fix this and call show_ui again:"
+    )
+    assert '(slider) has no property "labels". Did you mean "label"?' in message
+    assert (
+        '(image).src names the media "shot03"' in message
+        and "Its media are: mara, shot." in message
+    )
+    assert launcher.reads == [] and len(launcher.commands) == commands, (
+        "no file was read to say so"
+    )
+    assert cards(stage, film["id"]) == [] and not any(
+        "/previews/" in path for path in store.files
+    )
+
+    with pytest.raises(Refused, match="media\\[0\\] should name one file"):
+        agent.tool_show_ui(
+            turn, title="The look", components=LOOK, media=[{"name": "shot"}]
+        )
+    with pytest.raises(
+        Refused, match='needs an image, but the media "shot" is a video'
+    ):
+        clip = [
+            {"tag": "@mara"},
+            {"name": "shot", "engine_id": engine["id"], "path": "previews/cut.mp4"},
+        ]
+        agent.tool_show_ui(turn, title="The look", components=LOOK, media=clip)
+    assert launcher.reads == []
+
+
+def test_a_cards_files_are_only_the_projects_own(stage):
+    client, agent = stage.client, stage.agent
+    film = new_project(client)
+    other = new_project(client, token="bob-token")
+    library_entry(stage, film["id"], "Mara", [("walk.mp4", b"mp4", "video/mp4")])
+    library_entry(stage, film["id"], "Theo", [])
+    theirs = start_engine(stage, other["id"], token="bob-token")
+    turn = turn_of(stage, film["id"])
+    picture = {"type": "image", "src": "shot"}
+
+    def refused(
+        media: list[dict[str, Any]], components: dict[str, Any] = picture
+    ) -> Refused:
+        with pytest.raises(Refused) as raised:
+            agent.tool_show_ui(
+                turn, title="A frame", components=components, media=media
+            )
+        return raised.value
+
+    assert refused([{"name": "shot", "tag": "@iris"}]).status == 404
+    assert (
+        "@theo has no file yet" in refused([{"name": "shot", "tag": "@theo"}]).message
+    )
+    assert (
+        "@mara has no image yet"
+        in refused([{"name": "shot", "tag": "@mara", "kind": "image"}]).message
+    )
+    engine_file = {
+        "name": "shot",
+        "engine_id": theirs["id"],
+        "path": "previews/frame.png",
+    }
+    assert refused([engine_file]).status == 404, (
+        "another user's engine does not exist for this project"
+    )
+    mine = start_engine(stage, film["id"])
+    outside = {"name": "shot", "engine_id": mine["id"], "path": "../../other/frame.png"}
+    assert "outside the project's folder" in refused([outside]).message
+    # An entry with no picture gives the file it has, which the card's component may not take
+    assert (
+        'needs an image, but the media "shot" is a video'
+        in refused([{"name": "shot", "tag": "@mara"}]).message
+    )
+    assert cards(stage, film["id"]) == []
+
+
+def test_an_html_card_carries_its_document_and_a_model_file_is_stored_as_it_is(stage):
+    client, launcher, agent = stage.client, stage.launcher, stage.agent
+    film = new_project(client)
+    engine = start_engine(stage, film["id"], app="blender")
+    launcher.answers.append(
+        probe(
+            "handoff/blender-to-moody/pip.glb", 130_000, {"streams": [], "format": {}}
+        )
+    )
+    turn = turn_of(stage, film["id"])
+    page = "<canvas id=c></canvas><script>c.onclick = () => moody.setState({taps: 1})</script>"
+
+    result = agent.tool_show_ui(
+        turn,
+        title="Pip, turning",
+        html=page,
+        submit="Keep this",
+        height=300,
+        media=[{"engine_id": engine["id"], "path": "handoff/blender-to-moody/pip.glb"}],
+    )
+    assert (
+        result.ends_turn is False
+        and "Go on meanwhile" in json.loads(result.content)["note"]
+    )
+    (shown,) = cards(stage, film["id"])
+    assert (shown["kind"], shown["html"], shown["height"], shown["waits"]) == (
+        "html",
+        page,
+        300,
+        False,
+    )
+    assert "spec" not in shown
+    (model,) = shown["media"]
+    assert (model["name"], model["kind"]) == ("pip", "model") and model["url"].endswith(
+        "-pip.glb?token=signed"
+    )
+    commands = [command for _, command in launcher.commands]
+    assert not any(
+        " -c:v " in command or " -c:a " in command for command in commands
+    ), "a model is not re-encoded"
+
+    plain = agent.tool_show_ui(
+        turn,
+        title="A model to turn",
+        components={"type": "model", "src": "pip"},
+        media=[{"engine_id": engine["id"], "path": "handoff/blender-to-moody/pip.glb"}],
+    )
+    assert (
+        "no lock-in button" in json.loads(plain.content)["note"]
+        and plain.ends_turn is False
+    )
+    with pytest.raises(Refused, match="never calls moody.setState or moody.submit"):
+        agent.tool_show_ui(
+            turn, title="Nothing to send", html="<p>Hello</p>", submit="Keep this"
+        )
+
+
+def test_a_card_is_titled_for_the_page_by_what_it_shows(stage):
+    film = new_project(stage.client)
+    turn = turn_of(stage, film["id"])
+    assert (
+        stage.agent.title(turn, "show_ui", {"title": "The look of shot 3"})
+        == "Showing The look of shot 3"
+    )
+    assert stage.agent.title(turn, "show_ui", {}) == "Showing a card"
+
+
+def test_the_deployed_image_carries_the_catalog_and_the_module_that_reads_it():
+    source = (Path(__file__).resolve().parent / "app.py").read_text()
+    assert '"genui.py"' in source and '"/root/ui.json"' in source
+
+
+# The skill
+
+
+def skill_examples() -> list[dict[str, Any]]:
+    """Every `show_ui` call the cards skill writes out in full."""
+    text = (skills_directory() / "cards" / "SKILL.md").read_text()
+    return [
+        json.loads(block)
+        for block in re.findall(r"```json\n(.*?)```", text, flags=re.DOTALL)
+    ]
+
+
+def test_the_cards_skill_is_read_for_every_project_and_names_only_what_exists():
+    skills = read_skills(skills_directory())
+    skill = next(skill for skill in skills if skill.name == "cards")
+    for discipline in PRODUCTS.disciplines:
+        assert "cards" in [
+            one.name for one in skills_for(skills, PRODUCTS, discipline)
+        ], discipline
+    named = set(
+        re.findall(
+            r"`(show_ui|ask_user|preview|update_plan|(?:engine|library|generate)_[a-z_]+)`",
+            skill.body,
+        )
+    )
+    assert {"show_ui", "ask_user", "preview"} <= named and named <= set(TOOL_NAMES)
+    typed = set(re.findall(r'"type": "([a-z]+)"', skill.body))
+    assert typed <= set(CATALOG.components), typed - set(CATALOG.components)
+    assert {
+        "compare",
+        "slider",
+        "pick",
+        "tabs",
+        "reorder",
+        "layers",
+        "model",
+        "table",
+        "chart",
+        "audio",
+    } <= typed | set(re.findall(r"`([a-z]+)`", skill.body))
+    limits = CATALOG.limits
+    for number in ("nodes", "depth", "spec_bytes", "list_items", "media", "html_bytes"):
+        assert f"{limits[number]:,}" in skill.body, (
+            f"the skill states the catalog's {number}"
+        )
+
+
+def test_every_card_the_cards_skill_writes_out_passes_the_check():
+    examples = skill_examples()
+    assert len(examples) == 4 and sum("html" in example for example in examples) == 1
+    for example in examples:
+        asked = media_requests(CATALOG, example.get("media", []))
+        files = {
+            one.name: one.kind or (CATALOG.kind_of(one.path) if one.path else "image")
+            for one in asked
+        }
+        data, inputs = card(
+            CATALOG,
+            "ui-skill",
+            example["title"],
+            example.get("components"),
+            example.get("html"),
+            example.get("submit"),
+            example.get("waits", False),
+            example.get("height"),
+            files,
+        )
+        assert data["submit"] and data["waits"] is True
+        assert inputs or data["kind"] == "html", example["title"]
