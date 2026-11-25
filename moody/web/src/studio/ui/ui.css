@@ -181,9 +181,11 @@
   }
 
   /* Frames and pictures */
+  /* A figure beside a taller neighbor keeps its frame the size of its picture, the spare room under its caption. */
   .ui-figure {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
+    align-content: start;
     gap: 0.35rem;
     min-width: 0;
   }

@@ -18,11 +18,12 @@
  *
  * `DRAW` has one entry per adjustment of the catalog and fails to compile while one is missing.
  * An amount outside its range is clamped to it, and one that is not a number counts as the
- * adjustment's default, so a look never breaks on a value an input does not hold yet.
+ * adjustment's default, so a look never breaks on a value an input does not hold yet. The
+ * adjustments are applied in the catalog's order, so a look is the same however a card lists them.
  * @module
  */
 import { isNumber, isRecord } from '../../lib/narrow';
-import { CATALOG, isAdjustmentName, type AdjustmentName } from './catalog';
+import { ADJUSTMENT_NAMES, CATALOG, isAdjustmentName, type AdjustmentName } from './catalog';
 import { follow, type UiState } from './tree';
 import { clamp } from './values';
 
@@ -106,12 +107,13 @@ export function lookOf(adjust: unknown, state: UiState): Look {
   if (!isRecord(adjust)) {
     return look;
   }
-  for (const [name, given] of Object.entries(adjust)) {
+  // In the catalog's order, whatever order the card wrote them in: the order filters are applied in shows.
+  for (const name of ADJUSTMENT_NAMES) {
     const spec = CATALOG.adjustments[name];
-    if (spec === undefined || !isAdjustmentName(name)) {
+    if (spec === undefined || !isAdjustmentName(name) || !(name in adjust)) {
       continue;
     }
-    const amount = follow(given, state);
+    const amount = follow(adjust[name], state);
     const within = clamp(isNumber(amount) ? amount : spec.default, spec.min, spec.max);
     if (within !== spec.default) {
       DRAW[name](within, look);
