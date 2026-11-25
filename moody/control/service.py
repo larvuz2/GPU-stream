@@ -492,11 +492,14 @@ class Launcher(Protocol):
     def exec(self, sandbox_id: str, command: str, timeout: int) -> tuple[int, str]:
         """Run a shell command in the session's environment, as its user, and return its status and output."""
 
-    def filmcraft(self, sandbox_id: str, method: str, params: dict[str, Any] | None) -> dict[str, Any]:
-        """Call a method of FilmCraft's command channel in the session and return its answer.
+    def has_channel(self, app: str) -> bool:
+        """Whether engines of this app have a command channel, which `engine_call` reaches."""
+
+    def engine_call(self, sandbox_id: str, app: str, method: str, params: dict[str, Any] | None) -> dict[str, Any]:
+        """Call a method of the app's command channel in the session and return its answer.
 
         Raises:
-            RuntimeError: FilmCraft refused the call or did not answer, with why.
+            RuntimeError: The app refused the call or did not answer, or it has no command channel, with why.
         """
 
 
