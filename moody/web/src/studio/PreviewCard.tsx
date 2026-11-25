@@ -16,7 +16,9 @@
  * A long turn can show many previews, and each address is a signed one fetched on demand, so the
  * card stays light. A picture loads lazily. Sound and video are given their address only once
  * the card is near the view ({@link useNearView}), and then only their metadata is fetched: the
- * first frame and the length, never the file, until the person plays it. Nothing autoplays.
+ * first frame and the length, never the file, until the person plays it. Nothing autoplays. A
+ * file that fails to load says so quietly; its address is its identity here, so one the log later
+ * returns under a fresh address is loaded again.
  *
  * A pair of pictures is compared under one slider: the "after" picture lies under the "before",
  * which is clipped at the handle. The slider is a native range input laid over the pair, so it
@@ -124,14 +126,14 @@ export function PreviewCard({ caption, files, compare, engine }: PreviewCardProp
       {files.length === 0 ? (
         <Gone name="This preview" />
       ) : pair && before.kind === 'image' && after.kind === 'image' ? (
-        <ComparePictures before={before} after={after} />
+        <ComparePictures key={`${before.url} ${after.url}`} before={before} after={after} />
       ) : pair ? (
         <div className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
           <Side label="Before">
-            <PreviewFile file={before} />
+            <PreviewFile key={before.url} file={before} />
           </Side>
           <Side label="After">
-            <PreviewFile file={after} />
+            <PreviewFile key={after.url} file={after} />
           </Side>
         </div>
       ) : (

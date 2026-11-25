@@ -6,8 +6,8 @@
 
 /**
  * How the studio presents what the catalog and the control plane name: a discipline's name, an
- * app's status, the plan's progress, how long ago something happened, and opening a stream in a
- * new tab.
+ * app's status, the plan's progress, how long ago something happened, what an interactive card
+ * was locked in with, and opening a stream in a new tab.
  * @module
  */
 import type { PlanItem } from '../lib/api';

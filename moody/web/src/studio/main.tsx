@@ -16,8 +16,10 @@
  *
  * `?demo` is the one other way in: it mounts the studio over fixtures (`studio/demo.ts`), never
  * over the HTTP client, so it shows nothing of an account and needs none. `?demo=offline` shows a
- * server with no integrations configured, `?demo=empty` an account with no projects, and
- * `?demo=legacy` a control plane from before the studio.
+ * server with no integrations configured, `?demo=empty` an account with no projects,
+ * `?demo=legacy` a control plane from before the studio, and `?demo=movie` a new film played from
+ * its first message: the agent thinking, asking, handing work to subagents, and asking before it
+ * starts an engine.
  *
  * GitHub's callback returns here with `?github=` and what happened (`connected`, `installed` for
  * the GitHub App installed on more repositories, `requested` for an installation an organization's

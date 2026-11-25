@@ -362,6 +362,20 @@
     color: var(--color-fg);
   }
 
+  /*
+   * The pixel eyes that say what an agent is doing (`lib/moodyEyes.ts`): three CSS pixels per cell
+   * of their 11 by 8 grid, so every cell is whole device pixels at any ratio. Their color is the
+   * text color around them.
+   */
+  .moody-eyes {
+    display: inline-block;
+    width: 33px;
+    height: 24px;
+    flex: none;
+    vertical-align: middle;
+    pointer-events: none;
+  }
+
   /* A status LED: a lit pixel. A live one breathes. */
   .dot {
     position: relative;
@@ -393,6 +407,11 @@
 
   .dot-bad {
     --dot: var(--color-bad);
+  }
+
+  /* Something finished as it should: the LED is the success green, and does not breathe. */
+  .dot-done {
+    --dot: var(--color-ok);
   }
 
   /* Art: the frame is a finished-looking panel by itself, and the image fades in over it once it
@@ -1088,7 +1107,10 @@
     color: #e6e6e6;
   }
 
-  /* An indeterminate progress bar for a session that is starting. */
+  /*
+   * An indeterminate progress bar for a session that is starting: work under way, so lavender, as
+   * its LED is until it runs.
+   */
   .progress {
     position: relative;
     height: 0.25rem;
@@ -1101,7 +1123,7 @@
     position: absolute;
     inset: 0;
     width: 30%;
-    background: var(--color-lime);
+    background: var(--color-lavender);
     animation: slide 1.6s steps(12) infinite;
   }
 

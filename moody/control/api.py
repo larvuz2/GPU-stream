@@ -12,8 +12,10 @@ the Studio contract's, `error` what the first pages read) with its status
 here, or the text of a failed tool call.
 
 The Studio's routes (`moody/STUDIO.md`, its contract) are projects, their
-library, their engines, their event log and agent, the GitHub connection, and
-the Epic connection. Two routes take no credential: GitHub's callbacks, one for
+library, their engines, their event log and agent (a message, which may lock
+in an interactive card; the answer to an approval the agent waits on; and what
+the project's agent can use: its connectors, subagents, and skills), the
+GitHub connection, and the Epic connection. Two routes take no credential: GitHub's callbacks, one for
 the GitHub App and one for the Epic OAuth App, which a browser reaches by
 redirect and whose signed `state` names the user instead
 (`Sessions.github_callback`, `Sessions.epic_callback`).
@@ -42,6 +44,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
+from definitions import AgentSpec, Skill, agents_directory, agents_for, operators, read_agents, read_skills, skills_directory, skills_for
 from service import Catalog, Config, Refused, Sessions, User
 
 START_WAIT_SECONDS = 150
@@ -89,6 +92,7 @@ class ProjectChanges(BaseModel):
     name: str | None = None
     pinned: bool | None = None
     library_sections: list[str] | None = None
+    permissions: dict[str, Any] | None = None
 
 
 class NewEngine(BaseModel):
@@ -100,9 +104,16 @@ class NewEngine(BaseModel):
 
 
 class Message(BaseModel):
-    """What `POST /v1/projects/{pid}/messages` takes."""
+    """What `POST /v1/projects/{pid}/messages` takes: the person's words, and the card they lock in where they do."""
 
-    text: str
+    text: str = ""
+    ui: dict[str, Any] | None = None
+
+
+class Approval(BaseModel):
+    """What `POST /v1/projects/{pid}/approvals/{aid}` takes: `once`, `always`, or `deny`."""
+
+    decision: str
 
 
 class NewAsset(BaseModel):
@@ -260,13 +271,28 @@ def mcp_server(sessions: Sessions | None, catalog: Catalog) -> MCPServer:
     return server
 
 
-def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> FastAPI:
+def create_app(
+    sessions: Sessions | None,
+    config: Config,
+    catalog: Catalog,
+    skills: list[Skill] | None = None,
+    agents: list[AgentSpec] | None = None,
+    derived: list[AgentSpec] | None = None,
+) -> FastAPI:
     """The ASGI app: the `/v1` routes, and the MCP endpoint mounted beside them.
 
     `sessions` is nothing while no Supabase project is configured. The app then
     still answers `/v1/health`, which is how the site tells an unconfigured
-    service from one that is down, and refuses the rest with 503.
+    service from one that is down, and refuses the rest with 503. The skills
+    and subagents a project's environment lists are read from the image's
+    definitions (`definitions.py`) unless given.
     """
+    if skills is None:
+        skills = read_skills(skills_directory())
+    if agents is None:
+        agents = read_agents(agents_directory())
+    if derived is None:
+        derived = operators(agents_directory(), catalog, skills)
     agent = mcp_server(sessions, catalog)
     agent_app = agent.streamable_http_app(
         json_response=True,
@@ -385,7 +411,9 @@ def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> F
 
     @app.patch("/v1/projects/{project_id}")
     def update_project(project_id: str, body: ProjectChanges, who: Who) -> dict[str, Any]:
-        changed = service().update_project(who, project_id, body.name, body.pinned, body.library_sections)
+        changed = service().update_project(
+            who, project_id, body.name, body.pinned, body.library_sections, body.permissions
+        )
         return {"project": changed}
 
     @app.delete("/v1/projects/{project_id}", status_code=204)
@@ -413,7 +441,24 @@ def create_app(sessions: Sessions | None, config: Config, catalog: Catalog) -> F
 
     @app.post("/v1/projects/{project_id}/messages", status_code=202)
     def send_message(project_id: str, body: Message, who: Who) -> dict[str, str]:
-        return {"turn_id": service().send_message(who, project_id, body.text)}
+        return {"turn_id": service().send_message(who, project_id, body.text, body.ui)}
+
+    @app.post("/v1/projects/{project_id}/approvals/{approval_id}")
+    def answer_approval(project_id: str, approval_id: str, body: Approval, who: Who) -> dict[str, bool]:
+        return {"recorded": service().answer_approval(who, project_id, approval_id, body.decision)}
+
+    @app.get("/v1/projects/{project_id}/environment")
+    def environment(project_id: str, who: Who) -> dict[str, Any]:
+        project = service().owned_project(who, project_id)
+        offered = skills_for(skills, catalog, project["discipline"])
+        return {
+            "connectors": service().connectors(who, project_id),
+            "agents": [
+                {"name": one.name, "title": one.title, "description": one.description}
+                for one in agents_for(agents, derived, offered, catalog, project["discipline"])
+            ],
+            "skills": [{"name": skill.name, "description": skill.description} for skill in offered],
+        }
 
     @app.post("/v1/projects/{project_id}/stop")
     def stop_turn(project_id: str, who: Who) -> dict[str, bool]:

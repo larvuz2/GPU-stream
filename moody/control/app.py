@@ -11,6 +11,18 @@ minutes. `reconcile` runs once a minute and is the service's upkeep
 (`Sessions.reconcile`). `check` is for an operator: it starts and stops one
 session the way the service does.
 
+A turn is the Claude Agent SDK's loop (`loop.py`), whose `claude` program the
+SDK's package carries and the worker runs as a child process, so `agent_turn`
+reserves a CPU and memory for both (`AGENT_TURN_CPUS`,
+`AGENT_TURN_MEMORY_MB`). Anthropic's hosting guidance for one agent starts at
+a gibibyte of memory, five of disk, and a CPU. The memory here is twice that:
+a turn of two model calls and one tool, measured in this image
+(`trial.py`), peaks near 760 MiB, of which the program is 620 and the
+worker's Python 140, and a real conversation, a subagent's beside it, and a
+picture in a result add to it. The disk is within what every Modal container
+has. A turn that waits (for the person's approval, for an engine to start)
+holds its worker for that long and no other.
+
 Everything the deployment is configured with is the environment of the Modal
 Secret `moody`, read once per container (`config`). The Supabase secret key,
 the Anthropic and fal keys, the GitHub App's and the Epic OAuth App's client
@@ -21,35 +33,96 @@ The Sandboxes are the launcher's (`addons/modal/sandbox.py`), which this image
 carries beside the code that calls it, with the scripts the session image is
 built from: the image a session runs is defined in one place, and the Sandbox
 this service starts is the one `selkies-modal up` starts (`launcher.py`). The
-agent's skills (`moody/skills`) are carried too, read when a turn starts.
+agent's skills (`moody/skills`) and its subagents' definitions
+(`moody/agents`) are carried too, read when a turn starts and when the API
+lists what a project is offered.
+
+The image is made in two steps so that another app can stand on it:
+`packages` is what is installed (ffmpeg, with which a turn's worker makes the
+pictures the agent looks at a file by, `looking.py`, and the Python the
+requirements name), and `carried` puts the control plane's code and data on
+an image. `trial.py` builds its own from the two, with the test modules
+beside the code.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 import modal
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-SKILLS = HERE.parent / "skills"
+# The definitions the agent reads, each a directory of `moody/` carried beside the code under its own name
+DEFINITIONS = ("skills", "agents")
+MODULES = (
+    "service.py",
+    "api.py",
+    "agent.py",
+    "loop.py",
+    "transcript.py",
+    "definitions.py",
+    "looking.py",
+    "genui.py",
+    "launcher.py",
+    "generation.py",
+    "github_client.py",
+    "unreal.py",
+)
 # A turn's worker may run this long; a turn is a few model calls, a few generations, and an engine's start
 AGENT_TURN_SECONDS = 3600
+# What a turn's worker is given: the loop's program runs beside the worker's own Python
+AGENT_TURN_CPUS = 1.0
+AGENT_TURN_MEMORY_MB = 2048
+
+T = TypeVar("T")
 
 app = modal.App("moody-control")
 secret = modal.Secret.from_name("moody")
-image = (
+packages = (
     modal.Image.debian_slim(python_version="3.12")
+    .apt_install("ffmpeg")
     .pip_install_from_requirements(str(HERE / "requirements.txt"))
-    .add_local_dir(REPO / "addons" / "modal", "/root/launcher", ignore=["**/__pycache__", "*.md", "requirements.txt"])
-    .add_local_file(HERE.parent / "catalog.json", "/root/catalog.json")
 )
-for module in ("service.py", "api.py", "agent.py", "launcher.py", "generation.py", "github_client.py", "unreal.py"):
-    image = image.add_local_file(HERE / module, f"/root/{module}")
-if SKILLS.is_dir():
-    image = image.add_local_dir(SKILLS, "/root/skills")
+
+
+def carried(base: modal.Image) -> modal.Image:
+    """An image with the control plane's code and data on it: the launcher, the catalog, the modules, the definitions."""
+    made = base.add_local_dir(
+        REPO / "addons" / "modal", "/root/launcher", ignore=["**/__pycache__", "*.md", "requirements.txt"]
+    ).add_local_file(HERE.parent / "catalog.json", "/root/catalog.json")
+    # The catalog of interactive cards, which `genui.py` reads beside the code
+    made = made.add_local_file(HERE.parent / "ui.json", "/root/ui.json")
+    for module in MODULES:
+        made = made.add_local_file(HERE / module, f"/root/{module}")
+    for name in DEFINITIONS:
+        if (HERE.parent / name).is_dir():
+            made = made.add_local_dir(HERE.parent / name, f"/root/{name}")
+    return made
+
+
+image = carried(packages)
+
+
+def given(read: Callable[[str], T], **names: str) -> dict[str, T]:
+    """The settings the environment gives, by `Config` field, each read from the variable named for it.
+
+    A variable that is unset or empty leaves its field out, so the default is
+    the one `Config` declares and is written nowhere else.
+    """
+    return {field: read(os.environ[name]) for field, name in names.items() if os.environ.get(name)}
+
+
+def switch(value: str) -> bool:
+    """A setting that is on or off, as the environment spells it."""
+    return value.strip().lower() in ("true", "1", "yes", "on")
+
+
+def listed(value: str) -> frozenset[str]:
+    """A setting that is a list of names, separated by commas."""
+    return frozenset(name.strip() for name in value.split(",") if name.strip())
 
 
 def config() -> Any:
@@ -57,6 +130,20 @@ def config() -> Any:
     from service import Config
 
     return Config(
+        **given(
+            str,
+            agent_effort="MOODY_AGENT_EFFORT",
+            agent_fallback_model="MOODY_AGENT_FALLBACK_MODEL",
+            agent_model_balanced="MOODY_AGENT_MODEL_BALANCED",
+            agent_model_light="MOODY_AGENT_MODEL_LIGHT",
+            anthropic_base_url="ANTHROPIC_BASE_URL",
+            loop_root="MOODY_LOOP_ROOT",
+            loop_cli="MOODY_LOOP_CLI",
+        ),
+        **given(float, turn_budget_usd="MOODY_TURN_BUDGET_USD", approval_seconds="MOODY_APPROVAL_SECONDS"),
+        **given(int, turn_limit="MOODY_TURN_LIMIT"),
+        **given(switch, agent_thinking="MOODY_AGENT_THINKING"),
+        **given(listed, loop_env="MOODY_LOOP_ENV"),
         supabase_url=os.environ.get("SUPABASE_URL", ""),
         supabase_key=os.environ.get("SUPABASE_SECRET_KEY", ""),
         stripe_key=os.environ.get("STRIPE_SECRET_KEY", ""),
@@ -130,7 +217,9 @@ def stop_job(session_id: str, reason: str) -> None:
     sessions().run_stop(session_id, reason)
 
 
-@app.function(image=image, secrets=[secret], timeout=AGENT_TURN_SECONDS)
+@app.function(
+    image=image, secrets=[secret], timeout=AGENT_TURN_SECONDS, cpu=AGENT_TURN_CPUS, memory=AGENT_TURN_MEMORY_MB
+)
 def agent_turn(project_id: str, turn_id: str) -> None:
     """Run one turn of a project's agent (`agent.Agent.run`)."""
     from agent import Agent

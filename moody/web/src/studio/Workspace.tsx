@@ -6,7 +6,8 @@
 
 /**
  * The open project: its header, conversation, and composer in the center, and in the right column
- * the Screen over the Environment, Plan, and Library panels.
+ * the Screen over the Environment (engines, repositories, and what the agent works with), Plan,
+ * and Library panels.
  *
  * It renders three regions of the studio's grid (`studio.css`) and is keyed by the project, so
  * opening another project starts its data afresh. Each region knows how to lead to the others: a
@@ -19,17 +20,22 @@
  * or an engine's card, or the agent, whose `screen` event the screen follows as it arrives and
  * shows on opening the project until the person picks something else.
  *
+ * The conversation is folded here from the project's events, once for both the views that read
+ * it: the center pane, and the library's Process tab, which gathers the media the session showed
+ * and leads from each file back to the entry it appeared in (`reveal`).
+ *
  * A project created from a link into the studio arrives with its first message, which is sent
  * once the project is open, so it shows as sent at once.
  * @module
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Layers, ListChecks, PanelRightClose, PanelRightOpen, Plus, Server } from 'lucide-react';
-import { isActive, type ControlPlane, type Project, type Session } from '../lib/api';
+import { ALWAYS, isActive, type ControlPlane, type Project, type Session } from '../lib/api';
 import { AUTO_REGION } from '../lib/catalog';
 import { isBoolean, isRecord, type Guard } from '../lib/narrow';
 import { Composer } from './Composer';
 import { Conversation } from './Conversation';
+import { AgentEnvironment } from './EnvironmentAgent';
 import { EngineSection, GitHubSection, type EpicReturn, type GitHubReturn } from './EnvironmentPanel';
 import { GitHubMark } from './Menu';
 import { usePreference } from './hooks';
@@ -38,7 +44,9 @@ import { Panel } from './Panel';
 import { PlanBody } from './PlanPanel';
 import { DisciplineIcon } from '../components/DisciplineIcon';
 import { disciplineName, planProgress } from './present';
+import { describeAnswer } from './ui/answer';
 import { Stage, type StreamStandIn } from './Stage';
+import { buildTranscript, processMedia, type ProcessEntry, type Reveal } from './transcript';
 import { connected, type Account, type Epic, type GitHub, type Projects } from './useAccount';
 import { useProject } from './useProject';
 
@@ -143,6 +151,9 @@ export function Workspace(props: WorkspaceProps) {
   const [picked, setPicked] = useState<Picked | null>(null);
   const [openAssetId, setOpenAssetId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [ledTo, setLedTo] = useState<Reveal | null>(null);
+  const items = useMemo(() => buildTranscript(data.events), [data.events]);
+  const process = useMemo(() => processMedia(items), [items]);
   const environmentRef = useRef<HTMLDivElement>(null);
   const planRef = useRef<HTMLDivElement>(null);
   const libraryRef = useRef<HTMLDivElement>(null);
@@ -225,6 +236,18 @@ export function Workspace(props: WorkspaceProps) {
     setOpenAssetId(id);
     setAdding(false);
     reveal('library', libraryRef);
+  }
+
+  /**
+   * Leads to where a file the session showed appeared in the conversation.
+   *
+   * @param entry The file.
+   */
+  function showInConversation(entry: ProcessEntry): void {
+    setLedTo({ key: entry.itemKey, agentId: entry.agentId, seq: (ledTo?.seq ?? 0) + 1 });
+    if (narrow) {
+      onTab('chat');
+    }
   }
 
   /**
@@ -317,6 +340,9 @@ export function Workspace(props: WorkspaceProps) {
         <Conversation
           project={project}
           data={data}
+          items={items}
+          reveal={ledTo}
+          onStale={data.refreshLinks}
           tags={tags}
           canSend={blocked === null}
           onTag={(tag) => {
@@ -331,6 +357,8 @@ export function Workspace(props: WorkspaceProps) {
             reveal('plan', planRef);
           }}
           onChoose={data.send}
+          onApprove={data.approve}
+          onLock={(ui, value) => data.send(describeAnswer(ui, value), { ui_id: ui.ui_id, value })}
           onSuggest={setDraft}
         />
         <Composer
@@ -411,6 +439,16 @@ export function Workspace(props: WorkspaceProps) {
                   projects.accept(await connected(client).unlinkRepo(project.id));
                 }}
               />
+              <AgentEnvironment
+                environment={data.environment}
+                status={data.environmentStatus}
+                permissions={project.permissions ?? NO_PERMISSIONS}
+                onRevoke={async (tool) => {
+                  projects.accept(
+                    await connected(client).updateProject(project.id, { permissions: withoutTool(project, tool) }),
+                  );
+                }}
+              />
             </div>
           </Panel>
         </div>
@@ -449,11 +487,31 @@ export function Workspace(props: WorkspaceProps) {
               adding={adding}
               onAdding={setAdding}
               generation={account.health?.generation ?? null}
+              process={process}
+              onShowInConversation={showInConversation}
             />
           </Panel>
         </div>
       </aside>
     </>
+  );
+}
+
+/** The kept answers of a project that has none. */
+const NO_PERMISSIONS: Readonly<Record<string, string>> = {};
+
+/**
+ * The tools a project's agent may still run without asking once one is taken back.
+ *
+ * @param project The project.
+ * @param tool The tool to ask about again.
+ * @returns Every other tool the person always allows.
+ */
+function withoutTool(project: Project, tool: string): Record<string, typeof ALWAYS> {
+  return Object.fromEntries(
+    Object.entries(project.permissions ?? {}).flatMap(([name, answer]): [string, typeof ALWAYS][] =>
+      name !== tool && answer === ALWAYS ? [[name, ALWAYS]] : [],
+    ),
   );
 }
 

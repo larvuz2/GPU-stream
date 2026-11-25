@@ -431,6 +431,21 @@
     background-position: right 0.6rem center;
   }
 
+  /* A row of a list in the Environment panel: a repository, a connector, a subagent, a permission. */
+  .env-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.4rem 0.5rem 0.4rem 0.4rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.75rem;
+    background: rgb(255 255 255 / 0.025);
+  }
+
+  .env-row[data-state='off'] {
+    opacity: 0.65;
+  }
+
   /* The panels of the right column. */
   .panel + .panel {
     border-top: 1px solid var(--studio-line);
@@ -953,25 +968,244 @@
     font-weight: 600;
   }
 
-  /* The agent at work: three pixels lighting in turn. */
-  .typing-dots {
-    display: inline-flex;
-    gap: 0.25rem;
-  }
-
-  .typing-dots i {
-    width: 0.35rem;
-    height: 0.35rem;
+  /*
+   * Text still being written ends in a caret, lavender as the intelligence at work is. It follows
+   * the last words, which in a list are its last item's.
+   */
+  .prose-studio[data-streaming] > :last-child:not(ul, ol)::after,
+  .prose-studio[data-streaming] > :is(ul, ol):last-child > li:last-child::after {
+    content: '';
+    display: inline-block;
+    width: 0.45em;
+    height: 1em;
+    margin-left: 0.2em;
     background: var(--color-lavender);
-    animation: typing 1.2s ease-in-out infinite;
+    vertical-align: text-bottom;
+    animation: blink 1s steps(1) infinite;
   }
 
-  .typing-dots i:nth-child(2) {
-    animation-delay: 0.15s;
+  /*
+   * The agent's reasoning: a quiet line that unfolds, never a card, so it cannot be mistaken for
+   * the answer. Its label is lavender; everything else is the faintest text the page has.
+   */
+  .thinking-note {
+    color: var(--color-faint);
+    font-size: 0.8125rem;
   }
 
-  .typing-dots i:nth-child(3) {
-    animation-delay: 0.3s;
+  .thinking-note summary {
+    display: flex;
+    min-height: 1.5rem;
+    align-items: center;
+    gap: 0.45rem;
+    border-radius: 0.4rem;
+    list-style: none;
+  }
+
+  .thinking-note summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .thinking-note summary > svg:first-child,
+  .thinking-label {
+    color: var(--color-lavender);
+  }
+
+  .thinking-label {
+    flex: none;
+    font-weight: 500;
+  }
+
+  .thinking-preview {
+    overflow: hidden;
+    min-width: 0;
+    flex: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .thinking-note[open] .thinking-preview {
+    visibility: hidden;
+  }
+
+  /* A note still being written reads at the size of the line that says what the agent is doing. */
+  .thinking-note[data-streaming] {
+    font-size: 0.875rem;
+  }
+
+  .thinking-note[open] .tool-chevron {
+    transform: rotate(90deg);
+  }
+
+  .thinking-body {
+    margin: 0.35rem 0 0.2rem 0.3rem;
+    padding-left: 0.85rem;
+    border-left: 1px solid var(--ai-line);
+  }
+
+  .thinking-body .prose-studio {
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+
+  /* An entry another part of the page led to is lit for a moment, in the intelligence's color. */
+  [data-revealed] {
+    border-radius: 0.6rem;
+    animation: revealed 1.8s ease-out;
+  }
+
+  /* The person's message that locked an interactive card in: one compact line, on their side. */
+  .lock-line {
+    display: flex;
+    width: fit-content;
+    max-width: min(36rem, 85%);
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.6rem 0.6rem 0.15rem 0.6rem;
+    background: var(--color-ink-700);
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+  }
+
+  .lock-line[data-pending] {
+    opacity: 0.7;
+  }
+
+  /* What a turn took: small print under its last entry. */
+  .usage-line {
+    color: var(--color-faint);
+    font-size: 0.6875rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+
+  /* The agent at work: its eyes, what they are doing, and the tool it is running. */
+  .activity-line {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 1.75rem;
+    font-size: 0.875rem;
+  }
+
+  /*
+   * Subagents at work: one block per group of them, a card each. The surfaces are the Color
+   * Bible's neutrals, a step apart, so the block reads as one thing on the conversation's ground;
+   * the only colors are what the states mean (success, error) and the lavender of work under way.
+   */
+  .agents-block {
+    padding: 0.9rem 1rem 0.85rem;
+    border: 1px solid var(--color-ink-700);
+    border-radius: 1rem;
+    background: var(--color-ink-950);
+  }
+
+  .agents-heading {
+    color: var(--color-soft);
+    font-size: 0.9375rem;
+    letter-spacing: 0.005em;
+  }
+
+  .agents-count {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.8rem;
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .agent-card {
+    border: 1px solid var(--color-ink-700);
+    border-radius: 0.5rem;
+    background: var(--color-ink-900);
+    transition: border-color 0.15s ease;
+  }
+
+  .agent-card:hover,
+  .agent-card:has(.agent-card-head[aria-expanded='true']) {
+    border-color: var(--color-line);
+  }
+
+  /* The card's head: the chevron's column, then the title over the activity over the detail. */
+  .agent-card-head {
+    display: grid;
+    width: 100%;
+    grid-template-columns: 1rem minmax(0, 1fr) auto;
+    column-gap: 0.6rem;
+    row-gap: 0.3rem;
+    align-items: center;
+    padding: 0.7rem 0.9rem 0.75rem 0.75rem;
+    border-radius: 0.5rem;
+    text-align: left;
+  }
+
+  .agent-card-chevron {
+    width: 0.9rem;
+    height: 0.9rem;
+    color: var(--color-faint);
+    transition: transform 0.15s ease;
+  }
+
+  .agent-card-head[aria-expanded='true'] .agent-card-chevron {
+    transform: rotate(90deg);
+  }
+
+  .agent-card-title {
+    overflow: hidden;
+    color: var(--color-soft);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agent-card-state {
+    font-size: 0.75rem;
+    letter-spacing: 0.01em;
+  }
+
+  .agent-card-activity {
+    display: flex;
+    grid-column: 2 / -1;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 1rem;
+  }
+
+  .agent-card-detail {
+    overflow: hidden;
+    grid-column: 2 / -1;
+    color: var(--color-faint);
+    font-size: 0.8125rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* What a subagent did, under its card's head and in line with its title. */
+  .agent-card-body {
+    padding: 0.7rem 0.9rem 0.85rem 2.35rem;
+    border-top: 1px solid var(--color-ink-700);
+  }
+
+  .agent-card-body .prose-studio {
+    font-size: 0.875rem;
+  }
+
+  /* A phone has no room to indent what a subagent did, nor to keep what it is doing on one line. */
+  @media (max-width: 479.98px) {
+    .agent-card-body {
+      padding-left: 0.9rem;
+    }
+
+    .agent-card-detail {
+      white-space: normal;
+    }
   }
 
   /* The composer: a field with its controls inside one rounded frame. */
@@ -1098,6 +1332,7 @@
   }
 
   .chip[aria-pressed='true'],
+  .chip[aria-selected='true'],
   .chip:has(input:checked) {
     border-color: var(--color-lime);
     background: var(--selection-bg);
@@ -1157,16 +1392,16 @@
   }
 }
 
-@keyframes typing {
-  0%,
-  70%,
-  100% {
-    opacity: 0.25;
-    transform: translateY(0);
+@keyframes revealed {
+  from {
+    box-shadow:
+      0 0 0 2px var(--color-lavender),
+      0 0 0 7px var(--ai-bg);
   }
 
-  35% {
-    opacity: 1;
-    transform: translateY(-2px);
+  to {
+    box-shadow:
+      0 0 0 2px transparent,
+      0 0 0 7px transparent;
   }
 }

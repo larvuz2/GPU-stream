@@ -35,30 +35,44 @@ disciplines: music, media
 | Field | Meaning |
 |---|---|
 | `name` | The skill's name, the same as its folder. The folder is what the loader reads. |
-| `description` | Follows the skill's heading in the prompt. Say what the skill is for and when it applies. |
+| `description` | What the agent always sees of the skill, and decides by whether to open it. Say what the skill is for and when it applies. |
 | `disciplines` | Optional. Which projects read the skill; see [Which projects read a skill](#which-projects-read-a-skill). |
+| `operator_tools` | Optional, in a skill named after an app. Tools that app's operator gets beside its template's (`moody/agents/_operator.md`): `operator_tools: unreal_projects, unreal_assets, unreal_open`. Each has to be a tool the agent has. |
 
 Each field is one `key: value` line. The loader reads nothing else of YAML: no multi-line values,
 no nested keys.
 
 ## How a skill is loaded
 
-`read_skills` and `skills_for` in `moody/control/agent.py` are the loader, and their docblocks are
-the reference. What a writer needs to know:
+`read_skills` and `skills_for` in `moody/control/definitions.py` decide which skills a project is
+offered, and the agent's loop (the Claude Agent SDK, `moody/control/loop.py`) loads them. Their
+docblocks are the reference. What a writer needs to know:
 
-- **The whole skill is in the system prompt.** At the start of a turn the agent's system prompt is
-  built from the project's discipline, the catalog, and every skill that fits the discipline, each
-  under `# Skill: <name>`. The agent has no tool that opens a skill file, so nothing is read on
-  demand.
-- **References are appended, not fetched.** Every other `.md` file in the skill's folder follows
-  `SKILL.md` under a heading that is its path (`## references/editing.md`), which is where the
-  skill's links to it lead. A file that is not Markdown is not loaded. A link to anything outside
-  the skill's folder leads nowhere.
-- **So length is paid for on every turn** of every project that reads the skill. Put in what the
-  agent needs to act and leave out what it would do anyway.
-- **A change to a skill reaches a project at its next turn** after a deploy. The system prompt is
-  otherwise the same for every turn of a project, so do not write anything into a skill that
-  changes with the work: the project's state arrives in a message of its own each turn.
+- **Only the description is always in context.** At the start of a turn the skills the project is
+  offered are copied, each folder whole, into the turn's working directory, and the loop lists
+  them to the agent by name and `description`. Nothing else of a skill is in the prompt. So the
+  description is what the agent decides by: a skill whose description does not say when it
+  applies is not opened when it should be.
+- **The body is loaded when the agent opens the skill**, with the loop's skill tool, and stays in
+  the conversation from then on. It arrives with the skill's base directory, which is what the
+  paths in its text are relative to.
+- **A reference is read when the body sends the agent to it.** A link such as
+  `[editing](references/editing.md)` is a path under the base directory, and the agent reads that
+  file with the loop's read tool when the stage it is at needs it. Any file of the skill's folder
+  can be read this way; nothing outside the offered skills' folders can, so a link that leaves the
+  skill's folder leads nowhere. Say in the body when each reference is needed ("before the first
+  cut, read ..."): a reference nothing points to at the right moment is not read.
+- **A subagent whose definition names the skill starts with its body loaded**
+  (`skills:` in `moody/agents/<name>.md`; an engine's operator reads the skill named after its
+  app), and reads the references the same way.
+- **So length is paid for when the skill is used**, not on every turn: the description on every
+  turn of every project offered the skill, the body from the turn that opens it, a reference from
+  the step that reads it. Keep the description to a paragraph, put in the body what the agent
+  needs for every job the skill covers, and move what only one stage needs into a reference.
+- **A change to a skill reaches a project at its next turn** after a deploy. A conversation that
+  opened the skill before keeps the text it read until it opens the skill again. Do not write
+  anything into a skill that changes with the work: the project's state arrives with the
+  person's message each turn.
 
 ### Which projects read a skill
 
@@ -76,8 +90,8 @@ is said; the loader names no skill. `moody/skills/studio` is that skill today: h
 runs across engines.
 
 One consequence to design for: the agent can start an engine that is not one of its discipline's,
-and then that engine's skill is not in its prompt. A skill whose engine is useful beyond its
-disciplines lists them in `disciplines`.
+and then that engine's skill is not among those it is offered, nor is the engine's operator. A
+skill whose engine is useful beyond its disciplines lists them in `disciplines`.
 
 ## The structure that works
 
@@ -103,7 +117,7 @@ finds the same thing in the same place in every skill.
    what to offer instead. A skill never presents a missing or partial feature as working.
 8. **Hand-offs.** What the engine exports for which other engine, in which format, into
    `handoff/<from app id>-to-<to app id>/` of the project's folder, and what it accepts from
-   others. `moody/skills/studio` holds the convention and the table of routes; the engine's skill
+   others. `moody/skills/studio` holds the convention; the engine's skill
    holds the exact recipe for its side.
 9. **Show your work.** How the agent makes this engine's work in progress visible with `preview`:
    the engine's own commands that write a frame, a range, a page, or a render into `previews/` of
@@ -153,8 +167,9 @@ and saw do what the skill says. That rule is what makes a skill worth more than 
    give it the request the skill is for, and read the turn: did it ask the questions, quote the
    cost, run the recipe in order, confirm the result, and stop the engine? Where it went wrong,
    the skill was unclear; fix the skill, not the prompt.
-4. **It reads well in the prompt.** Read the skill as it reaches the model, references included
-   (`system_prompt` in `moody/control/agent.py`). Cut what the agent did not need in step 3.
+4. **It reads well as it reaches the model.** Read the description alone, as the loop lists it:
+   would the agent open the skill for the request of step 3? Then the body, then each reference at
+   the stage that sends the agent to it. Cut what the agent did not need in step 3.
 
 ## Moving a skill to its own repository
 

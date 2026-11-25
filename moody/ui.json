@@ -1,0 +1,372 @@
+{
+  "version": 1,
+  "about": "The catalog of the interactive cards Moody's agent shows in a conversation (`show_ui`). The control plane builds the tool's reference from it and checks every card against it (moody/control/genui.py); the app renders from it (moody/web/src/studio/ui). A component is an entry here plus its renderer there.",
+  "limits": {
+    "title_chars": 120,
+    "submit_chars": 40,
+    "spec_bytes": 24000,
+    "nodes": 120,
+    "depth": 8,
+    "list_items": 60,
+    "text_chars": 2000,
+    "media": 24,
+    "html_bytes": 200000,
+    "height_min": 120,
+    "height_max": 900,
+    "height_default": 360,
+    "frame_min": 40,
+    "problems": 8
+  },
+  "media_kinds": {
+    "image": [".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif", ".svg"],
+    "video": [".mp4", ".m4v", ".webm"],
+    "audio": [".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"],
+    "model": [".glb"]
+  },
+  "adjustments": {
+    "brightness": { "min": -100, "max": 100, "default": 0, "doc": "Darker to lighter." },
+    "contrast": { "min": -100, "max": 100, "default": 0, "doc": "Flatter to punchier." },
+    "saturation": { "min": -100, "max": 100, "default": 0, "doc": "Gray to vivid." },
+    "hue": { "min": -180, "max": 180, "default": 0, "doc": "Degrees around the color wheel." },
+    "warmth": { "min": -100, "max": 100, "default": 0, "doc": "Cooler (blue) to warmer (amber)." },
+    "tint": { "min": -100, "max": 100, "default": 0, "doc": "Green to magenta." },
+    "fade": { "min": 0, "max": 100, "default": 0, "doc": "Lifts the blacks, as faded film." },
+    "sepia": { "min": 0, "max": 100, "default": 0, "doc": "Toward a brown monochrome." },
+    "blur": { "min": 0, "max": 40, "default": 0, "doc": "Softness, in pixels." },
+    "grain": { "min": 0, "max": 100, "default": 0, "doc": "Film grain over the picture." },
+    "vignette": { "min": 0, "max": 100, "default": 0, "doc": "Darkens the corners." }
+  },
+  "finishes": {
+    "original": { "doc": "The model's own materials." },
+    "clay": { "doc": "Matte, one color: reads the form." },
+    "metal": { "doc": "Brushed metal." },
+    "gloss": { "doc": "Glossy paint." },
+    "wire": { "doc": "The mesh as wireframe." }
+  },
+  "blends": ["normal", "multiply", "screen", "overlay", "soft-light", "lighten", "darken"],
+  "common": {
+    "when": {
+      "kind": "when",
+      "doc": "Show the component only while this holds: {id: value}, {id: [any of these]}, or {id: {not|gt|lt|has: value}}; every entry must hold."
+    }
+  },
+  "shapes": {
+    "option": {
+      "doc": "One choice. A bare string or number is short for {value}.",
+      "short": "value",
+      "props": {
+        "value": { "kind": "value", "required": true, "doc": "What the answer carries." },
+        "label": { "kind": "string", "doc": "What the person reads; the value where left out." },
+        "image": { "kind": "media", "kinds": ["image"], "doc": "A picture of the choice." },
+        "note": { "kind": "string", "doc": "A line under the label." }
+      }
+    },
+    "picture": {
+      "doc": "One picture of a gallery. A bare string is short for {src}.",
+      "short": "src",
+      "props": {
+        "src": { "kind": "media", "kinds": ["image", "video"], "required": true },
+        "caption": { "kind": "string" }
+      }
+    },
+    "point": {
+      "doc": "One value of a chart.",
+      "props": {
+        "label": { "kind": "string", "required": true },
+        "value": { "kind": "number", "required": true }
+      }
+    },
+    "layer": {
+      "doc": "One layer of a composite, the first at the bottom.",
+      "props": {
+        "name": { "kind": "string", "required": true },
+        "src": { "kind": "media", "kinds": ["image"], "required": true },
+        "visible": { "kind": "boolean", "default": true },
+        "opacity": { "kind": "number", "min": 0, "max": 100, "default": 100 },
+        "blend": { "kind": "enum", "values": "blends", "default": "normal" }
+      }
+    },
+    "swatch": {
+      "doc": "One color of a palette. A bare color is short for {color}.",
+      "short": "color",
+      "props": {
+        "color": { "kind": "color", "required": true },
+        "label": { "kind": "string" }
+      }
+    }
+  },
+  "components": {
+    "stack": {
+      "group": "layout",
+      "doc": "Children one under another; with a label, a titled group.",
+      "props": {
+        "label": { "kind": "string" },
+        "children": { "kind": "nodes", "required": true }
+      }
+    },
+    "row": {
+      "group": "layout",
+      "doc": "Children side by side, sharing the width; they stack on a phone.",
+      "props": {
+        "children": { "kind": "nodes", "required": true }
+      }
+    },
+    "grid": {
+      "group": "layout",
+      "doc": "Children in equal columns.",
+      "props": {
+        "columns": { "kind": "integer", "min": 1, "max": 4, "default": 2 },
+        "children": { "kind": "nodes", "required": true }
+      }
+    },
+    "tabs": {
+      "group": "layout",
+      "doc": "One tab of children in view at a time. With an id, the open tab is an answer.",
+      "input": "the open tab's value",
+      "optional_id": true,
+      "props": {
+        "id": { "kind": "id" },
+        "children": { "kind": "nodes", "only": ["tab"], "required": true }
+      }
+    },
+    "tab": {
+      "group": "layout",
+      "doc": "One tab of tabs.",
+      "inside": ["tabs"],
+      "props": {
+        "label": { "kind": "string", "required": true },
+        "value": { "kind": "value", "doc": "What the answer carries; the label where left out." },
+        "children": { "kind": "nodes", "required": true }
+      }
+    },
+    "text": {
+      "group": "content",
+      "doc": "A line or a paragraph; {id} shows an input's value live.",
+      "props": {
+        "text": { "kind": "text", "required": true },
+        "tone": { "kind": "enum", "values": ["body", "muted", "heading", "readout"], "default": "body" }
+      }
+    },
+    "image": {
+      "group": "content",
+      "doc": "A picture, with adjustments that can follow inputs live.",
+      "props": {
+        "src": { "kind": "media", "kinds": ["image"], "required": true },
+        "caption": { "kind": "text" },
+        "adjust": { "kind": "adjust" }
+      }
+    },
+    "video": {
+      "group": "content",
+      "doc": "A video that plays in place, with the same adjustments.",
+      "props": {
+        "src": { "kind": "media", "kinds": ["video"], "required": true },
+        "caption": { "kind": "text" },
+        "adjust": { "kind": "adjust" },
+        "loop": { "kind": "boolean", "default": false }
+      }
+    },
+    "audio": {
+      "group": "content",
+      "doc": "A sound with its waveform and a player.",
+      "props": {
+        "src": { "kind": "media", "kinds": ["audio"], "required": true },
+        "label": { "kind": "string" }
+      }
+    },
+    "gallery": {
+      "group": "content",
+      "doc": "Pictures in a grid, each opening larger.",
+      "props": {
+        "items": { "kind": "list", "of": "picture", "required": true },
+        "columns": { "kind": "integer", "min": 1, "max": 4, "default": 3 }
+      }
+    },
+    "compare": {
+      "group": "content",
+      "doc": "Two pictures under one divider the person drags: before on the left, after on the right. Adjustments apply to the after side.",
+      "props": {
+        "before": { "kind": "media", "kinds": ["image"], "required": true },
+        "after": { "kind": "media", "kinds": ["image"], "required": true },
+        "adjust": { "kind": "adjust" }
+      }
+    },
+    "swatches": {
+      "group": "content",
+      "doc": "A palette of colors.",
+      "props": {
+        "label": { "kind": "string" },
+        "colors": { "kind": "list", "of": "swatch", "required": true }
+      }
+    },
+    "table": {
+      "group": "content",
+      "doc": "Rows under column headings. With an id, the person picks rows, and the answer is each picked row's first cell.",
+      "input": "the picked row's first cell, or a list of them with pick: many",
+      "optional_id": true,
+      "props": {
+        "id": { "kind": "id" },
+        "columns": { "kind": "list", "of": { "kind": "string" }, "required": true },
+        "rows": { "kind": "list", "of": { "kind": "list", "of": { "kind": "value" } }, "required": true },
+        "pick": { "kind": "enum", "values": ["one", "many"], "default": "one" },
+        "value": { "kind": "any", "doc": "The rows picked at first." }
+      }
+    },
+    "chart": {
+      "group": "content",
+      "doc": "Values as ranked bars, a line or an area over an ordered axis, or the shares of one whole.",
+      "props": {
+        "kind": { "kind": "enum", "values": ["bar", "line", "area", "share"], "default": "bar" },
+        "label": { "kind": "string" },
+        "data": { "kind": "list", "of": "point", "required": true },
+        "unit": { "kind": "string", "doc": "Written with each value: a leading $ or a trailing unit such as s or %." },
+        "highlight": { "kind": "value", "bind": true, "doc": "The label of the value to emphasize." }
+      }
+    },
+    "model": {
+      "group": "content",
+      "doc": "A 3D model the person orbits and zooms. With an id, the view they leave it at is an answer.",
+      "input": "{azimuth, elevation, zoom}: the view in degrees and a zoom factor",
+      "optional_id": true,
+      "props": {
+        "id": { "kind": "id" },
+        "src": { "kind": "media", "kinds": ["model"], "required": true },
+        "azimuth": { "kind": "number", "min": -180, "max": 180, "default": 35, "doc": "Where the view starts: degrees around the model." },
+        "elevation": { "kind": "number", "min": -85, "max": 85, "default": 15, "doc": "And degrees above it." },
+        "finish": { "kind": "enum", "values": "finishes", "default": "original", "bind": true },
+        "color": { "kind": "color", "bind": true, "doc": "The finish's color; the original finish ignores it." },
+        "spin": { "kind": "boolean", "default": false, "bind": true, "doc": "Turn slowly until the person takes over." }
+      }
+    },
+    "layers": {
+      "group": "content",
+      "doc": "Pictures composited as layers. With an id, the person picks a layer from a dropdown and sets its visibility and opacity.",
+      "input": "{selected, layers: {name: {visible, opacity}}}",
+      "optional_id": true,
+      "props": {
+        "id": { "kind": "id" },
+        "layers": { "kind": "list", "of": "layer", "required": true }
+      }
+    },
+    "slider": {
+      "group": "input",
+      "doc": "A number the person drags.",
+      "input": "a number",
+      "props": {
+        "id": { "kind": "id", "required": true },
+        "label": { "kind": "string" },
+        "min": { "kind": "number", "default": 0 },
+        "max": { "kind": "number", "default": 100 },
+        "step": { "kind": "number", "default": 1 },
+        "value": { "kind": "number" },
+        "unit": { "kind": "string" }
+      }
+    },
+    "number": {
+      "group": "input",
+      "doc": "A number the person types.",
+      "input": "a number",
+      "props": {
+        "id": { "kind": "id", "required": true },
+        "label": { "kind": "string" },
+        "min": { "kind": "number" },
+        "max": { "kind": "number" },
+        "step": { "kind": "number", "default": 1 },
+        "value": { "kind": "number", "default": 0 },
+        "unit": { "kind": "string" }
+      }
+    },
+    "select": {
+      "group": "input",
+      "doc": "One of many options, in a dropdown.",
+      "input": "the option's value",
+      "props": {
+        "id": { "kind": "id", "required": true },
+        "label": { "kind": "string" },
+        "options": { "kind": "list", "of": "option", "required": true },
+        "value": { "kind": "value" }
+      }
+    },
+    "segmented": {
+      "group": "input",
+      "doc": "One of two to five options, all in view.",
+      "input": "the option's value",
+      "props": {
+        "id": { "kind": "id", "required": true },
+        "label": { "kind": "string" },
+        "options": { "kind": "list", "of": "option", "required": true, "min_items": 2, "max_items": 5 },
+        "value": { "kind": "value" }
+      }
+    },
+    "toggle": {
+      "group": "input",
+      "doc": "On or off.",
+      "input": "true or false",
+      "props": {
+        "id": { "kind": "id", "required": true },
+        "label": { "kind": "string", "required": true },
+        "value": { "kind": "boolean", "default": false }
+      }
+    },
+    "checkboxes": {
+      "group": "input",
+      "doc": "Any of several options.",
+      "input": "a list of option values",
+      "props": {
+        "id": { "kind": "id", "required": true },
+        "label": { "kind": "string" },
+        "options": { "kind": "list", "of": "option", "required": true },
+        "value": { "kind": "list", "of": { "kind": "value" } },
+        "required": { "kind": "boolean", "default": false }
+      }
+    },
+    "field": {
+      "group": "input",
+      "doc": "Words the person types: a note, a name, a line of dialogue.",
+      "input": "a string",
+      "props": {
+        "id": { "kind": "id", "required": true },
+        "label": { "kind": "string" },
+        "placeholder": { "kind": "string" },
+        "value": { "kind": "string", "default": "" },
+        "lines": { "kind": "integer", "min": 1, "max": 8, "default": 1 },
+        "required": { "kind": "boolean", "default": false }
+      }
+    },
+    "color": {
+      "group": "input",
+      "doc": "A color the person picks, from suggestions or any.",
+      "input": "a #rrggbb color",
+      "props": {
+        "id": { "kind": "id", "required": true },
+        "label": { "kind": "string" },
+        "value": { "kind": "color", "default": "#808080" },
+        "suggest": { "kind": "list", "of": { "kind": "color" } }
+      }
+    },
+    "pick": {
+      "group": "input",
+      "doc": "One of several options shown as pictures; with many, any of them.",
+      "input": "the option's value, or a list of them with many",
+      "props": {
+        "id": { "kind": "id", "required": true },
+        "label": { "kind": "string" },
+        "options": { "kind": "list", "of": "option", "required": true },
+        "many": { "kind": "boolean", "default": false },
+        "columns": { "kind": "integer", "min": 1, "max": 4, "default": 3 },
+        "value": { "kind": "any" },
+        "required": { "kind": "boolean", "default": true }
+      }
+    },
+    "reorder": {
+      "group": "input",
+      "doc": "Items the person puts in order by dragging or with the arrow buttons.",
+      "input": "the options' values in the person's order",
+      "props": {
+        "id": { "kind": "id", "required": true },
+        "label": { "kind": "string" },
+        "options": { "kind": "list", "of": "option", "required": true }
+      }
+    }
+  }
+}

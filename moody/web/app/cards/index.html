@@ -1,0 +1,32 @@
+<!doctype html>
+<!--
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+-->
+
+<!-- The development gallery of the agent's interactive cards, served at /app/cards/ and linked from nowhere in the
+     product: every kind of card over fixtures, with no account and no request. The brand token is filled from the
+     catalog at build time (vite.config.ts). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Interactive cards — %BRAND%</title>
+    <meta name="description" content="Development gallery of the interactive cards the %BRAND% agent answers with." />
+    <!-- A development page has nothing for a search engine. -->
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#080808" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <p style="padding: 2rem; font-family: system-ui, sans-serif; color: #ffffff; background: #080808">
+        The %BRAND% card gallery needs JavaScript to run.
+      </p>
+    </noscript>
+    <script type="module" src="/src/studio/ui/gallery/main.tsx"></script>
+  </body>
+</html>

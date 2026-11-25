@@ -1,6 +1,7 @@
 ---
 name: unreal
 description: Work on an Unreal Engine project, from a GitHub repository a whole team shares or from a template. Bring a developer's game into a cloud Unreal engine step by step (start the engine, which clones the linked repository, report what the project is, open it in the editor, switch the view to Unreal), answer what is in it (maps, animations, textures, meshes, materials, blueprints, sounds, effects, UI, data) from the repository with unreal_assets, and leave the team's branches and files as they are. Use for Games, Architecture, and Experiences projects, and whenever someone asks about an Unreal project or wants to work in Unreal Engine.
+operator_tools: unreal_projects, unreal_assets, unreal_open
 ---
 
 <!--
@@ -44,7 +45,8 @@ description: Work on an Unreal Engine project, from a GitHub repository a whole 
 
 ## A new project (no repository yet)
 
-1. Start the engine. Ask which template: Third Person, First Person, Top Down, Vehicle, or Blank.
+1. Ask which template: Third Person, First Person, Top Down, Vehicle, or Blank. Then start the
+   engine: the question needs none, and the engine costs credits while the person decides.
 2. With `engine_exec`, list the engine's `Templates/` folder, copy the Blueprint template
    (`TP_ThirdPersonBP` and the like) into the project's folder as `<Name>/`, and rename its
    `.uproject` to `<Name>.uproject`. Use the C++ template only when they ask for C++. No

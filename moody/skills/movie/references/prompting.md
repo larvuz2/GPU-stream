@@ -7,52 +7,43 @@
 # Prompting with references
 
 How a prompt names its references, the camera language that steers a shot, worked prompts for
-stills and shots in every format, how to fix a bad take, and the models with their limits and
-prices as fal lists them (checked 2026-11-24 on each model's page,
-`https://fal.ai/models/<model id>/llms.txt`).
+stills and shots in every format, and how to fix a result. It serves every `generate_image` and
+`generate_video` call, whoever makes it. Which entries exist and how they are made is library.md;
+tests, the shot list, and takes are shots.md.
 
 ## How references reach the model
 
-You pass library tags in `references` and write the same tags in the prompt. Seedance (and
-FLUX.2) know references by position, per media kind: `@Image1`, `@Image2`, ... in the order of
-the model's `image_urls`, `@Video1`, ... for `video_urls`, `@Audio1`, ... for `audio_urls`. The
-control plane is to send each tag's media in the order of `references` and put the model's name
-in place of each tag in the prompt (Moody Studio's plan has the tags name the references). Write
-prompts that work whichever way the names arrive:
-
-1. List `references` in the order the tags first appear in the prompt.
-2. Introduce each tag once with its canonical description: "@mara, a 34-year-old woman with
-   close-cropped black hair in a red raincoat". The words carry identity if a name does not.
-3. Then refer to it by tag or by the description, never by a new nickname.
-
-What the agent writes:
+You pass library tags in `references` and write the same tags in the prompt. The control plane
+sends each tag's newest image (for a video call, a take's video or a track's audio where the
+entry has no image), in the order of `references`, and rewrites the prompt for the model, which
+knows references only by position:
 
 ```text
-references: ["@mara", "@kitchen-night", "@locket"]
-prompt: "Medium close-up, eye level, 50mm. @mara, a 34-year-old woman with close-cropped
-black hair in a red raincoat, stands at the counter of @kitchen-night, a small apartment
-kitchen at night lit by one amber pendant lamp, rain on the window behind her. She turns
-@locket, a small tarnished silver locket, over in her fingers ..."
+references: ["@mara", "@kitchen-night"]
+prompt:     "Medium shot. @mara turns from the window of @kitchen-night. Static camera."
+
+the model reads:
+"Medium shot. @Image1 turns from the window of @Image2. Static camera.
+
+@Image1 is Mara. @Image2 is Kitchen, night."
 ```
 
-What Seedance should read once the tags are mapped: the same prompt with `@Image1`, `@Image2`,
-`@Image3` in place of the three tags, and `image_urls` in that order. A tag whose entry holds a
-video (a previous take) becomes `@Video1`; one holding audio becomes `@Audio1`. If a tool result
-shows the prompt reached the model with the tags unchanged, the descriptions are what carry the
-identity: keep them in.
+A take given as a reference becomes `@Video1`, and audio `@Audio1`, each kind counted on its own.
+So:
 
-Limits per call:
+1. Write every reference's tag in the prompt where it belongs. A tag in `references` that the
+   prompt never names is an image the model was not told what to do with.
+2. List `references` in the order the tags first appear in the prompt.
+3. Introduce each tag once with its entry's description, word for word: "@mara, a 34-year-old
+   woman with close-cropped black hair in a red raincoat". Then refer to it by tag, never by a
+   new nickname.
+4. A tag that is not in `references` stays in the prompt as plain text and means nothing to the
+   model: reference it or describe it in words.
 
-| Model | Images | Videos | Audio | Total | Notes |
-|---|---|---|---|---|---|
-| Seedance 2.5 (and US) | 30 | 10 | 10 | 50 | videos 1.8-30.2 s each, 30.2 s combined, 24-60 fps |
-| Seedance 2.5 Flash | 10 | 5 | 5 | | |
-| Seedance 2.0, Fast, Mini | 9 | 3 | 3 | 12 | videos 2-15 s combined; one image or video required |
-| Nano Banana Pro edit | 14 | | | 14 | |
-| Seedream 5.5 edit | 10 | | | 10 | more than 10: only the last 10 are used |
-
-Two to four references per shot is the working range: the characters in frame, the place, and
-the prop the shot is about. Every extra reference competes for the model's attention.
+The most references one call takes is in each tool's `references` parameter, and a call over it
+is refused with the number. Two to four per shot is the working range: the characters in frame,
+the place, and the prop the shot is about. Every extra reference competes for the model's
+attention.
 
 ## Prompt anatomy for a shot
 
@@ -119,11 +110,13 @@ hour, overcast soft light, hard midday sun; high-key (bright, low contrast, ads 
 low-key (dark, contrasty, thriller); neon and mixed color temperatures for night city.
 
 **Motion and time.** "Slow motion" and "time-lapse" are understood; for speed changes you plan
-to make in the edit, generate at normal speed and retime with `clip.speedDuration`.
+to make in the edit, generate at normal speed and retime there.
 
 ## Stills: worked prompts
 
-**Character look development** (no references, `aspect_ratio: "3:4"`, `count: 4`):
+**Character candidate** (no references, `aspect_ratio: "3:4"`, one call per candidate, each saved
+under a tag of its own; vary the face, the hair, or the bearing between them, inside the
+description):
 
 ```text
 Portrait photograph of Mara, a 34-year-old woman with close-cropped black hair, an oval face,
@@ -132,25 +125,25 @@ Neutral expression, looking at the camera. Soft even studio light, plain mid-gra
 85mm, natural skin texture.
 ```
 
-**Turnaround sheet** (`references: ["@mara"]`, `aspect_ratio: "16:9"`, `count: 2`, saved to the
-entry):
+**Turnaround sheet** (`references: ["@mara-look-b"]`, the candidate the person picked;
+`aspect_ratio: "16:9"`; saved into `@mara`, whose reference it becomes):
 
 ```text
-Character turnaround sheet of @mara, the same woman as the reference, full body, four views
+Character turnaround sheet of @mara-look-b, the same woman as the reference, full body, four views
 side by side on a plain mid-gray background: front, three-quarter left, profile left, back.
 Same red knee-length raincoat, gray knit, black jeans, ankle boots in every view. Even soft
 light, no shadows on the background, no text, no props.
 ```
 
-**Face sheet** (`references: ["@mara"]`, `aspect_ratio: "1:1"`): "Close-up portrait of @mara,
+**Face** (`references: ["@mara"]`, `aspect_ratio: "1:1"`, saved as `@mara-face`): "Close-up portrait of @mara,
 the same woman as the reference, three-quarter view, neutral expression, soft key light from the
 left, plain gray background. Keep every facial feature identical."
 
-**Expression or wardrobe variant** (`references: ["@mara"]`): change one thing and say what
-stays: "... the same woman, same hair and face, now soaked from rain, raincoat dark with water,
-hair plastered to her forehead."
+**Expression or wardrobe variant** (`references: ["@mara"]`, saved as an entry of its own such as
+`@mara-wet`): change one thing and say what stays: "... the same woman, same hair and face, now
+soaked from rain, raincoat dark with water, hair plastered to her forehead."
 
-**Environment plate** (no people, at the delivery aspect):
+**Environment plate** (no people, at the film's aspect ratio):
 
 ```text
 Empty small apartment kitchen at night, third floor. A single amber pendant lamp over a worn
@@ -228,15 +221,15 @@ silver locket, lies open in a palm; inside, a faded photograph of a boy. Static.
 1: wide ... Cut to shot 2: close-up ... Cut to shot 3: ..." Keep each part to one action; you
 can still cut inside it in the edit.
 
-**Continuing a shot** (Seedance 2.5): give the previous take's tag as a reference and say what
-continues: "Continuing @s01-sh20-t1: @jonas steps inside and closes the door behind him ...".
-Input video seconds are billed with the output.
+**Continuing a shot:** give the previous take's tag as a reference, where it reaches the model as
+`@Video1`, and say what continues: "Continuing @s01-sh20-t1: @jonas steps inside and closes the
+door behind him ...". The seconds of the take you pass are billed with the seconds generated.
 
 ## Fixing a take
 
 | Problem | Fix |
 |---|---|
-| The face drifts from the reference | Fewer references; add the face sheet; repeat the canonical description; a closer shot size |
+| The face drifts from the reference | Fewer references; add the face entry (`@mara-face`) as a reference; repeat the description word for word; a closer shot size |
 | Two characters blend | One reference image per character, both described with their difference ("the older man", "the woman in red"); stage them apart in the frame |
 | Wrong or extra camera move | Put the move right after the frame line; one move only; "static, locked off" when none |
 | Extra people appear | "@mara alone in the frame"; describe the empty space |
@@ -249,40 +242,9 @@ Input video seconds are billed with the output.
 
 Change one thing per retake and say which, so the person learns with you what moves the result.
 
-## Models and prices
+## What the tools take
 
-**Video** (reference-to-video on fal). Seconds are of generated video unless noted.
-
-| Model id | Duration | Resolutions | Price |
-|---|---|---|---|
-| `bytedance/seedance-2.5/reference-to-video` | auto, 4-14 s | 480p, 720p, 1080p, 4k | $0.2205, $0.4730, $1.164, $1.840 per s |
-| `bytedance/seedance-2.5/us/reference-to-video` | same | same | same |
-| `bytedance/seedance-2.5/flash/reference-to-video` | auto, 4-30 s | 480p, 720p | $0.1345, $0.3024 per s |
-| `bytedance/seedance-2.0/reference-to-video` | auto, 4-15 s | 480p to 4k | $0.014 per 1,000 tokens (720p about $0.30 per s) |
-| `bytedance/seedance-2.0/fast/reference-to-video` | auto, 4-15 s | 480p, 720p | $0.2419 per s at 720p |
-| `bytedance/seedance-2.0/mini/reference-to-video` | auto, 4-15 s | 480p, 720p | $0.007 per 1,000 tokens (720p about $0.15 per s) |
-
-- Tokens are width x height x (input video seconds + output seconds) x 24 / 1024; 720p is 21,600
-  tokens a second. With any video reference, Seedance 2.5 bills the whole request at $0.0128 per
-  1,000 tokens at 480p and 720p (about $0.28 per second of input plus output at 720p); Flash and
-  the 2.0 tiers multiply by about 0.6 and also count the input seconds.
-- Aspect ratios on all: `auto`, `21:9`, `16:9`, `4:3`, `1:1`, `3:4`, `9:16`.
-- Seedance 2.5 also takes `task` (`reference`, `editing` of a reference video, `extension` of
-  one, or `auto`), `draft` (a 480p preview whose `draft_id` `bytedance/seedance-2.5/draft/complete`
-  renders at 1080p or 4K within 14 days, the same take), `return_last_frame`, `seed`, and
-  `generate_audio` (on by default, same price). Use them when the control plane exposes them;
-  `generate_video` today takes the prompt, references, duration, aspect ratio, and resolution.
-
-**Images** (multi-reference editing on fal):
-
-| Model id | References | Price | Best for |
-|---|---|---|---|
-| `fal-ai/nano-banana-pro/edit` | 14 | $0.15 per image (4K x2) | character sheets, composites, identity across variants |
-| `fal-ai/nano-banana-2/edit` | 14 | $0.08 per image (0.5K x0.75, 2K x1.5, 4K x2) | the same at lower cost |
-| `bytedance/seedream/v5.5/edit` | 10 | $0.03 (1K-1.5K) or $0.0405 (2K) plus $0.012 per reference, per image | volume look development, transparent-background prop sheets |
-| `fal-ai/flux-2-pro/edit` | not stated | $0.03 first megapixel, $0.015 each further (inputs count) | photoreal products; names references `@Image1` |
-| `fal-ai/flux-2-max/edit` | not stated | $0.07 first megapixel, $0.03 each further | the same, highest fidelity |
-| `openai/gpt-image-2.6/sunburst/edit` | 16 | token-priced | tight, scoped edits over many rounds |
-
-Text-to-image versions exist for each (`fal-ai/nano-banana-pro`, `bytedance/seedream/v5.5/
-text-to-image`, ...) for look development without references.
+The aspect ratios, the resolutions, the model choices, the shortest and longest clip, and the
+most references are in the parameters of `generate_image` and `generate_video`, and a call
+outside them is refused with the limit. Prices are in the skill's "Cost and time". Every prompt
+here ends with the film's style line (`@look`'s `style_line`), the same words in every call.

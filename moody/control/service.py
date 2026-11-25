@@ -33,7 +33,13 @@ and their files objects of a private Storage bucket, handed out only as signed
 links that expire. What the agent does in a project arrives as an append-only
 log of events the page polls (`events`), and a message to the agent claims the
 project's one turn in the database before a job runs it (`send_message`,
-`agent.py`). The user's GitHub account is connected through a GitHub App whose
+`agent.py`). A message may lock in an interactive card the agent showed
+(`ui`), whose values go to the agent with it. Where the agent waits for the
+person's approval of a step, their answer is recorded once, in the database
+(`answer_approval`), and `always` is kept among the project's permissions,
+which the person can also set and clear (`update_project`). What a project's
+agent can use beyond its tools is listed for the page (`connectors`). The
+user's GitHub account is connected through a GitHub App whose
 user token, and the refresh token that renews it, are kept sealed
 (`github_client.py`); the token is refreshed only when it is about to expire
 (`github_token`), and the repositories offered are those of the app's
@@ -126,7 +132,16 @@ MEGABYTE = 1024 * 1024
 MEDIA_LIMIT_BYTES = 200 * MEGABYTE
 # The folder of a project's files in the bucket that holds the agent's previews, which are not library entries
 PREVIEWS = "previews"
+# The events that carry files, by kind, and the field of each that lists them by their paths in the bucket
+SIGNED_FILES = {"preview": "items", "ui": "media"}
 MESSAGE_LIMIT = 20000
+# The largest state of an interactive card a message may lock in, as JSON
+UI_VALUE_LIMIT_BYTES = 64 * 1024
+# What a project's permissions say of a tool the person no longer wants to be asked about, and how a tool is named
+ALWAYS = "always"
+TOOL_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")
+# What the person may answer an approval with
+APPROVAL_DECISIONS = ("once", ALWAYS, "deny")
 PROJECT_FIELDS = (
     "id",
     "name",
@@ -139,6 +154,7 @@ PROJECT_FIELDS = (
     "github_branch",
     "library_sections",
     "plan",
+    "permissions",
 )
 ASSET_FIELDS = ("id", "section", "name", "tag", "description", "metadata", "created_at", "updated_at")
 EVENT_FIELDS = ("id", "turn_id", "kind", "data", "created_at")
@@ -258,6 +274,30 @@ class Config:
     preview_files: int = 12
     # The largest file or folder `engine_send` carries from one running engine to another
     transfer_limit_bytes: int = 4096 * MEGABYTE
+    # The agent's loop (`loop.py`): how hard the model works, whether it thinks, and the model a request falls
+    # back to where the agent's own is overloaded or declines; empty for none
+    agent_effort: str = "high"
+    agent_thinking: bool = True
+    agent_fallback_model: str = ""
+    # The models a subagent's `balanced` and `light` tiers run on; `inherit` is the agent's own
+    agent_model_balanced: str = "claude-sonnet-5-5"
+    agent_model_light: str = "claude-haiku-5-5"
+    # What one turn may spend on the model, in dollars as the loop prices it, and the most steps it may take;
+    # zero for no limit
+    turn_budget_usd: float = 10.0
+    turn_limit: int = 200
+    # How long a step waits for the person's approval before the agent is told to end its turn and ask
+    approval_seconds: float = 600
+    # Where the loop reaches the Messages API where not Anthropic's own address: a proxy that holds the key
+    anthropic_base_url: str = ""
+    # Under which a turn's working directory is made, `<root>/<project id>`. The loop keys a session's transcript
+    # by that path, so it is the same on every machine and changing it starts every project's session anew
+    loop_root: str = "/tmp/moody-loop"
+    # Variables of the worker's environment the loop's process also gets, beside the Anthropic key: a proxy's
+    # address, a certificate bundle. Nothing else of the worker's environment reaches it
+    loop_env: frozenset[str] = frozenset()
+    # The `claude` program the loop runs, where not the one the SDK bundles
+    loop_cli: str = ""
 
     @property
     def supabase(self) -> bool:
@@ -328,6 +368,7 @@ class Store:
         "no_project": (404, "No such project."),
         "no_seats": (409, "Every seat of this app is in use. Try again when one is free."),
         "turn_running": (409, "The agent is still working on this project. Wait for it, or stop it."),
+        "no_approval": (404, "The agent is not waiting for that approval."),
     }
 
     def __init__(self, url: str, key: str) -> None:
@@ -409,6 +450,21 @@ class Store:
             timeout=300,
         )
         response.raise_for_status()
+
+    def download(self, bucket: str, path: str, limit: int) -> bytes:
+        """A file of a bucket, whole.
+
+        Raises:
+            ValueError: The file is larger than `limit` bytes; no more than that is read of it.
+        """
+        with self.http.stream("GET", f"/storage/v1/object/{bucket}/{quote(path)}", timeout=300) as response:
+            response.raise_for_status()
+            data = bytearray()
+            for chunk in response.iter_bytes():
+                data += chunk
+                if len(data) > limit:
+                    raise ValueError(f"{path} is larger than {limit} bytes")
+        return bytes(data)
 
     def sign(self, bucket: str, paths: list[str], seconds: int) -> dict[str, str]:
         """Links that read each path for `seconds`, by path; a path with no file has none."""
@@ -975,17 +1031,27 @@ class Sessions:
         name: str | None = None,
         pinned: bool | None = None,
         library_sections: list[str] | None = None,
+        permissions: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Rename the user's project, pin or unpin it, or set its library's sections.
+        """Rename the user's project, pin or unpin it, set its library's sections, or set what its agent may do unasked.
 
         Pinning leaves `updated_at` as it was, so a project keeps its place
-        among the recent ones when it is pinned.
+        among the recent ones when it is pinned, and so does a change of
+        permissions. `permissions` is the whole of them, `{tool: "always"}`:
+        a tool left out is one the agent asks about again.
 
         Raises:
-            Refused: 400 for a name that is blank.
+            Refused: 400 for a name that is blank, or permissions that are not a tool's name to `always`.
         """
         row = self.owned_project(user, project_id)
         changes: dict[str, Any] = {}
+        if permissions is not None:
+            if len(permissions) > 64 or any(
+                not isinstance(tool, str) or not TOOL_NAME.fullmatch(tool) or value != ALWAYS
+                for tool, value in permissions.items()
+            ):
+                raise Refused(400, f'Permissions name a tool and say "{ALWAYS}" for it.')
+            changes["permissions"] = permissions
         if name is not None:
             cleaned = " ".join(name.split())[:120]
             if not cleaned:
@@ -993,7 +1059,7 @@ class Sessions:
             changes["name"] = cleaned
         if library_sections is not None:
             changes["library_sections"] = clean_sections(library_sections)
-        if changes:
+        if changes.keys() - {"permissions"}:
             changes["updated_at"] = now()
         if pinned is not None:
             changes["pinned"] = pinned
@@ -1128,6 +1194,15 @@ class Sessions:
         ]
         asset["thumbnail_url"] = next((item["url"] for item in asset["media"] if item["kind"] == "image"), None)
         return asset
+
+    @staticmethod
+    def kept_asset(row: dict[str, Any]) -> dict[str, Any]:
+        """A library entry as an event of the log keeps it: its fields, and its files by their paths in the bucket.
+
+        `shown_events` turns it into the entry the API shows, with links
+        signed for that reading.
+        """
+        return {**{name: row[name] for name in ASSET_FIELDS}, "media": row["media"]}
 
     def links(self, rows: list[dict[str, Any]]) -> dict[str, str]:
         """Signed links to every file of these entries, by path, in one call to Storage."""
@@ -1366,26 +1441,52 @@ class Sessions:
         )
         return {"events": self.shown_events(rows), "running": self.turn_running(project)}
 
-    def shown_events(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Events as the API shows them, each `preview`'s files under links signed for this reading.
+    @staticmethod
+    def event_files(row: dict[str, Any]) -> list[dict[str, Any]]:
+        """The files an event of the log shows, each kept by its path in the bucket.
 
-        A preview is kept in the log by its files' paths in the bucket, never by a link: a link
-        expires within the hour, and work in progress is what a person scrolls back to the next
-        day. So each page of events is signed as it is read, in one request for all of its
-        previews, and a file that is gone is left out of its preview.
+        A `preview`'s items and an interactive card's files (`SIGNED_FILES`),
+        the results under a call (`tool_end`'s `media`), and the files of the
+        entry a `library` event carries.
         """
-        paths = [item["path"] for row in rows if row["kind"] == "preview" for item in row["data"].get("items", [])]
+        data = row["data"]
+        if row["kind"] in SIGNED_FILES:
+            return data.get(SIGNED_FILES[row["kind"]], [])
+        if row["kind"] == "tool_end":
+            return data.get("media", [])
+        if row["kind"] == "library":
+            return data.get("asset", {}).get("media", [])
+        return []
+
+    def shown_events(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Events as the API shows them, every file in them under a link signed for this reading.
+
+        The log keeps a file by its path in the bucket, never by a link: a
+        link expires within the hour, and a conversation is what a person
+        scrolls back through the next day. So each page of events is signed
+        as it is read, in one request for all of its files (`event_files`). A
+        preview's or a card's file, or a call's result, that is gone is left
+        out; a library entry keeps its place with no link, as the library
+        shows it.
+        """
+        paths = [item["path"] for row in rows for item in self.event_files(row)]
         links = self.store.sign(LIBRARY_BUCKET, paths, SIGNED_URL_SECONDS) if paths else {}
         shown = []
         for row in rows:
-            event = self.public_event(row)
-            if row["kind"] == "preview":
+            event, data = self.public_event(row), row["data"]
+            if row["kind"] in SIGNED_FILES:
+                held = SIGNED_FILES[row["kind"]]
                 items = [
                     {**{key: value for key, value in item.items() if key != "path"}, "url": links[item["path"]]}
-                    for item in row["data"].get("items", [])
+                    for item in data.get(held, [])
                     if item["path"] in links
                 ]
-                event["data"] = {**row["data"], "items": items}
+                event["data"] = {**data, held: items}
+            elif row["kind"] == "tool_end" and "media" in data:
+                media = [{"kind": item["kind"], "url": links[item["path"]]} for item in data["media"] if item["path"] in links]
+                event["data"] = {**data, "media": media}
+            elif row["kind"] == "library" and "asset" in data:
+                event["data"] = {**data, "asset": self.public_asset(data["asset"], links)}
             shown.append(event)
         return shown
 
@@ -1394,27 +1495,36 @@ class Sessions:
         row = self.store.insert("project_events", {"project_id": project_id, "turn_id": turn_id, "kind": kind, "data": data})
         return self.public_event(row)
 
-    def send_message(self, user: User, project_id: str, text: str) -> str:
+    def send_message(self, user: User, project_id: str, text: str, ui: dict[str, Any] | None = None) -> str:
         """Start the agent's turn on the user's project with this message, hand it to a job, and return its ID.
+
+        `ui` locks in an interactive card the agent showed, `{ui_id, value}`:
+        the card has to be one of the project's `ui` events, and its state is
+        kept on the turn's `user_message` event as it was sent. A message
+        that locks a card in may have no words of its own.
 
         Raises:
             Refused: 503 while no agent is configured or its job cannot be started, 400 for an empty
-                message, 413 for one over `MESSAGE_LIMIT`, 409 while another turn runs.
+                message or a `ui` that is not a card and its state, 404 for a card the project never
+                showed, 413 for a message over `MESSAGE_LIMIT` or a state over
+                `UI_VALUE_LIMIT_BYTES`, 409 while another turn runs.
         """
         if not self.config.agent:
             raise Refused(503, "The agent is not switched on yet.")
         text = text.strip()
-        if not text:
+        if not text and ui is None:
             raise Refused(400, "Write a message first.")
         if len(text) > MESSAGE_LIMIT:
             raise Refused(413, "That message is too long.")
         project = self.owned_project(user, project_id)
+        locked = self.locked_card(project, ui) if ui is not None else None
         turn_id = self.store.rpc(
             "moody_begin_turn",
             p_project=project["id"],
             p_user=user.id,
             p_text=text,
             p_stale_seconds=TURN_STALE_SECONDS,
+            p_ui=locked,
         )
         try:
             self.jobs.turn(project["id"], turn_id)
@@ -1424,6 +1534,95 @@ class Sessions:
             self.store.rpc("moody_end_turn", p_project=project["id"], p_turn=turn_id)
             raise Refused(503, "The agent could not be started. Try again.") from error
         return turn_id
+
+    def locked_card(self, project: dict[str, Any], ui: dict[str, Any]) -> dict[str, Any]:
+        """A message's `ui` as the turn's first event keeps it: the card's ID and the state it was locked in with.
+
+        Raises:
+            Refused: 400 for a `ui` without a card's ID or whose state is not JSON, 413 for a state
+                over `UI_VALUE_LIMIT_BYTES`, 404 for a card that is no `ui` event of the project.
+        """
+        ui_id = ui.get("ui_id")
+        if not isinstance(ui_id, str) or not ui_id or "value" not in ui:
+            raise Refused(400, "A locked-in card is its ui_id and its value.")
+        try:
+            size = len(json.dumps(ui["value"], allow_nan=False).encode())
+        except (TypeError, ValueError):
+            raise Refused(400, "A card's value is JSON.") from None
+        if size > UI_VALUE_LIMIT_BYTES:
+            raise Refused(413, "That card's value is too large.")
+        shown = self.store.rows("project_events", project_id=f"eq.{project['id']}", kind="eq.ui")
+        if not any(row["data"].get("ui_id") == ui_id for row in shown):
+            raise Refused(404, "This project has no such card.")
+        return {"ui_id": ui_id, "value": ui["value"]}
+
+    def answer_approval(self, user: User, project_id: str, approval_id: str, decision: str) -> bool:
+        """Record the person's answer to an approval the agent of their project waits on; returns whether it stands.
+
+        An approval is answered once: the answer does not stand where another
+        was recorded first, which is also what a wait that ran out is
+        (`moody_resolve_approval`). `always` is kept for the tool among the
+        project's permissions by the same function.
+
+        Raises:
+            Refused: 400 for an answer that is none of `APPROVAL_DECISIONS`, 404 for an approval the
+                project's agent never asked for.
+        """
+        if decision not in APPROVAL_DECISIONS:
+            raise Refused(400, f"An approval is answered with one of {', '.join(APPROVAL_DECISIONS)}.")
+        project = self.owned_project(user, project_id)
+        standing = self.store.rpc(
+            "moody_resolve_approval", p_project=project["id"], p_approval=approval_id, p_decision=decision
+        )
+        return standing == decision
+
+    def connectors(self, user: User, project_id: str) -> list[dict[str, Any]]:
+        """The services the agent of the user's project can use, or could once the person connects them.
+
+        Each is `{id, name, kind, state, detail}`, derived from what the
+        deployment is configured with and what the person connected:
+        generation through fal, GitHub and the project's repository, the
+        loop's web search, and, for a project whose discipline uses Unreal
+        Engine, the Epic link its editor is licensed through. A service the
+        deployment is not configured for is `off`.
+        """
+        project = self.owned_project(user, project_id)
+        found = [
+            {
+                "id": "fal", "name": "fal", "kind": "generation",
+                "state": "connected" if self.config.generation else "off",
+                "detail": "Image and video generation." if self.config.generation else "Generation is not configured on this deployment.",
+            }
+        ]
+        github = self.github_status(user)
+        if not github["configured"]:
+            state, detail = "off", "GitHub is not configured on this deployment."
+        elif not github["connected"]:
+            state, detail = "available", "Connect GitHub to link a repository to this project."
+        elif project["github_repo"]:
+            state, detail = "connected", f"{project['github_repo']}, as {github.get('login', '')}; the agent saves to a branch of its own."
+        else:
+            state, detail = "available", f"Connected as {github.get('login', '')}; no repository is linked to this project yet."
+        found.append({"id": "github", "name": "GitHub", "kind": "repository", "state": state, "detail": detail})
+        found.append(
+            {
+                "id": "web", "name": "Web search", "kind": "search",
+                "state": "connected" if self.config.agent else "off",
+                "detail": "The agent searches the web and reads pages." if self.config.agent else "The agent is not switched on yet.",
+            }
+        )
+        if "unreal" in self.catalog.disciplines.get(project["discipline"], {}).get("engines", []):
+            epic = self.epic_status(user)
+            if not epic["configured"]:
+                state, detail = "off", "The Epic connection is not configured on this deployment."
+            elif not epic["connected"]:
+                state, detail = "available", "Connect the GitHub account linked to Epic to bring your own copy of the Unreal Editor."
+            elif epic.get("linked"):
+                state, detail = "connected", f"{epic.get('login', '')} is linked to Epic: an Unreal engine starts with your copy of the editor."
+            else:
+                state, detail = "available", epic.get("detail") or f"{epic.get('login', '')} is not linked to Epic yet."
+            found.append({"id": "epic", "name": "Epic Games", "kind": "license", "state": state, "detail": detail})
+        return found
 
     def stop_turn(self, user: User, project_id: str) -> bool:
         """Ask the running turn of the user's project to stop; returns whether one was running."""

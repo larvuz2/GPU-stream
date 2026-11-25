@@ -34,20 +34,34 @@
  * pictures. The demo's Epic connection is linked, the GitHub account whose Epic account the
  * editor runs on.
  *
+ * A turn is a script (`demoKit.ts`), played by {@link createDemoControlPlane}'s `play`: its events
+ * are written as their times come, and a turn that asks before a tool waits on its approval until
+ * the person answers it, then plays the rest. An answer of "always" is kept in the project's
+ * permissions, so the same tool runs without asking from then on, until the person revokes it.
+ * Each project also has an environment: the connectors, subagents, and skills its agent works
+ * with. Every reading of a log returns its files under addresses of that reading (`?read=`), as
+ * the control plane signs them afresh each time, so a page that reads the log again gets other
+ * addresses for the same files.
+ *
  * The scene parameter (`?demo=<scene>`) picks a state: the film by default, `offline` for a
  * server with no integrations configured, `empty` for an account with no projects, `legacy` for a
- * control plane from before the studio, which answers its routes with 404, and `no-epic` for an
+ * control plane from before the studio, which answers its routes with 404, `no-epic` for an
  * Epic connection whose GitHub account is not linked to Epic, where opening the game in Unreal
- * answers with the steps that link it.
+ * answers with the steps that link it, and `movie` for a new film that starts from its first
+ * message with no engine, which plays the agent thinking, asking, delegating to subagents, and
+ * asking before it starts one (`demoMovie.ts`).
  * @module
  */
 import {
+  ALWAYS,
   ApiError,
   DESKTOP_STREAM,
   type ApiKey,
   type Asset,
+  type Connector,
   type ControlPlane,
   type EngineStream,
+  type Environment,
   type EpicStatus,
   type GitHubRepo,
   type GitHubStatus,
@@ -58,21 +72,31 @@ import {
   type PreviewItem,
   type Project,
   type Session,
-  type SessionStatus,
+  type SkillInfo,
   type StudioEvent,
   type TurnId,
   type UnrealProject,
 } from '../lib/api';
-import { catalog, findApp } from '../lib/catalog';
+import { catalog, findApp, findDiscipline } from '../lib/catalog';
 import { appImage } from '../lib/media';
+import {
+  asset,
+  DAY,
+  HOUR,
+  MINUTE,
+  SECOND,
+  snapshot,
+  still,
+  type EventBody,
+  type Pause,
+  type Scheduled,
+  type Script,
+  type Simulation,
+} from './demoKit';
+import { FILM_DISCIPLINES, MOVIE_AGENTS, MOVIE_PROJECT, movieOpening, movieProject, movieTurn } from './demoMovie';
 
 /** The address the demo's account is shown under. */
 export const DEMO_EMAIL = 'you@example.com';
-
-const SECOND = 1000;
-const MINUTE = 60 * SECOND;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
 
 /** The status a refusal of the demo carries: a feature it does not have. */
 const NOT_CONFIGURED = 503;
@@ -85,9 +109,6 @@ const AVATAR = `data:image/svg+xml,${encodeURIComponent(
   "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='#191919'/><text x='32' y='41' font-family='system-ui,sans-serif' font-size='26' font-weight='700' text-anchor='middle' fill='#ffffff'>M</text></svg>",
 )}`;
 
-/** A still of the site's artwork, as a media file. */
-const still = (file: string, name: string): Media => ({ kind: 'image', url: `/media/${file}`, name });
-
 const PIP = still('character-theo.webp', 'pip-reference.webp');
 const MARA = still('character-mara.webp', 'mara-reference.webp');
 const GLASSHOUSE = still('discipline-architecture.webp', 'glasshouse.webp');
@@ -95,32 +116,6 @@ const SPIRE = still('discipline-media.webp', 'spire-city.webp');
 const PEAKS = still('discipline-experiences.webp', 'ember-peaks-concept.webp');
 const BEACON = still('discipline-art.webp', 'beacon.webp');
 const RUNNERS = still('discipline-fashion.webp', 'runners.webp');
-
-/** One state of a simulated engine, entered at a point in time. */
-interface Phase {
-  /** When the state is entered, in milliseconds since the epoch. */
-  at: number;
-  /** The state. */
-  status: SessionStatus;
-  /** Why it ended, for a final state. */
-  reason?: string;
-}
-
-/** A simulated engine: what it runs, for which project, and the states it passes through. */
-interface Simulation {
-  /** The engine's identifier. */
-  id: string;
-  /** Its project. */
-  project: string;
-  /** The catalog app. */
-  app: string;
-  /** The catalog tier. */
-  tier: string;
-  /** The states, in the order they are entered. */
-  phases: Phase[];
-  /** The pictures it streams, for an engine that streams more than its desktop. */
-  streams?: EngineStream[];
-}
 
 /** The name of an Unreal engine's second picture, the editor's own stream. */
 const UNREAL_STREAM = 'Unreal';
@@ -179,51 +174,6 @@ function gamePlan(opened: boolean): PlanItem[] {
   ];
 }
 
-/**
- * Reads a simulated engine at a point in time.
- *
- * @param simulation The engine's schedule.
- * @param now The time to read it at.
- * @returns The engine as the control plane would report it then.
- */
-function snapshot(simulation: Simulation, now: number): Session {
-  const reached = simulation.phases.filter((phase) => phase.at <= now);
-  const first = simulation.phases[0];
-  const current = reached.at(-1) ?? first;
-  const started = reached.find((phase) => phase.status === 'running');
-  const ended = reached.find((phase) => phase.status === 'ended' || phase.status === 'failed');
-  const rate = catalog.tiers.find((tier) => tier.id === simulation.tier)?.credits_per_minute ?? 0;
-  return {
-    id: simulation.id,
-    project_id: simulation.project,
-    app: simulation.app,
-    tier: simulation.tier,
-    region: 'auto',
-    status: current?.status ?? 'ended',
-    created_at: new Date(first?.at ?? now).toISOString(),
-    started_at: started === undefined ? null : new Date(started.at).toISOString(),
-    ended_at: ended === undefined ? null : new Date(ended.at).toISOString(),
-    end_reason: ended?.reason ?? null,
-    credits_used: started === undefined ? 0 : Math.ceil(((ended?.at ?? now) - started.at) / MINUTE) * rate,
-    queue_position: current?.status === 'queued' ? 1 : null,
-    ...(simulation.streams === undefined ? {} : { streams: simulation.streams }),
-  };
-}
-
-/** Leaves keys out of each member of a union, keeping the union. */
-type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
-
-/** An event as the demo's agent writes it, before the log numbers and dates it. */
-type EventBody = DistributiveOmit<StudioEvent, 'id' | 'created_at'>;
-
-/** An event waiting for its time. */
-interface Scheduled {
-  /** When it is written, in milliseconds since the epoch. */
-  at: number;
-  /** What it is. */
-  event: EventBody;
-}
-
 /** The film's plan as the demo opens. */
 function filmPlan(stage: 'opening' | 'answered'): PlanItem[] {
   return [
@@ -235,29 +185,6 @@ function filmPlan(stage: 'opening' | 'answered'): PlanItem[] {
     { id: 'p6', title: 'Cut, color, and mix in FilmCraft', status: 'pending' },
     { id: 'p7', title: 'Poster in PhotoCraft (coming next)', status: 'blocked' },
   ];
-}
-
-/**
- * Builds an asset of the film's library.
- *
- * @param fields What sets it apart.
- * @param at When it was made.
- * @returns The asset.
- */
-function asset(
-  fields: Pick<Asset, 'id' | 'section' | 'name' | 'tag' | 'description' | 'media'> & {
-    metadata?: Record<string, unknown>;
-  },
-  at: number,
-): Asset {
-  const time = new Date(at).toISOString();
-  return {
-    metadata: null,
-    ...fields,
-    created_at: time,
-    updated_at: time,
-    thumbnail_url: fields.media.find((media) => media.kind === 'image')?.url ?? null,
-  };
 }
 
 /**
@@ -938,6 +865,54 @@ function demoRepos(now: number): GitHubRepo[] {
 }
 
 /**
+ * An event as one reading of the log returns it: each file it carries under an address of that
+ * reading, the way the control plane signs a file afresh for each one.
+ *
+ * @param event The event as it was written.
+ * @param read Which reading of the log this is.
+ * @returns The event with that reading's addresses.
+ */
+function readAs(event: EventBody, read: number): EventBody {
+  const sign = <File extends { url: string }>(file: File): File => ({
+    ...file,
+    url: `${file.url}${file.url.includes('?') ? '&' : '?'}read=${read}`,
+  });
+  switch (event.kind) {
+    case 'tool_end':
+      return event.data.media === undefined ? event : { ...event, data: { ...event.data, media: event.data.media.map(sign) } };
+    case 'preview':
+      return { ...event, data: { ...event.data, items: event.data.items.map(sign) } };
+    case 'ui':
+      return { ...event, data: { ...event.data, media: event.data.media.map(sign) } };
+    default:
+      return event;
+  }
+}
+
+/** The skill every project's agent reads in the demo. */
+const STUDIO_SKILL: SkillInfo = {
+  name: 'studio',
+  description: 'How a production runs across engines, and how work moves between them as files.',
+};
+
+/** The skill a film's agent reads in the demo. */
+const MOVIE_SKILL: SkillInfo = {
+  name: 'movie',
+  description: 'A film from idea to cut: the story, the cast, and the art style first, then shots, then the edit.',
+};
+
+/** What the skill of each engine that has one teaches, by the engine's app. */
+const ENGINE_SKILLS: Readonly<Record<string, string | undefined>> = {
+  filmcraft: 'Cutting, color, sound, titles, and export in FilmCraft.',
+  photocraft: 'Layers, masks, retouching, and key art in PhotoCraft.',
+  soundcraft: 'Writing, arranging, mixing, and mastering in SoundCraft.',
+  lightcraft: 'Developing and grading photographs in LightCraft.',
+  vectorcraft: 'Logos, identities, and patterns in VectorCraft.',
+  cadcraft: 'Drafting buildings and products in CADCraft.',
+  unreal: 'Opening, building, and working in Unreal projects.',
+};
+
+/**
  * Picks what the demo's agent says to a message, by what the message is.
  *
  * @param project The project.
@@ -945,68 +920,92 @@ function demoRepos(now: number): GitHubRepo[] {
  * @param turn The turn it starts.
  * @param start When the turn starts.
  * @param epicLinked Whether the demo's Epic connection is linked to Epic.
- * @returns The turn's events, with their times.
+ * @param said How many messages the person had sent in the project before this one.
+ * @returns The turn.
  */
-function reply(project: Project, text: string, turn: TurnId, start: number, epicLinked: boolean): Scheduled[] {
+function reply(
+  project: Project,
+  text: string,
+  turn: TurnId,
+  start: number,
+  epicLinked: boolean,
+  said: number,
+): Script {
   const at = (seconds: number): number => start + seconds * SECOND;
+  if (project.id === MOVIE_PROJECT) {
+    return movieTurn(said, turn, start);
+  }
   if (project.id === 'demo-game' && /\bopen\b.*\bunreal\b/i.test(text)) {
-    return openInUnreal(turn, at, epicLinked);
+    return { events: openInUnreal(turn, at, epicLinked) };
   }
   const opening = /cold open|workshop|violet flats|title card/i.test(text) && project.id === 'demo-film';
   if (opening) {
-    return [
-      {
-        at: at(1.2),
-        event: {
-          turn_id: turn,
-          kind: 'text',
-          data: {
-            text: 'Good call. Opening on @pip keeps us close to him from the first frame, and the lights dying behind him sets the clock running. Writing the shot list for scene 1 now.',
-          },
-        },
-      },
-      {
-        at: at(2),
-        event: {
-          turn_id: turn,
-          kind: 'tool_start',
-          data: { call_id: `${turn}-a`, tool: 'github_save', title: 'Shot list for scene 1' },
-        },
-      },
-      {
-        at: at(4.5),
-        event: {
-          turn_id: turn,
-          kind: 'tool_end',
-          data: { call_id: `${turn}-a`, ok: true, summary: 'shots.md · 6 shots · 0:52' },
-        },
-      },
-      { at: at(4.8), event: { turn_id: turn, kind: 'plan', data: { items: filmPlan('answered') } } },
-      {
-        at: at(5.6),
-        event: {
-          turn_id: turn,
-          kind: 'text',
-          data: {
-            text: '### Scene 1\n- **1A** Close on @pip’s hands at the bench, the workshop lamp flickering.\n- **1B** The window: Spire City’s towers going dark, block by block.\n- **1C** @beacon on the shelf, cold.\n\nShall I generate 1A to 1C with Seedance, using the references in the library?',
-          },
-        },
-      },
-      { at: at(6), event: { turn_id: turn, kind: 'turn_end', data: {} } },
-    ];
+    return { events: filmOpening(turn, at) };
   }
+  return {
+    events: [
+      {
+        at: at(1.5),
+        event: {
+          turn_id: turn,
+          kind: 'text',
+          data: {
+            text: 'Got it. This is the demo, so nothing is generated here, but in a real project I would get to work now and check in with you before any decision that is yours.',
+          },
+        },
+      },
+      { at: at(2), event: { turn_id: turn, kind: 'turn_end', data: {} } },
+    ],
+  };
+}
+
+/**
+ * The film agent's answer to how the film should open: the shot list for scene 1.
+ *
+ * @param turn The turn.
+ * @param at When each event is written, by seconds into the turn.
+ * @returns The turn's events.
+ */
+function filmOpening(turn: TurnId, at: (seconds: number) => number): Scheduled[] {
   return [
     {
-      at: at(1.5),
+      at: at(1.2),
       event: {
         turn_id: turn,
         kind: 'text',
         data: {
-          text: 'Got it. This is the demo, so nothing is generated here, but in a real project I would get to work now and check in with you before any decision that is yours.',
+          text: 'Good call. Opening on @pip keeps us close to him from the first frame, and the lights dying behind him sets the clock running. Writing the shot list for scene 1 now.',
         },
       },
     },
-    { at: at(2), event: { turn_id: turn, kind: 'turn_end', data: {} } },
+    {
+      at: at(2),
+      event: {
+        turn_id: turn,
+        kind: 'tool_start',
+        data: { call_id: `${turn}-a`, tool: 'github_save', title: 'Shot list for scene 1' },
+      },
+    },
+    {
+      at: at(4.5),
+      event: {
+        turn_id: turn,
+        kind: 'tool_end',
+        data: { call_id: `${turn}-a`, ok: true, summary: 'shots.md · 6 shots · 0:52' },
+      },
+    },
+    { at: at(4.8), event: { turn_id: turn, kind: 'plan', data: { items: filmPlan('answered') } } },
+    {
+      at: at(5.6),
+      event: {
+        turn_id: turn,
+        kind: 'text',
+        data: {
+          text: '### Scene 1\n- **1A** Close on @pip’s hands at the bench, the workshop lamp flickering.\n- **1B** The window: Spire City’s towers going dark, block by block.\n- **1C** @beacon on the shelf, cold.\n\nShall I generate 1A to 1C with Seedance, using the references in the library?',
+        },
+      },
+    },
+    { at: at(6), event: { turn_id: turn, kind: 'turn_end', data: {} } },
   ];
 }
 
@@ -1021,7 +1020,8 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   const legacy = scene === 'legacy';
   const offline = scene === 'offline';
   const epicLinked = scene !== 'no-epic';
-  let projects = scene === 'empty' ? [] : demoProjects(opened);
+  const movie = scene === 'movie';
+  let projects = scene === 'empty' ? [] : [...(movie ? [movieProject(opened)] : []), ...demoProjects(opened)];
   const libraries = new Map<string, Asset[]>([['demo-film', filmLibrary(opened)]]);
   const filmSimulation: Simulation = {
     id: 'demo-engine-1',
@@ -1084,6 +1084,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     },
   ];
   let counter = 100;
+  let reads = 0;
   const me: Me = { id: 'demo-user', email: DEMO_EMAIL, credits: 412, max_sessions: 3 };
   const health: Health = {
     ok: true,
@@ -1143,16 +1144,125 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   }
 
   /**
-   * Applies what an event written now describes, as the real agent's tools would.
+   * Applies what an event written now describes, as the real agent's tools would: the plan and the
+   * library's sections are the project's, and an asset is in its library.
    *
    * @param project The project.
    * @param scheduled The event.
    */
   function apply(project: string, scheduled: Scheduled): void {
     const { event } = scheduled;
+    if (!log(project).includes(scheduled)) {
+      // The turn was stopped before this event's time came.
+      return;
+    }
     if (event.kind === 'plan') {
       change(project, { plan: event.data.items });
+    } else if (event.kind === 'library') {
+      if ('asset' in event.data) {
+        store(project, event.data.asset);
+      } else {
+        change(project, { library_sections: event.data.sections });
+      }
     }
+  }
+
+  /** The turns waiting for the person's answer to an approval, by project. */
+  const pauses = new Map<string, Pause>();
+
+  /**
+   * Sets a turn, or the rest of one, going: its events are written as their times come, its
+   * engines start, and where it asks before a tool it waits there, unless the person always
+   * allows that tool in this project, which goes on without asking.
+   *
+   * @param projectId The project.
+   * @param script The turn.
+   */
+  function play(projectId: string, script: Script): void {
+    const now = Date.now();
+    const events = [...script.events];
+    const engines = [...(script.engines ?? [])];
+    let pause = script.pause;
+    while (pause !== undefined && find(projectId).permissions?.[pause.approval.tool] === ALWAYS) {
+      const rest = pause.resume(ALWAYS, pause.at);
+      events.push(...rest.events);
+      engines.push(...(rest.engines ?? []));
+      pause = rest.pause;
+    }
+    if (pause !== undefined) {
+      events.push({ at: pause.at, event: { turn_id: pause.turn, kind: 'approval', data: pause.approval } });
+      pauses.set(projectId, pause);
+    }
+    simulations = [...simulations, ...engines];
+    // The log numbers its events in the order they are written, so a turn goes in by time.
+    events.sort((a, b) => a.at - b.at);
+    log(projectId).push(...events);
+    for (const entry of events) {
+      window.setTimeout(
+        () => {
+          apply(projectId, entry);
+        },
+        Math.max(0, entry.at - now),
+      );
+    }
+  }
+
+  /**
+   * What a project's agent works with in the demo: generation, the web, the person's GitHub, Epic
+   * for a discipline that uses Unreal Engine, and the discipline's subagents and skills.
+   *
+   * @param project The project.
+   * @returns Its environment.
+   */
+  function environmentOf(project: Project): Environment {
+    const engines = findDiscipline(project.discipline)?.engines ?? [];
+    const connectors: Connector[] = [
+      {
+        id: 'fal',
+        name: 'fal',
+        kind: 'generation',
+        state: offline ? 'off' : 'connected',
+        detail: offline ? 'Not configured on this server' : 'Image and video models, billed in credits',
+      },
+      { id: 'web', name: 'Web search', kind: 'search', state: 'connected', detail: 'Searches and reads the web for references' },
+      {
+        id: 'github',
+        name: 'GitHub',
+        kind: 'repository',
+        state: !github.configured ? 'off' : github.connected ? 'connected' : 'available',
+        detail: !github.configured
+          ? 'Not configured on this server'
+          : github.connected
+            ? `Connected as ${github.login ?? LOGIN}`
+            : 'Connect it to keep the project’s documents in a repository',
+      },
+    ];
+    if (engines.includes('unreal')) {
+      connectors.push({
+        id: 'epic',
+        name: 'Epic Games',
+        kind: 'license',
+        state: !epic.configured ? 'off' : epic.linked === true ? 'connected' : 'available',
+        detail: epic.linked === true ? 'Your own Unreal Editor comes with an Unreal engine' : 'Link it for your own Unreal Editor',
+      });
+    }
+    const film = FILM_DISCIPLINES.has(project.discipline);
+    return {
+      connectors,
+      agents: film ? MOVIE_AGENTS : MOVIE_AGENTS.filter((agent) => agent.name === 'research'),
+      skills: [
+        STUDIO_SKILL,
+        ...(film ? [MOVIE_SKILL] : []),
+        ...engines.flatMap((engine) => {
+          const description = ENGINE_SKILLS[engine];
+          return description === undefined ? [] : [{ name: engine, description }];
+        }),
+      ],
+    };
+  }
+
+  if (movie) {
+    play(MOVIE_PROJECT, movieOpening(opened));
   }
 
   /**
@@ -1335,37 +1445,34 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
         const now = Date.now();
         const entries = log(projectId);
         const events: StudioEvent[] = [];
+        reads += 1;
         entries.forEach((scheduled, index) => {
           const id = index + 1;
           if (scheduled.at <= now && id > after) {
-            events.push({ ...scheduled.event, id, created_at: new Date(scheduled.at).toISOString() });
+            events.push({ ...readAs(scheduled.event, reads), id, created_at: new Date(scheduled.at).toISOString() });
           }
         });
-        const running = entries.some((scheduled) => scheduled.at > now);
+        const running = pauses.has(projectId) || entries.some((scheduled) => scheduled.at > now);
         return { events, running, cursor: events.at(-1)?.id ?? null };
       }, 120);
     },
-    sendMessage: (projectId, text) =>
+    sendMessage: (projectId, text, ui) =>
       soon(() => {
         const project = find(projectId);
         const entries = log(projectId);
         const now = Date.now();
-        if (entries.some((scheduled) => scheduled.at > now)) {
+        if (pauses.has(projectId) || entries.some((scheduled) => scheduled.at > now)) {
           throw new ApiError(409, 'A turn is already running.');
         }
         counter += 1;
         const turn = `turn-${counter}`;
-        const message: Scheduled = { at: now, event: { turn_id: turn, kind: 'user_message', data: { text } } };
-        const scheduled = [message, ...reply(project, text, turn, now, epicLinked)];
-        entries.push(...scheduled);
-        for (const entry of scheduled) {
-          window.setTimeout(
-            () => {
-              apply(projectId, entry);
-            },
-            Math.max(0, entry.at - now),
-          );
-        }
+        const said = entries.filter((scheduled) => scheduled.event.kind === 'user_message').length;
+        const message: Scheduled = {
+          at: now,
+          event: { turn_id: turn, kind: 'user_message', data: ui === undefined ? { text } : { text, ui } },
+        };
+        const answer = reply(project, text, turn, now, epicLinked, said);
+        play(projectId, { ...answer, events: [message, ...answer.events] });
         change(projectId, { updated_at: new Date(now).toISOString() });
         return turn;
       }),
@@ -1374,11 +1481,46 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
         const now = Date.now();
         const entries = log(projectId).filter((scheduled) => scheduled.at <= now);
         const last = entries.at(-1);
+        const pause = pauses.get(projectId);
+        if (pause !== undefined && pause.at <= now) {
+          entries.push({
+            at: now,
+            event: {
+              turn_id: pause.turn,
+              kind: 'approval_result',
+              data: { approval_id: pause.approval.approval_id, decision: 'expired' },
+            },
+          });
+        }
+        pauses.delete(projectId);
         if (last !== undefined && last.event.kind !== 'turn_end') {
           entries.push({ at: now, event: { turn_id: last.event.turn_id, kind: 'turn_end', data: {} } });
         }
         logs.set(projectId, entries);
       }),
+    approve: (projectId, approvalId, decision) =>
+      soon(() => {
+        const project = find(projectId);
+        const pause = pauses.get(projectId);
+        const now = Date.now();
+        if (pause?.approval.approval_id !== approvalId || pause.at > now) {
+          return false;
+        }
+        pauses.delete(projectId);
+        if (decision === ALWAYS) {
+          change(projectId, { permissions: { ...project.permissions, [pause.approval.tool]: ALWAYS } });
+        }
+        const rest = pause.resume(decision, now);
+        play(projectId, {
+          ...rest,
+          events: [
+            { at: now, event: { turn_id: pause.turn, kind: 'approval_result', data: { approval_id: approvalId, decision } } },
+            ...rest.events,
+          ],
+        });
+        return true;
+      }, 200),
+    environment: (projectId) => (legacy ? missing() : soon(() => environmentOf(find(projectId)), 300)),
     getLibrary: (projectId) =>
       legacy
         ? missing()
