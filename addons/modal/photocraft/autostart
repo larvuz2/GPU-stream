@@ -74,6 +74,13 @@ if [ -n "${file}" ]; then
   [ -n "${recovered}" ] || set -- "${file#./}"
 fi
 
+# A recovery copy is a folder of small files, one per tile, which PhotoCraft reads one after
+# another and the workspace Volume fetches on first read. Read together first, they are on this
+# machine by the time PhotoCraft asks for them.
+started="$(date +%s)"
+find "${PHOTOCRAFT_CONFIG_DIR}/Recovery" -type f -print0 2> /dev/null | timeout 60 xargs -0 -r -P 32 -n 16 cat > /dev/null 2>&1
+echo "$(date -u +%FT%TZ) read $(find "${PHOTOCRAFT_CONFIG_DIR}/Recovery" -type f 2> /dev/null | wc -l) recovery files in $(($(date +%s) - started)) s" >> "${PHOTOCRAFT_CONFIG_DIR}/logs/prewarm.log"
+
 # $$ is PhotoCraft's own process once this script has become it
 (
   while sleep 20 && kill -0 "$$" 2> /dev/null; do
