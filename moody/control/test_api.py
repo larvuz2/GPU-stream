@@ -821,7 +821,8 @@ def world() -> tuple[TestClient, Sessions, FakeStore, FakeLauncher]:
 
 
 SKILLS = {
-    "filmcraft": "---\nname: filmcraft\ndescription: Editing films in FilmCraft.\n---\n\nCut on action. FILMCRAFT-SKILL-TEXT\nFor color see [color](references/color.md).\n",
+    "filmcraft": "---\nname: filmcraft\ndescription: Editing films in FilmCraft.\noperator_tools: filmcraft, library_list\n---\n\n"
+                 "Cut on action. FILMCRAFT-SKILL-TEXT\nFor color see [color](references/color.md).\n",
     "studio-basics": "# Basics\n\nName every file. GENERAL-SKILL-TEXT\n",
     "songwriting": "---\ndescription: Writing songs.\ndisciplines: [music]\n---\nSONG-SKILL-TEXT\n",
 }
@@ -831,8 +832,8 @@ AGENTS = {
                    "disciplines: all\ntools: web_search, web_fetch, library_list, library_upsert\nmodel: balanced\n---\nYou research. RESEARCH-PROMPT\n",
     "lyricist.md": "---\nname: lyricist\ntitle: Lyricist\ndescription: Writes lyrics.\ndisciplines: music\ntools: library_*\n"
                    "skills: songwriting\nmodel: light\n---\nYou write lyrics. LYRICIST-PROMPT\n",
-    "_operator.md": "---\ndescription: Drives {name} for one job in a running engine.\nmodel: inherit\n---\n"
-                    "You operate {name} (app `{app}`). OPERATOR-PROMPT\n",
+    "_operator.md": "---\nname: {app}\ntitle: {name} agent\ndescription: Drives {name} for one job in a running engine.\nskills: {app}\n"
+                    "model: inherit\n---\n\n<!--\n  A license header.\n-->\n\nYou operate {name} (app `{app}`). OPERATOR-PROMPT\n",
     "README.md": "# Subagents\n\nHow to write one.\n",
 }
 
@@ -3360,19 +3361,28 @@ def test_subagents_are_read_from_files_offered_by_discipline_and_given_their_too
     model.script(reply(say("Hello.")), reply(say("Hello.")), reply(say("Hello.")))
     message(client, film["id"], "Hi")
     offered = model.options[0].agents
-    assert list(offered) == ["research", "filmcraft"], "the defined ones that fit, then an operator for each of the project's skills that is an app's"
+    assert list(offered) == ["research", "filmcraft", "photocraft", "nuke"], (
+        "the defined ones that fit, then an operator for each of the discipline's engines that can be started"
+    )
     research, operator = offered["research"], offered["filmcraft"]
     assert research.description == "Looks things up on the web and in the library." and research.model == "claude-sonnet-5-5"
     assert research.tools == [f"{PREFIX}library_list", f"{PREFIX}library_upsert", "WebSearch", "WebFetch"] and research.skills is None
     assert research.prompt.startswith("You research. RESEARCH-PROMPT") and "Your last message is your report" in research.prompt
     assert operator.description == "Drives FilmCraft for one job in a running engine." and operator.model == "inherit"
     assert operator.prompt.startswith("You operate FilmCraft (app `filmcraft`). OPERATOR-PROMPT") and operator.skills == ["filmcraft"]
-    assert operator.tools == [f"{PREFIX}{name}" for name in TOOL_NAMES if name.startswith("engine_") or name == "preview"] + ["Read"]
+    driving = [name for name in TOOL_NAMES if name.startswith("engine_") or name == "preview"]
+    assert operator.tools == [f"{PREFIX}{name}" for name in TOOL_NAMES if name in (*driving, "filmcraft", "library_list")] + ["Read"], (
+        "the template's tools, then those the engine's skill names for its operator"
+    )
+    unskilled = offered["photocraft"]
+    assert unskilled.skills is None and unskilled.tools == [f"{PREFIX}{name}" for name in driving], "an engine without a skill has an operator that reads none"
+    assert unskilled.prompt.startswith("You operate PhotoCraft (app `photocraft`). OPERATOR-PROMPT"), "a definition's opening comment is not in its prompt"
+    assert unskilled.description == "Drives PhotoCraft for one job in a running engine."
 
     with_config(studio, agent_model_balanced="claude-opus-5-5", agent_model_light="claude-haiku-5-5")
     message(client, song["id"], "Hi")
     offered = model.options[1].agents
-    assert list(offered) == ["lyricist", "research"] and offered["research"].model == "claude-opus-5-5"
+    assert list(offered) == ["lyricist", "research", "soundcraft"] and offered["research"].model == "claude-opus-5-5"
     lyricist = offered["lyricist"]
     assert lyricist.model == "claude-haiku-5-5" and lyricist.skills == ["songwriting"]
     assert lyricist.tools == [f"{PREFIX}library_list", f"{PREFIX}library_upsert", "Read"]
@@ -3384,9 +3394,16 @@ def test_subagents_are_read_from_files_offered_by_discipline_and_given_their_too
     assert model.options[2].agents is None
     listed = read_agents(studio.tmp / "agents")
     assert [agent.name for agent in listed] == ["lyricist", "research"], "a template and a file without front matter define nothing"
-    assert [agent.name for agent in operators(studio.tmp / "agents", CATALOG, studio.agent.skills)] == ["filmcraft"]
+    derived = operators(studio.tmp / "agents", CATALOG, studio.agent.skills)
+    assert [agent.name for agent in derived] == [app["id"] for app in CATALOG.data["apps"] if app["status"] in ("available", "byol", "team")], (
+        "every app that can be started has an operator"
+    )
     assert operators(tmp_path, CATALOG, studio.agent.skills) == [], "without the template there are no operators"
-    assert [a.name for a in agents_for(listed, [], studio.agent.skills, "games")] == ["research"]
+    assert [a.name for a in agents_for(listed, [], studio.agent.skills, CATALOG, "games")] == ["research"]
+    assert [a.name for a in agents_for(listed, derived, [], CATALOG, "games")] == ["research", "blender", "unreal"]
+    assert [a.name for a in agents_for([], derived, studio.agent.skills, CATALOG, "writing")] == ["filmcraft"], (
+        "an operator is offered with its engine's skill too, where the discipline has no such engine"
+    )
     (tmp_path / "wrong.md").write_text("---\nname: other\ndescription: x\n---\nprompt")
     with pytest.raises(ValueError, match="file's stem"):
         read_agents(tmp_path)
@@ -3668,6 +3685,8 @@ def test_the_environment_lists_what_a_projects_agent_can_use(studio):
     assert found["agents"] == [
         {"name": "research", "title": "Research agent", "description": "Looks things up on the web and in the library."},
         {"name": "filmcraft", "title": "FilmCraft agent", "description": "Drives FilmCraft for one job in a running engine."},
+        {"name": "photocraft", "title": "PhotoCraft agent", "description": "Drives PhotoCraft for one job in a running engine."},
+        {"name": "nuke", "title": "Nuke agent", "description": "Drives Nuke for one job in a running engine."},
     ]
     assert found["skills"] == [{"name": "filmcraft", "description": "Editing films in FilmCraft."}, {"name": "studio-basics", "description": ""}]
 
@@ -3679,7 +3698,8 @@ def test_the_environment_lists_what_a_projects_agent_can_use(studio):
 
     played = environment(game).json()
     epic = {c["id"]: c for c in played["connectors"]}["epic"]
-    assert (epic["kind"], epic["state"]) == ("license", "available") and [a["name"] for a in played["agents"]] == ["research"]
+    assert (epic["kind"], epic["state"]) == ("license", "available")
+    assert [a["name"] for a in played["agents"]] == ["research", "blender", "unreal"]
     connect_epic(studio)
     studio.github.pullers.add(unseal(SECRET, studio.store.tables["epic_connections"][ALICE.id]["token_encrypted"]))
     assert {c["id"]: c["state"] for c in environment(game).json()["connectors"]}["epic"] == "connected"

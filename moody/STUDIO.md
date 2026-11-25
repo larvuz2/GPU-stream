@@ -328,12 +328,17 @@ a process the model steers.
 
   A file whose name starts with `_` is a template, not a subagent. One is
   read: `_operator.md`, from which an operator is derived for every app that
-  can be started and has a skill of its own name. Its `name` is the app's id,
-  its `title` "<App name> agent", its tools the template's or else `engine_*`
-  and `preview`, its skill that app's, and `{app}` and `{name}` in the
-  template's description and prompt are the app's id and name. A definition
-  that names a tool or a skill that does not exist, or whose `name` is not
-  its file's, keeps the agent from starting.
+  can be started. Its `name` is the app's id and its `title` "<App name>
+  agent"; `{app}` and `{name}` in the template's description and prompt are
+  the app's id and name. Its tools are the template's, or else `engine_*` and
+  `preview`, then those the skill named after the app lists for it
+  (`operator_tools` in that skill's front matter: what drives one engine and
+  no other). It reads that skill; an app without one has an operator that
+  reads none. A project is offered the operators of its discipline's engines
+  and of the engines whose skill it is offered. A definition's text may open
+  with a comment (its license header), which is not part of the prompt. A
+  definition that names a tool or a skill that does not exist, or whose
+  `name` is not its file's, keeps the agent from starting.
 - **Approvals.** A tool whose definition says `approval: ask` (starting an
   engine, generating video) waits for the person, unless the project's
   permissions say `always` for it: the call's `tool_start` is followed by an

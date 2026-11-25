@@ -4,8 +4,8 @@
 """What a project's agent is offered beside its tools: skills and subagents, both read from files.
 
 A skill is a directory, `moody/skills/<name>/`, whose `SKILL.md` opens with
-front matter (`name`, `description`, `disciplines`) and whose other files are
-what its text sends the agent to. Nothing of a skill is put in the agent's
+front matter (`name`, `description`, `disciplines`, `operator_tools`) and whose
+other files are what its text sends the agent to. Nothing of a skill is put in the agent's
 prompt here: the loop lists each offered skill by its description and loads
 its text, then a reference file, when the work calls for it (`loop.py`), so
 all this module decides is which skills a project is offered (`skills_for`).
@@ -14,11 +14,16 @@ A subagent is a file, `moody/agents/<name>.md`: front matter and the system
 prompt the subagent works under (`AgentSpec`, the contract's format in
 `moody/STUDIO.md`). A file whose name starts with `_` is a template, not an
 agent. One template is read here: `_operator.md`, from which an operator is
-derived for every app that can be started and has a skill of its own name
-(`operators`), so a new engine with a skill gains its operator with no
-definition written for it. Which subagents a project is offered follows the
-same rule as its skills (`agents_for`): a definition's `disciplines`, and for
-an operator the disciplines its skill is offered to.
+derived for every app that can be started (`operators`), so a new engine gains
+its operator with no definition written for it. An operator reads the skill
+named after its app where there is one, and that skill may name tools its
+operator gets beside the template's (`operator_tools`): what drives one
+engine and no other, as the tools that open an Unreal project do. Which
+subagents a project is offered follows the same rule as its skills
+(`agents_for`): a definition's `disciplines`, and for an operator the
+disciplines that have its app among their engines or are offered its skill.
+A definition's text may open with a comment, its file's license header, which
+is no part of what the model reads (`prose`).
 
 The API reads the same definitions to list a project's skills and subagents
 (`GET /v1/projects/{pid}/environment`), which is why they live apart from the
@@ -27,7 +32,7 @@ agent: nothing here knows the loop or a tool's implementation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
@@ -50,6 +55,8 @@ class Skill:
 
     `body` is the text of its `SKILL.md` after the front matter, which the
     loop reads from `directory` when the agent opens the skill.
+    `operator_tools` are the tools the operator of the engine the skill is
+    named after gets beside its template's.
     """
 
     name: str
@@ -57,6 +64,7 @@ class Skill:
     disciplines: frozenset[str]
     body: str
     directory: Path
+    operator_tools: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -138,6 +146,7 @@ def read_skills(directory: Path) -> list[Skill]:
                 disciplines,
                 body.strip(),
                 path.parent,
+                listed(fields.get("operator_tools", "")),
             )
         )
     return skills
@@ -182,8 +191,17 @@ def spec(
         tools=listed(fields.get("tools", "")) or tools,
         skills=listed(fields.get("skills", "")),
         model=model,
-        prompt=prompt.strip(),
+        prompt=prose(prompt),
     )
+
+
+def prose(text: str) -> str:
+    """A definition's text as the model reads it: without the comment it opens with, its file's license header."""
+    body = text.strip()
+    if body.startswith("<!--"):
+        _, closed, rest = body.partition("-->")
+        body = rest.strip() if closed else body
+    return body
 
 
 def read_agents(directory: Path) -> list[AgentSpec]:
@@ -213,31 +231,38 @@ def read_agents(directory: Path) -> list[AgentSpec]:
 def operators(
     directory: Path, catalog: Catalog, skills: list[Skill]
 ) -> list[AgentSpec]:
-    """One operator per app that can be started and has a skill of its own name, made from the directory's template.
+    """One operator per app that can be started, made from the directory's template.
 
     The template's `{app}` and `{name}` stand for the app's id and its name,
     in its description and in its prompt. An operator works with the tools
     that drive an engine (`OPERATOR_TOOLS`, unless the template lists its
-    own) and reads its app's skill; it is offered where that skill is
-    (`agents_for`), so its `disciplines` are the skill's. Without the
+    own), then those the skill named after its app names for it
+    (`Skill.operator_tools`), and reads that skill; an app without a skill
+    has an operator that reads none. Where each is offered is `agents_for`'s
+    to say, so the template's `disciplines` are not read. Without the
     template there are no operators.
     """
     template = directory / OPERATOR_TEMPLATE
     if not template.is_file():
         return []
     fields, prompt = front_matter(template.read_text())
-    named = {skill.name for skill in skills}
+    named = {skill.name: skill for skill in skills}
     made = []
     for app in catalog.data["apps"]:
-        if app["status"] not in STARTABLE or app["id"] not in named:
+        if app["status"] not in STARTABLE:
             continue
+        skill = named.get(app["id"])
         described = {
             **{key: value for key, value in fields.items() if key != "disciplines"},
             "title": f"{app['name']} agent",
-            "skills": app["id"],
+            "skills": app["id"] if skill else "",
             "description": filled(fields.get("description", ""), app),
         }
-        made.append(spec(app["id"], described, filled(prompt, app), OPERATOR_TOOLS))
+        operator = spec(app["id"], described, filled(prompt, app), OPERATOR_TOOLS)
+        extra = skill.operator_tools if skill else ()
+        made.append(
+            replace(operator, tools=tuple(dict.fromkeys((*operator.tools, *extra))))
+        )
     return made
 
 
@@ -250,16 +275,19 @@ def agents_for(
     agents: list[AgentSpec],
     derived: list[AgentSpec],
     offered: list[Skill],
+    catalog: Catalog,
     discipline: str,
 ) -> list[AgentSpec]:
-    """The subagents a project of a discipline is offered: the defined ones that fit it, then its skills' operators.
+    """The subagents a project of a discipline is offered: the defined ones that fit it, then its engines' operators.
 
     A defined subagent fits where its `disciplines` name the discipline or
-    every one. An operator fits where its app's skill is among those offered,
-    and a definition written for the same name takes its place. A subagent
-    reads only the skills the project is offered.
+    every one. An operator fits where its app is one of the discipline's
+    engines or its app's skill is among those offered, and a definition
+    written for the same name takes its place. A subagent reads only the
+    skills the project is offered.
     """
     names = {skill.name for skill in offered}
+    engines = set(catalog.disciplines.get(discipline, {}).get("engines", []))
     chosen = [
         agent
         for agent in agents
@@ -267,7 +295,9 @@ def agents_for(
     ]
     taken = {agent.name for agent in chosen}
     chosen += [
-        agent for agent in derived if agent.name in names and agent.name not in taken
+        agent
+        for agent in derived
+        if (agent.name in names or agent.name in engines) and agent.name not in taken
     ]
     return [
         AgentSpec(

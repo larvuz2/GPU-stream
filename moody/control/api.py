@@ -455,7 +455,7 @@ def create_app(
             "connectors": service().connectors(who, project_id),
             "agents": [
                 {"name": one.name, "title": one.title, "description": one.description}
-                for one in agents_for(agents, derived, offered, project["discipline"])
+                for one in agents_for(agents, derived, offered, catalog, project["discipline"])
             ],
             "skills": [{"name": skill.name, "description": skill.description} for skill in offered],
         }

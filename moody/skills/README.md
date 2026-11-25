@@ -37,6 +37,7 @@ disciplines: music, media
 | `name` | The skill's name, the same as its folder. The folder is what the loader reads. |
 | `description` | What the agent always sees of the skill, and decides by whether to open it. Say what the skill is for and when it applies. |
 | `disciplines` | Optional. Which projects read the skill; see [Which projects read a skill](#which-projects-read-a-skill). |
+| `operator_tools` | Optional, in a skill named after an app. Tools that app's operator gets beside its template's (`moody/agents/_operator.md`): `operator_tools: unreal_projects, unreal_assets, unreal_open`. Each has to be a tool the agent has. |
 
 Each field is one `key: value` line. The loader reads nothing else of YAML: no multi-line values,
 no nested keys.
@@ -62,8 +63,8 @@ docblocks are the reference. What a writer needs to know:
   skill's folder leads nowhere. Say in the body when each reference is needed ("before the first
   cut, read ..."): a reference nothing points to at the right moment is not read.
 - **A subagent whose definition names the skill starts with its body loaded**
-  (`skills:` in `moody/agents/<name>.md`, and every engine's operator names its engine's skill),
-  and reads the references the same way.
+  (`skills:` in `moody/agents/<name>.md`; an engine's operator reads the skill named after its
+  app), and reads the references the same way.
 - **So length is paid for when the skill is used**, not on every turn: the description on every
   turn of every project offered the skill, the body from the turn that opens it, a reference from
   the step that reads it. Keep the description to a paragraph, put in the body what the agent

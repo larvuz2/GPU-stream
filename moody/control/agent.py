@@ -1321,7 +1321,7 @@ class Agent:
                 skills=agent.skills,
                 model=models[agent.model],
             )
-            for agent in agents_for(self.agents, self.derived, offered, project["discipline"])
+            for agent in agents_for(self.agents, self.derived, offered, self.sessions.catalog, project["discipline"])
         ]
 
     def state(self, turn: Turn, history: Callable[[], list[dict[str, Any]]]) -> str:
