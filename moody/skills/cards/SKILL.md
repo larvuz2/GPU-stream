@@ -276,6 +276,9 @@ A whole card, small enough to read:
 - **Ranges where every position is plausible.** A warmth slider that only looks right between 10
   and 30 should not run from -100 to 100.
 - **Their words, with units**: "Hold" with `unit: "s"`, not `duration_frames`.
+- **A label names the thing**: "Warmth", "The lead", "The opening's frames". The page tells the
+  person what they changed by these labels ("You changed: Warmth, Grain"), so an instruction
+  such as "Drag to reorder" belongs in a line of text, not in a label.
 - **The button says what happens**: "Lock in this look", "Cast this lead", never "Submit".
 - **The title says what the card is**, in a few words; the consequence goes in your message.
 - **Hide what does not apply** with `when` rather than showing a control that does nothing.
