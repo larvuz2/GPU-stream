@@ -43,7 +43,8 @@ import { LibraryBody } from './LibraryPanel';
 import { Panel } from './Panel';
 import { PlanBody } from './PlanPanel';
 import { DisciplineIcon } from '../components/DisciplineIcon';
-import { disciplineName, lockText, planProgress } from './present';
+import { disciplineName, planProgress } from './present';
+import { describeAnswer } from './ui/answer';
 import { Stage, type StreamStandIn } from './Stage';
 import { buildTranscript, processMedia, type ProcessEntry, type Reveal } from './transcript';
 import { connected, type Account, type Epic, type GitHub, type Projects } from './useAccount';
@@ -357,7 +358,7 @@ export function Workspace(props: WorkspaceProps) {
           }}
           onChoose={data.send}
           onApprove={data.approve}
-          onLock={(ui, value) => data.send(lockText(ui.title, value), { ui_id: ui.ui_id, value })}
+          onLock={(ui, value) => data.send(describeAnswer(ui, value), { ui_id: ui.ui_id, value })}
           onSuggest={setDraft}
         />
         <Composer

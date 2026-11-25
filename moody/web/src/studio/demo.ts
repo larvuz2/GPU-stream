@@ -873,7 +873,7 @@ function demoRepos(now: number): GitHubRepo[] {
  * @returns The event with that reading's addresses.
  */
 function readAs(event: EventBody, read: number): EventBody {
-  const sign = <File extends Media>(file: File): File => ({
+  const sign = <File extends { url: string }>(file: File): File => ({
     ...file,
     url: `${file.url}${file.url.includes('?') ? '&' : '?'}read=${read}`,
   });

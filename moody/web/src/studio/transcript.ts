@@ -57,6 +57,7 @@ import type {
   TurnId,
   UiData,
 } from '../lib/api';
+import { cardMedia } from '../lib/api';
 
 /** A tool call's state. */
 export type ToolState = 'running' | 'ok' | 'failed' | 'stopped';
@@ -73,8 +74,8 @@ export type TranscriptItem =
       type: 'user';
       key: string;
       text: string;
-      /** The interactive card the message locked in, with the card's title where the log has it. */
-      lock: { title: string | null; value: unknown } | null;
+      /** Whether the message locked an interactive card in: its text then says what was locked. */
+      lock: boolean;
     }
   | { type: 'agent'; key: string; text: string; streaming: boolean; first: boolean }
   | { type: 'thinking'; key: string; text: string; streaming: boolean; first: boolean }
@@ -351,13 +352,7 @@ function fold(events: readonly StudioEvent[], entriesOf: (agentId: string) => Su
             };
           }
         });
-        const card = lockedIndex === undefined ? undefined : items[lockedIndex];
-        items.push({
-          type: 'user',
-          key,
-          text: event.data.text,
-          lock: lock === undefined ? null : { title: card?.type === 'ui' ? card.ui.title : null, value: lock.value },
-        });
+        items.push({ type: 'user', key, text: event.data.text, lock: lock !== undefined });
         break;
       }
       case 'text':
@@ -744,7 +739,13 @@ export function processMedia(items: readonly TranscriptItem[]): ProcessEntry[] {
         add(item.files, item.caption, item.key, null, item.key);
         break;
       case 'ui':
-        add(item.ui.media, item.ui.title, item.key, null, item.key);
+        add(
+          item.ui.media.flatMap((file) => cardMedia(file) ?? []),
+          item.ui.title,
+          item.key,
+          null,
+          item.key,
+        );
         break;
       case 'agents':
         for (const agent of item.agents) {

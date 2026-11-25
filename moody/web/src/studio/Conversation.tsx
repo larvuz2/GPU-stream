@@ -64,7 +64,7 @@ import { AgentsBlock } from './AgentsBlock';
 import { ApprovalCard } from './ApprovalCard';
 import { ErrorNotice, Notice } from './Notice';
 import { DisciplineIcon } from '../components/DisciplineIcon';
-import { disciplineName, valueSummary } from './present';
+import { disciplineName } from './present';
 import { PreviewCard } from './PreviewCard';
 import { Prose } from './Prose';
 import { ThinkingEyes, ThinkingNote } from './ThinkingNote';
@@ -79,7 +79,7 @@ import {
   type Reveal,
   type TranscriptItem,
 } from './transcript';
-import type { PendingMessage, ProjectData } from './useProject';
+import type { ProjectData } from './useProject';
 
 /** How close to the bottom, in pixels, still counts as following the conversation. */
 const FOLLOW_SLACK_PX = 96;
@@ -308,7 +308,7 @@ export function Conversation(props: ConversationProps) {
                   </div>
                 </li>
               ) : (
-                <LockLine title={lockedTitle(items, data.pending)} value={data.pending.ui.value} pending />
+                <LockLine text={data.pending.text} pending />
               )}
               {activity === null ? null : <ActivityLine activity={activity} />}
             </ol>
@@ -361,24 +361,10 @@ function ActivityLine({ activity }: ActivityLineProps) {
   );
 }
 
-/**
- * The title of the card a message just sent locks in.
- *
- * @param items The conversation.
- * @param pending The message.
- * @returns The card's title, or `null` where the conversation holds no such card.
- */
-function lockedTitle(items: readonly TranscriptItem[], pending: PendingMessage): string | null {
-  const card = items.find((item) => item.type === 'ui' && item.ui.ui_id === pending.ui?.ui_id);
-  return card?.type === 'ui' ? card.ui.title : null;
-}
-
 /** Props of {@link LockLine}. */
 interface LockLineProps {
-  /** The title of the card that was locked in, or `null` where the log does not hold the card. */
-  title: string | null;
-  /** The card's state, as the person left it. */
-  value: unknown;
+  /** The message: what was locked in, as the card worded it (`ui/answer.ts`, `describeAnswer`). */
+  text: string;
   /** Whether the message is sent but not in the log yet. */
   pending?: boolean;
 }
@@ -389,17 +375,12 @@ interface LockLineProps {
  * @param props The component's props.
  * @returns The list item.
  */
-function LockLine({ title, value, pending = false }: LockLineProps) {
-  const summary = valueSummary(value);
+function LockLine({ text, pending = false }: LockLineProps) {
   return (
     <li className="mt-5 first:mt-0">
-      <div className="lock-line" data-pending={pending ? true : undefined}>
+      <div className="lock-line" data-pending={pending ? true : undefined} title={text}>
         <Lock className="size-3.5 flex-none text-lime" aria-hidden="true" />
-        <span className="flex-none">
-          Locked in{title === null ? '' : ' '}
-          {title === null ? null : <span className="font-medium text-fg">{title}</span>}
-        </span>
-        {summary === '' ? null : <span className="min-w-0 truncate text-faint">{summary}</span>}
+        <span className="min-w-0 truncate">{text}</span>
       </div>
     </li>
   );
@@ -562,12 +543,12 @@ function Entry({
 }: EntryProps) {
   switch (item.type) {
     case 'user':
-      return item.lock === null ? (
+      return item.lock ? (
+        <LockLine text={item.text} />
+      ) : (
         <li className="mt-5 first:mt-0">
           <div className="message-user">{item.text}</div>
         </li>
-      ) : (
-        <LockLine title={item.lock.title} value={item.lock.value} />
       );
     case 'agent':
       return (

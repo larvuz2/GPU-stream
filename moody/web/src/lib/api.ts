@@ -558,9 +558,13 @@ export interface ApprovalResultData {
 const UI_KINDS = ['components', 'html'] as const;
 
 /** A file an interactive card shows. */
-export interface UiMedia extends Media {
+export interface UiMedia {
   /** The name the card's content refers to it by. */
   name: string;
+  /** What it is: a {@link MediaKind}, or a kind only cards show, such as `model` for a 3D model. */
+  kind: string;
+  /** Its address, signed for the reading of the log that returned it. */
+  url: string;
 }
 
 /**
@@ -1138,7 +1142,17 @@ const isApprovalResult: Guard<ApprovalResultData> = (value): value is ApprovalRe
 
 /** Checks a value into a {@link UiMedia}. */
 const isUiMedia: Guard<UiMedia> = (value): value is UiMedia =>
-  isRecord(value) && oneOf(MEDIA_KINDS)(value.kind) && isWebUrl(value.url) && isString(value.name);
+  isRecord(value) && isString(value.kind) && isWebUrl(value.url) && isString(value.name);
+
+/**
+ * Reads a card's file as ordinary media, where its kind is one the rest of the page shows.
+ *
+ * @param file The card's file.
+ * @returns The file as media, or `null` for a kind only cards show, such as a 3D model.
+ */
+export function cardMedia(file: UiMedia): Media | null {
+  return oneOf(MEDIA_KINDS)(file.kind) ? { kind: file.kind, url: file.url, name: file.name } : null;
+}
 
 /** Checks a value into a {@link UiData}; its `spec` is left for the card to check. */
 const isUi: Guard<UiData> = (value): value is UiData =>

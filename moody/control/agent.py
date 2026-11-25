@@ -144,6 +144,7 @@ from generation import (
     video_arguments,
 )
 from github_client import GitHubError
+import genui
 from service import (
     DESKTOP,
     LIBRARY_BUCKET,
@@ -772,6 +773,7 @@ TOOLS = [
         },
         ["engine_id", "caption"],
     ),
+    tool("show_ui", genui.DESCRIPTION, genui.properties(genui.catalog()), ["title"]),
     tool(
         "filmcraft",
         "Call a method of FilmCraft's command channel in a running FilmCraft engine: the same commands its interface "
@@ -1125,6 +1127,7 @@ class Result:
     summary: str
     ok: bool = True
     media: list[dict[str, Any]] = field(default_factory=list)
+    ends_turn: bool = False
 
 
 class Turn:
@@ -1531,6 +1534,7 @@ class Agent:
             "engine_files": f"Listing {arguments.get('path') or 'the project folder'}",
             "engine_send": f"Sending {PurePosixPath(arguments.get('path', '')).name or 'a file'} to another engine",
             "preview": "Preparing a preview",
+            "show_ui": f"Showing {arguments.get('title') or 'a card'}",
             "filmcraft": f"{self.app_name('filmcraft')}: {arguments.get('method', '')}",
             "github_save": f"Saving {arguments.get('path', '')} to the agent's branch on GitHub",
             "github_read": f"Reading {arguments.get('path', '') or 'the repository'} from "
@@ -2027,6 +2031,99 @@ class Agent:
                 "it is not an image, a video, or a sound." if chosen == "file" else "this engine's ffmpeg does not read it."
             )
         return shown
+
+    # Interactive cards
+
+    def tool_show_ui(
+        self,
+        turn: Turn,
+        title: str,
+        components: dict[str, Any] | None = None,
+        html: str | None = None,
+        submit: str | None = None,
+        waits: bool = False,
+        media: list[dict[str, Any]] | None = None,
+        height: int | None = None,
+    ) -> Result:
+        """Show an interactive card (`ui`), checked against the catalog before any of its files is read (`genui.py`).
+
+        A card's files are library entries' media, kept where they are in the bucket, and files
+        an engine wrote in the project's folder, brought into the bucket the way a preview's are
+        (`prepared`), under the project's `previews/` folder. What each file is has to be known to
+        check the card, so it is read from the entry or from the file's name first, and an
+        engine's files are fetched only once the card is valid: a card that is refused costs no
+        upload. The event keeps each file's path, which a reading of the log signs
+        (`Sessions.shown_events`). A card that waits ends the turn (`Result.ends_turn`).
+
+        Raises:
+            Refused: 400 with what to fix for a card the catalog does not allow, 404 for a tag no
+                entry has, 409 for an entry with no file of the kind wanted, 422 for an engine's
+                file a browser does not show as the kind the card needs, and as `engine_sandbox`
+                and `prepared` do.
+        """
+        catalog = genui.catalog()
+        folder = project_folder(turn.project_id)
+        try:
+            asked = genui.media_requests(catalog, media or [])
+        except genui.Invalid as invalid:
+            raise Refused(400, invalid.message) from None
+        # Each file as the event names it; an engine's file has where it comes from in place of a path until it is stored
+        files: list[dict[str, Any]] = []
+        for request in asked:
+            if request.tag is not None:
+                (row,) = self.sessions.assets_by_tags(turn.project, [request.tag])
+                kinds = [(genui.stored_kind(catalog, item), item) for item in row["media"]]
+                wanted = request.kind or ("image" if any(kind == "image" for kind, _ in kinds) else None)
+                found = next(((kind, item) for kind, item in kinds if wanted in (None, kind)), None)
+                if found is None:
+                    raise Refused(409, f"{row['tag']} has no {wanted or 'file'} yet. Generate or upload one first, or show another entry.")
+                files.append({"name": request.name, "kind": found[0], "path": found[1]["path"]})
+            else:
+                _, sandbox = self.engine_sandbox(turn, request.engine_id or "")
+                inside = folder_path(request.path or "", folder)
+                named = catalog.kind_of(inside)
+                kind = request.kind or (named if named != "file" else media_kind(inside))
+                files.append({"name": request.name, "kind": kind, "from": (sandbox, inside)})
+        try:
+            data, inputs = genui.card(
+                catalog, uuid.uuid4().hex[:12], title, components, html, submit, waits, height,
+                {file["name"]: file["kind"] for file in files},
+            )
+        except genui.Invalid as invalid:
+            raise Refused(400, invalid.message) from None
+        scratch = f"{PREVIEW_SCRATCH}/{uuid.uuid4().hex[:12]}"
+        engines = {file["from"][0] for file in files if "from" in file}
+        try:
+            for index, file in enumerate(files):
+                if "from" not in file:
+                    continue
+                sandbox, inside = file.pop("from")
+                shown = self.prepared(sandbox, folder, inside, file["kind"] if file["kind"] in MEDIA_KINDS else "file", f"{scratch}/{index}", False)
+                if file["kind"] in MEDIA_KINDS and shown.item["kind"] != file["kind"]:
+                    raise Refused(422, f"{inside} cannot be shown as {genui.article(file['kind'])} in a browser: {shown.facts.get('note', 'it is not one')}")
+                file["path"] = f"{turn.project['user_id']}/{turn.project_id}/{PREVIEWS}/{uuid.uuid4().hex[:12]}-{safe_name(shown.stored_as)}"
+                self.store.upload(LIBRARY_BUCKET, file["path"], shown.data, shown.content_type)
+        finally:
+            for sandbox in engines:
+                self.sessions.launcher.exec(sandbox, f"rm -rf {shlex.quote(scratch)}", EXEC_SECONDS)
+        turn.event("ui", {**data, "media": files})
+        ends = bool(waits)
+        if data["submit"] is None:
+            note = "The person sees the card in the conversation. It has no lock-in button, so nothing comes back from it."
+        elif ends:
+            note = (
+                "The person sees the card in the conversation. Your turn ends here: when they lock it in, their next "
+                "message carries what they chose, and you go on from it."
+            )
+        else:
+            note = (
+                "The person sees the card in the conversation and may lock it in whenever they like; what they chose then "
+                "arrives in a message of theirs. Go on meanwhile."
+            )
+        answer = {"shown": data["title"], "ui_id": data["ui_id"], "kind": data["kind"], "files": [file["name"] for file in files], "note": note}
+        if data["kind"] == genui.KINDS[0]:
+            answer["answers_with"] = {given: f"{component}: {catalog.components[component]['input']}" for given, component in inputs.items()}
+        return Result(json.dumps(answer), f"Showed {data['title']}"[:200], ends_turn=ends)
 
     def tool_engine_exec(self, turn: Turn, engine_id: str, command: str) -> Result:
         _, sandbox = self.engine_sandbox(turn, engine_id)

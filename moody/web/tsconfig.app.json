@@ -20,5 +20,5 @@
     "skipLibCheck": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "../catalog.json"]
+  "include": ["src", "../catalog.json", "../ui.json"]
 }

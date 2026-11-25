@@ -91,6 +91,8 @@ export default defineConfig({
       input: {
         landing: path.resolve(root, 'index.html'),
         studio: path.resolve(root, 'app/index.html'),
+        // The development gallery of the agent's interactive cards, which nothing links to.
+        cards: path.resolve(root, 'app/cards/index.html'),
       },
       output: {
         // The libraries change far less often than the pages, so each gets a chunk whose hashed
@@ -99,6 +101,8 @@ export default defineConfig({
           groups: [
             { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
             { name: 'supabase', test: /node_modules[\\/]@supabase[\\/]/ },
+            // Fetched only when a card shows a 3D model (`src/studio/ui/components/Model.tsx`).
+            { name: 'three', test: /node_modules[\\/]three[\\/]/ },
           ],
         },
       },

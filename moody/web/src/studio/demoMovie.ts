@@ -15,7 +15,7 @@
  * 1. The agent reasons (a `thinking` note), answers while the answer is written (`text` events of
  *    one `block`), and asks for the story.
  * 2. It asks for the main characters, and writes the plan.
- * 3. It asks for the art style.
+ * 3. It asks for the art style with an interactive card (`ui`), which the person locks in.
  * 4. It sets the library's sections and hands pre-production to five subagents at once (`agent`
  *    events of one `group`), which work at different speeds, change what they are doing as they
  *    go, and finish at different times. Each subagent's own tool calls and notes carry its
@@ -30,6 +30,7 @@
  */
 import type { AgentData, AgentInfo, Asset, Media, PlanItem, Project, TurnId } from '../lib/api';
 import { catalog, findApp, findTier, IDLE_SHUTDOWN_MINUTES } from '../lib/catalog';
+import { EXAMPLES } from './ui/gallery/examples';
 import {
   asset,
   SECOND,
@@ -292,23 +293,34 @@ function asking(stage: number, turn: TurnId, start: number): Script {
       'Iris and Wick carry it, and the isles are the third character. One more before I start making things:',
     );
     line.add(2.8, { kind: 'plan', data: { items: moviePlan(2) } });
-    line.add(3, {
-      kind: 'ask',
-      data: {
-        question: 'What art style?',
-        options: [
-          'Cinematic and painterly: warm lamplight against violet dusk',
-          'Stop-motion felt and paper',
-          'Clean stylized 3D with soft light',
-        ],
-      },
-    });
+    line.add(
+      3,
+      STYLE_CARD === undefined
+        ? {
+            kind: 'ask',
+            data: {
+              question: 'What art style?',
+              options: [
+                'Cinematic and painterly: warm lamplight against violet dusk',
+                'Stop-motion felt and paper',
+                'Clean stylized 3D with soft light',
+              ],
+            },
+          }
+        : { kind: 'ui', data: STYLE_CARD },
+    );
     ends = 3.2;
     line.add(ends, { kind: 'usage', data: { input_tokens: 7910, output_tokens: 94, cost_usd: 0.04, seconds: ends, agents: 0 } });
   }
   line.add(ends + 0.2, { kind: 'turn_end', data: {} });
   return { events: line.events };
 }
+
+/**
+ * The card the scene asks the art style with: the gallery's own, so the scene shows a card the way
+ * a real turn would, as pictures and palettes to choose between rather than a list of words.
+ */
+const STYLE_CARD = EXAMPLES.find((example) => example.id === 'style')?.ui;
 
 /** The group the scene's five subagents share: one step started them together. */
 const GROUP = 'pre-production';

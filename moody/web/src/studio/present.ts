@@ -66,66 +66,6 @@ export function planProgress(items: PlanItem[]): string | undefined {
   return items.length === 0 ? undefined : `${items.filter((item) => item.status === 'done').length} of ${items.length}`;
 }
 
-/** How many of a locked card's values its line names, and how long the line may get. */
-const SUMMARY_FIELDS = 4;
-const SUMMARY_LENGTH = 120;
-
-/**
- * Writes one value of a card's state, where it is short enough to say.
- *
- * @param value The value.
- * @returns Text for a string, a number, a boolean, or a list of them; `null` for anything else.
- */
-function plainValue(value: unknown): string | null {
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    const parts = value.map(plainValue);
-    return parts.every((part) => part !== null) ? parts.join(', ') : null;
-  }
-  return null;
-}
-
-/**
- * Says what an interactive card was locked in with, in a line a person can read: a plain value as
- * itself, a record as its first few plain fields. The state's shape is the card's own, so
- * anything deeper is left to the card, which shows it locked.
- *
- * @param value The card's state.
- * @returns The line, or an empty string for a state with nothing plain to say.
- */
-export function valueSummary(value: unknown): string {
-  const plain = plainValue(value);
-  let text = plain ?? '';
-  if (plain === null && typeof value === 'object' && value !== null) {
-    text = Object.entries(value)
-      .flatMap(([key, field]) => {
-        const said = plainValue(field);
-        return said === null || said === '' ? [] : [`${key.replaceAll('_', ' ')}: ${said}`];
-      })
-      .slice(0, SUMMARY_FIELDS)
-      .join(' · ');
-  }
-  return text.length > SUMMARY_LENGTH ? `${text.slice(0, SUMMARY_LENGTH).trimEnd()}…` : text;
-}
-
-/**
- * Words the message that locks an interactive card in. The card's state travels beside it as
- * data; this is what a reader of the log sees.
- *
- * @param title The card's title.
- * @param value The card's state.
- * @returns The message.
- */
-export function lockText(title: string, value: unknown): string {
-  const summary = valueSummary(value);
-  return summary === '' ? `Locked in “${title}”.` : `Locked in “${title}”: ${summary}`;
-}
-
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
