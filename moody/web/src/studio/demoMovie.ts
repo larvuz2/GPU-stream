@@ -20,11 +20,14 @@
  *    events of one `group`), which work at different speeds, change what they are doing as they
  *    go, and finish at different times. Each subagent's own tool calls and notes carry its
  *    `agent_id`, so they show inside its card; the references they generate arrive in the library
- *    as they are made. One of them fails a generation and resolves it. Then the agent sums up and,
- *    before starting FilmCraft, asks (`approval`): the turn waits for the answer, starts the engine
- *    or goes on without it, and ends with what it cost (`usage`).
+ *    as they are made. One of them fails a generation and resolves it. Then, before starting
+ *    FilmCraft, the agent asks (`approval`): the turn waits for the answer, starts the engine or
+ *    goes on without it, and ends on a report and what it cost (`usage`).
  *
- * No engine exists until that approval is given: planning, writing, and generating need none.
+ * A turn of many steps ends the way the contract asks ("a long job ends with a report"): its last
+ * message is organized under short headings, each a few bullets, the most important first.
+ *
+ * No engine exists until the approval is given: planning, writing, and generating need none.
  * The pictures are the site's own artwork.
  * @module
  */
@@ -359,8 +362,8 @@ const JOBS: readonly Pick<AgentData, 'name' | 'task' | 'activity' | 'detail'>[] 
 ];
 
 /**
- * The scene's fourth turn: pre-production handed to five subagents at once, the agent's summary,
- * and the approval before FilmCraft.
+ * The scene's fourth turn: pre-production handed to five subagents at once, the approval before
+ * FilmCraft, and the report the turn ends on.
  *
  * @param turn The turn.
  * @param start When it starts.
@@ -638,8 +641,35 @@ function delegating(turn: TurnId, start: number): Script {
     3.4,
     'text',
     `${turn}-a2`,
-    'Pre-production is in the library.\n\n- **Story.** Three acts, fourteen beats: the lamps fail, the crossing, the last lamp.\n- **Characters.** @iris and @wick, each with a reference.\n- **World.** @workshop-isle and @drifting-isles, in one palette: warm lamplight against violet dusk.\n\nNext I would generate the first animation tests and cut them into an animatic. The cut needs FilmCraft, which runs on a cloud machine billed by the minute, so starting it is yours to decide.',
+    'All five are done. Next come the first animation tests, and then the animatic they are cut into. The cut needs FilmCraft, which runs on a cloud machine billed by the minute, so starting it is yours to decide.',
   );
+  /**
+   * The report the turn ends on, once the person has decided about the engine.
+   *
+   * @param engine What became of FilmCraft, which is what the person just decided and so comes first.
+   * @param next What the agent does on the person's word.
+   * @returns The report.
+   */
+  const report = (engine: string, next: string): string =>
+    [
+      '### Done',
+      `- ${engine}`,
+      '- **Story.** The outline, in three acts and fourteen beats: the lamps fail, the crossing, the last lamp.',
+      '- **References.** Twelve kept. They agree that the lamps are the only saturated light in frame.',
+      '',
+      '### In the library now',
+      '- **Characters.** @iris and @wick, each with a reference. Wick’s first one came out with the lantern unlit and was painted again.',
+      '- **Environments.** @workshop-isle and @drifting-isles, in one palette: warm lamplight against violet dusk.',
+      '',
+      '### Yours to decide',
+      '- Whether @wick keeps to clicks until the end or says one word at the last lamp. The outline works both ways; I would keep the clicks.',
+      '',
+      '### What I need from you',
+      `- ${next}`,
+      '',
+      '### Not known yet',
+      '- How long the film runs. The outline reads as four to five minutes; the animatic will tell.',
+    ].join('\n');
   line.add(26.9, { kind: 'plan', data: { items: moviePlan(4) } });
 
   const tier = findTier(ENGINE_TIER);
@@ -661,16 +691,19 @@ function delegating(turn: TurnId, start: number): Script {
         if (decision === 'deny') {
           rest.write(
             0.8,
-            1.8,
+            3.2,
             'text',
             `${turn}-a3`,
-            'Nothing was started and nothing is billed. I will generate the animation tests first and keep them in the library; say the word when you want them cut in FilmCraft.',
+            report(
+              `**${app}** was not started, as you decided, and nothing is billed.`,
+              'A word to go on. I will generate the first animation tests, which need no engine, and keep them with the project’s files until you want them cut.',
+            ),
           );
-          rest.add(2.8, {
+          rest.add(4.2, {
             kind: 'usage',
-            data: { input_tokens: 48210, output_tokens: 6932, cost_usd: 0.84, seconds: spent(2.8), agents: cards.size },
+            data: { input_tokens: 48210, output_tokens: 7104, cost_usd: 0.85, seconds: spent(4.2), agents: cards.size },
           });
-          rest.add(3, { kind: 'turn_end', data: {} });
+          rest.add(4.4, { kind: 'turn_end', data: {} });
           return { events: rest.events };
         }
         const engine: Simulation = {
@@ -698,16 +731,19 @@ function delegating(turn: TurnId, start: number): Script {
         rest.add(16.6, { kind: 'screen', data: { engine_id: engine.id, stream: 'Desktop' } });
         rest.write(
           17,
-          1.8,
+          3.2,
           'text',
           `${turn}-a3`,
-          `${app} is up on the project’s folder, and your screen shows it. I will generate the first animation test of @iris and @wick on the workshop isle and bring it into the timeline.`,
+          report(
+            `**${app}** is running on a ${tier?.name ?? ENGINE_TIER} machine, open on the project’s folder, and your screen shows it. It costs ${tier?.credits_per_minute ?? 0} credits a minute and stops by itself after ${IDLE_SHUTDOWN_MINUTES} idle minutes.`,
+            'A word to go on. I will generate the first animation tests and bring them into the timeline.',
+          ),
         );
-        rest.add(19, {
+        rest.add(20.4, {
           kind: 'usage',
-          data: { input_tokens: 51870, output_tokens: 7214, cost_usd: 0.91, seconds: spent(19), agents: cards.size },
+          data: { input_tokens: 51870, output_tokens: 7386, cost_usd: 0.92, seconds: spent(20.4), agents: cards.size },
         });
-        rest.add(19.2, { kind: 'turn_end', data: {} });
+        rest.add(20.6, { kind: 'turn_end', data: {} });
         return { events: rest.events, engines: [engine] };
       },
     },
