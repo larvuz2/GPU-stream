@@ -32,8 +32,9 @@ writes after you approve it in a browser.
 | `exec -- <command>` | Runs a command in the session's environment: on its display, with its GPU |
 | `blender` | Runs the Python on standard input inside the session's Blender, the one the page shows |
 | `filmcraft` | Sends the JSON requests on standard input, one per line, to a FilmCraft session's control channel and prints each reply |
+| `cadcraft` | Sends the JSON requests on standard input, one per line, to a CADCraft session's control channel and prints each reply |
 | `ls` | Lists the running sessions |
-| `down` | Stops a session, with the scene Blender has open kept for the next one |
+| `down` | Stops a session, with the scene Blender has open kept for the next one, and CADCraft's unsaved drawings saved |
 | `drive-login` | Opens Google's sign-in on a Nuke session's screen and keeps the Drive access it grants as a Modal Secret, which `up --secret` hands to a session as rclone's `gdrive:` |
 | `build` | Builds the image without starting a session |
 
@@ -256,6 +257,98 @@ connection authenticates first, `{"method": "auth", "params": {"token": ...}}`
 from inside the Sandbox, where `PHOTOCRAFT_CONTROL_TOKEN` holds it; the
 launcher has no verb for it yet.
 
+## CADCraft
+
+`--app cadcraft` starts a session for
+[CADCraft](https://github.com/storytold/cadcraft), the same team's open-source
+2D drafting application (layers, dimensions, hatches, blocks, paper-space
+sheets, constraints; DXF and DWG), which an agent drives through its command
+channel while a person drafts in the same window:
+
+```bash
+addons/modal/selkies-modal up --app cadcraft --name plan --gpu none --env SELKIES_MODAL_PROJECT=projects/house
+```
+
+The image installs the Debian package of CADCraft's GitHub release, checked
+against the hash the release's `SHA256SUMS.txt` lists (`CADCRAFT_VERSION` and
+`CADCRAFT_SHA256` in `sandbox.py`; updating is a bump of both), as FilmCraft's
+is. CADCraft opens maximized, on a drawing of the session's project folder
+([`cadcraft/autostart`](cadcraft/autostart)):
+
+- It opens the newest `.dxf` or `.dwg` in the folder, and in a folder with
+  none a new `drawing.dxf`, metric (millimeters, the ISO-25 dimension style),
+  so Save and the agent's `app.save` write where the next session looks.
+  CADCraft also keeps an empty `Drawing1` tab beside it.
+- Its settings folder (preferences, logs, plotters, autosaves) is `.cadcraft`
+  in the project folder, so one project's autosaves are never offered in
+  another.
+- Work outlives the session. A session that ends by its idle timeout or
+  `down` first saves every drawing with unsaved changes
+  ([`cadcraft/keep.sh`](cadcraft/keep.sh), which `session.sh` runs): a drawing
+  with a file is saved to it, the file as it was kept beside it as
+  `<name>.bak`, and one never saved goes into the folder under its title
+  (`Drawing2.dxf`). A session cut off with no chance to (the Sandbox's
+  lifetime, a crash) leaves CADCraft's autosave, which the next session
+  offers in its Drawing Recovery window and the `drawingrecovery` command
+  lists; each start sets the autosave interval to one minute (`SAVETIME`),
+  CADCraft's shortest. Measured: two drawings with unsaved changes, `down`
+  (5 s), `up`, and both were there, the one that had been in front open; a
+  circle drawn 75 s before the Sandbox was terminated outright came back from
+  the autosave. CADCraft's window closes with the display at the end of a
+  session, which it records as a crash report of under 1 kB in
+  `.cadcraft/crash-reports`.
+
+The control channel is CADCraft's JSON lines on the Sandbox's loopback (port
+9878; [its protocol](https://github.com/storytold/cadcraft/blob/main/docs/control-protocol.md)).
+CADCraft makes the channel's token itself each time it starts and writes it to
+a file only the session's user reads, so the launcher holds none: the client
+in the session ([`cadcraft/control.sh`](cadcraft/control.sh)) reads it for
+each request.
+
+```bash
+addons/modal/selkies-modal cadcraft --name plan <<'EOF'
+{"method": "engine.execute", "params": {"command": "rectang", "params": {"p1": [0, 0], "p2": [4600, 4000]}}}
+{"method": "engine.execute", "params": {"command": "export", "params": {"path": "exports/plan.pdf"}}}
+{"method": "drawing.inspect", "params": {"entities": false}}
+EOF
+```
+
+Each reply is CADCraft's own line, `{"ok": true, "result": ...}` or `{"ok":
+false, "error": ...}`, and the status is 1 when one was refused. From Python,
+`cadcraft_call(sandbox, method, params, timeout)` sends one request and
+returns its result, raising `RuntimeError` with CADCraft's message; the
+control plane's `engine_call` finds it by that name. `engine.execute` runs any
+of the 517 commands `engine.commands` lists, without opening a dialog.
+
+It writes DXF, DWG, PDF, SVG, and PNG, and has no 3D: `export` refuses STL,
+STEP, IGES, OBJ, and glTF. A drawing goes to Blender as its DXF, read there
+with `ezdxf` (`moody/skills/cadcraft/references/handoff.md` has the recipe: a
+4600 × 4000 mm room's walls arrived 4.6 × 4.0 × 2.7 m).
+
+Two sessions on one workspace do not see each other's new files while both
+run: a Sandbox sees the Volume as it was when it started (a file written 13 s
+before a start was there, one written 1 s before was not, one written after
+never appeared, and `reload_volumes` is refused while the session has files
+open). A hand-off is therefore export, then start the session that reads it.
+
+### Graphics and speed
+
+The window draws through Mesa's Vulkan in software (`WGPU_BACKEND=vulkan`,
+lavapipe), as FilmCraft's does, and a drawing is light work for it. Measured
+with `--gpu none` on the default two reserved cores; a GPU session was not
+measured, a Sandbox having no render node for it to draw through:
+
+| | |
+| --- | --- |
+| `up` until Selkies listens, image cached | 4 to 7 s; CADCraft answers 0.4 to 0.7 s later |
+| The image, built once | 71 s |
+| A request through `cadcraft_call` | 0.29 s median, the Sandbox's exec around a request that takes 28 ms from inside |
+| A frame of a dimensioned room plan (362 primitives) | 1.4 ms; 206 frames for 200 zooms |
+| `ui.screenshot`; `ui.render` at 2400 × 1600 | 0.26 s; 0.49 s |
+| A dimensioned plan, its A3 sheet, a part drawing, and 12 exports | 129 requests, 38 s |
+| CADCraft idle | 1.3 % of a core, 486 MB |
+| `cadcraft-cli perf`, 200,000 objects | display list 83 ms, DXF write 0.9 s, read 1.5 s |
+
 ## Unreal
 
 `--app unreal` starts the desktop an Unreal engine works on, for a studio whose
@@ -450,8 +543,8 @@ release archive from blender.org, checked against the hash blender.org
 publishes, `xprintidle` to read the display's idle counter, and this
 directory's scripts. `BASE_IMAGE`, `BLENDER_VERSION`, and `BLENDER_SHA256` at
 the top of `sandbox.py` choose what it is built from, as `FILMCRAFT_VERSION`,
-`FILMCRAFT_SHA256`, `PHOTOCRAFT_VERSION`, and `PHOTOCRAFT_SHA256` do for
-FilmCraft's and PhotoCraft's images, and a change to any of them builds a new
+`FILMCRAFT_SHA256`, `PHOTOCRAFT_VERSION`, `PHOTOCRAFT_SHA256`, `CADCRAFT_VERSION`,
+and `CADCRAFT_SHA256` do for FilmCraft's, PhotoCraft's, and CADCraft's images, and a change to any of them builds a new
 image on the next `up` or `build`.
 
 The Selkies window manager runs Blender as the session's application,

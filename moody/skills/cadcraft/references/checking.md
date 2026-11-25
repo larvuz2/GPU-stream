@@ -76,8 +76,8 @@ the code where the building stands governs.
 | In front of a toilet | 530 mm | 21 in | IRC R307.1 |
 | Toilet centerline to a side wall | 380 mm | 15 in | IRC R307.1 |
 | Habitable room ceiling height | 2130 mm | 7 ft | IRC R305.1 |
-| Stair: riser max, tread min, width min | 196, 254, 915 mm | 7 3/4, 10, 36 in | IRC R311.7 |
-| Stair comfort rule | 2 × riser + tread = 600 to 640 mm | 24 to 25 in | Blondel's rule |
+| Stair: rise max, run (step depth) min, width min | 196, 254, 915 mm | 7 3/4, 10, 36 in | IRC R311.7 |
+| Stair comfort rule | 2 × rise + run = 600 to 640 mm | 24 to 25 in | Blondel's rule |
 | Guard height | 915 mm dwelling, 1065 elsewhere | 36, 42 in | IRC R312, IBC 1015 |
 
 Also look: a door's swing arc crosses no furniture and no other swing; a door opens against a
