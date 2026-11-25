@@ -290,7 +290,9 @@ to `slip` afterwards. A crossfade over a cut: `edit.fades_create {tracks: ["VO"]
 | `mix.phase_invert` / `mix.trim` | `{tracks?, value?}` / `{tracks?, db}` |
 
 Inserts run top to bottom, slot 0 first, before the fader; sends are after the fader unless
-`pre_fader`. `mix.insert` without `slot` takes the first free one.
+`pre_fader`. `mix.insert` without `slot` takes the first free one. A fader at 0 dB is unity (a
+stereo file bounced at the level it came in at); a mono track panned to the center is 3 dB down
+in each speaker and at full level when panned hard.
 
 ### Built-in processors
 
@@ -333,8 +335,9 @@ Points are joined by straight lines and the value before the first point is the 
 a fade is two points (`volume` -60 at the start, -9 two bars later), a duck is four. `volume`
 is dB, `pan` -1..1, `send_a_level` the send in slot a in dB, and `plugin:a:threshold` the
 `threshold` of the insert in slot a. Once a track has volume automation, `mix.volume` no longer
-decides its level where the automation plays: move the points, or use `clip.gain` or a `gain`
-insert for an overall change.
+decides its level anywhere, since the first and last points hold before and after them (a
+`mix.volume` of -6 changed nothing in the bounce): move the points, or use `clip.gain` or a
+`gain` insert for an overall change.
 
 ## Transport and looking
 
