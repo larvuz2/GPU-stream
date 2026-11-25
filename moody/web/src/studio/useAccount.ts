@@ -10,6 +10,7 @@
  *
  * Each is read once when the studio opens. The balance is re-read when something spends it (an
  * engine changes state, a turn ends), so the sidebar follows the meter without a poll of its own.
+ * The account also carries the limits of its turns, which the person changes through it.
  * A control plane from before the studio answers the project and GitHub routes with 404; that is
  * reported as `missing`, which the studio shows as a calm "not here yet" rather than an error,
  * while the account, credits, and keys keep working.
@@ -24,6 +25,7 @@ import {
   type GitHubRepo,
   type GitHubStatus,
   type Health,
+  type LimitChanges,
   type Me,
   type NewProject,
   type Project,
@@ -59,6 +61,8 @@ export interface Account {
   health: Health | null;
   /** Re-reads the account, quietly. */
   refreshMe: () => void;
+  /** Changes the limits of the account's turns. Rejects with an `ApiError`, 400 for a refused value. */
+  setLimits: (changes: LimitChanges) => Promise<void>;
 }
 
 /**
@@ -110,7 +114,14 @@ export function useAccount(client: ControlPlane | null): Account {
     };
   }, [client]);
 
-  return { me, health, refreshMe };
+  const setLimits = useCallback(
+    async (changes: LimitChanges): Promise<void> => {
+      setMe(await connected(client).updateMe(changes));
+    },
+    [client],
+  );
+
+  return { me, health, refreshMe, setLimits };
 }
 
 /** The account's projects and the actions over them. */

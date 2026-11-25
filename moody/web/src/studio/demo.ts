@@ -53,6 +53,9 @@
  * answers with the steps that link it, and `movie` for a new film that starts from its first
  * message with no engine, which plays the agent thinking, asking, delegating to subagents, and
  * asking before it starts one (`demoMovie.ts`).
+ *
+ * The account has the limits of a turn as settings ({@link DEFAULT_LIMITS}, {@link MAX_LIMITS}),
+ * which `updateMe` changes and refuses as the control plane does.
  * @module
  */
 import {
@@ -69,6 +72,7 @@ import {
   type GitHubRepo,
   type GitHubStatus,
   type Health,
+  type Limits,
   type Media,
   type Me,
   type PlanItem,
@@ -78,9 +82,11 @@ import {
   type SkillInfo,
   type StudioEvent,
   type TurnId,
+  type TurnLimits,
   type UnrealProject,
 } from '../lib/api';
 import { catalog, findApp, findDiscipline } from '../lib/catalog';
+import { creditCount, usd } from '../lib/format';
 import { appImage } from '../lib/media';
 import {
   asset,
@@ -100,6 +106,12 @@ import { FILM_DISCIPLINES, MOVIE_AGENTS, MOVIE_PROJECT, movieOpening, movieProje
 
 /** The address the demo's account is shown under. */
 export const DEMO_EMAIL = 'you@example.com';
+
+/** What a turn may spend and take on the demo's deployment, for an account that set neither. */
+const DEFAULT_LIMITS: TurnLimits = { turn_budget_usd: 15, turn_limit: 200 };
+
+/** The demo deployment's ceilings, which no account sets a limit above. */
+const MAX_LIMITS: TurnLimits = { turn_budget_usd: 100, turn_limit: 1000 };
 
 /** The status a refusal of the demo carries: a feature it does not have. */
 const NOT_CONFIGURED = 503;
@@ -1094,7 +1106,32 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   ];
   let counter = 100;
   let reads = 0;
-  const me: Me = { id: 'demo-user', email: DEMO_EMAIL, credits: 412, max_sessions: 3 };
+  /** What the account set of a turn's limits itself. */
+  let own: Limits['own'] = { turn_budget_usd: null, turn_limit: null };
+  /**
+   * The account's limits for a turn: what it set, and the deployment's default where it set nothing.
+   *
+   * @returns The limits, as the control plane reports them.
+   */
+  const limits = (): Limits => ({
+    turn_budget_usd: own.turn_budget_usd ?? DEFAULT_LIMITS.turn_budget_usd,
+    turn_limit: own.turn_limit ?? DEFAULT_LIMITS.turn_limit,
+    own,
+    default: DEFAULT_LIMITS,
+    max: MAX_LIMITS,
+  });
+  /**
+   * The account, with its limits unless the control plane is one from before the studio.
+   *
+   * @returns The account.
+   */
+  const me = (): Me => ({
+    id: 'demo-user',
+    email: DEMO_EMAIL,
+    credits: 412,
+    max_sessions: 3,
+    ...(legacy ? {} : { limits: limits() }),
+  });
   const health: Health = {
     ok: true,
     agent: !offline,
@@ -1338,7 +1375,33 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
 
   return {
     health: () => Promise.resolve(health),
-    me: () => Promise.resolve(me),
+    me: () => Promise.resolve(me()),
+    updateMe: (changes) =>
+      legacy
+        ? missing()
+        : soon(() => {
+            const budget = changes.turn_budget_usd;
+            const steps = changes.turn_limit;
+            for (const value of [budget, steps]) {
+              if (typeof value === 'number' && !(value > 0)) {
+                throw new ApiError(400, 'A limit is a positive number, or null for the default.');
+              }
+            }
+            if (typeof budget === 'number' && budget > MAX_LIMITS.turn_budget_usd) {
+              throw new ApiError(400, `A turn may spend at most ${usd(MAX_LIMITS.turn_budget_usd)} here.`);
+            }
+            if (typeof steps === 'number' && !Number.isInteger(steps)) {
+              throw new ApiError(400, 'A turn’s steps are a whole number.');
+            }
+            if (typeof steps === 'number' && steps > MAX_LIMITS.turn_limit) {
+              throw new ApiError(400, `A turn may take at most ${creditCount(MAX_LIMITS.turn_limit)} steps here.`);
+            }
+            own = {
+              turn_budget_usd: budget === undefined ? own.turn_budget_usd : budget,
+              turn_limit: steps === undefined ? own.turn_limit : steps,
+            };
+            return me();
+          }),
     sessionLink: () => Promise.reject(new ApiError(NOT_CONFIGURED, 'The demo has no stream to open.')),
     stopSession: (id) =>
       soon(() => {

@@ -30,7 +30,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Layers, ListChecks, PanelRightClose, PanelRightOpen, Plus, Server } from 'lucide-react';
-import { ALWAYS, isActive, type ControlPlane, type Project, type Session } from '../lib/api';
+import { ALWAYS, isActive, type ControlPlane, type Project, type Session, type TurnLimit } from '../lib/api';
 import { AUTO_REGION } from '../lib/catalog';
 import { isBoolean, isRecord, type Guard } from '../lib/narrow';
 import { Composer } from './Composer';
@@ -122,6 +122,8 @@ interface WorkspaceProps {
   onFirstMessageTaken: () => void;
   /** Opens the credits dialog. */
   onAddCredits: () => void;
+  /** Opens the dialog of a turn's limits on the one a turn reached, or `null` where there are none to set. */
+  onLimits: ((reached: TurnLimit) => void) | null;
   /** Drawn instead of the stream, where there is none to show. */
   standIn?: StreamStandIn;
 }
@@ -358,6 +360,7 @@ export function Workspace(props: WorkspaceProps) {
           }}
           onChoose={data.send}
           onApprove={data.approve}
+          onLimits={props.onLimits}
           onLock={(ui, value) => data.send(describeAnswer(ui, value), { ui_id: ui.ui_id, value })}
           onSuggest={setDraft}
         />

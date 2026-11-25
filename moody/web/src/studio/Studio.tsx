@@ -24,13 +24,14 @@
  */
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { FolderOpen, LayoutGrid, MessageSquare, MonitorPlay, Plus } from 'lucide-react';
-import type { ControlPlane, NewProject } from '../lib/api';
+import type { ControlPlane, NewProject, TurnLimit } from '../lib/api';
 import { brand, catalog } from '../lib/catalog';
 import { isBoolean, isNumber } from '../lib/narrow';
 import { ConnectClaudeDialog } from './ConnectClaude';
 import { CreditsDialog } from './CreditsDialog';
 import type { EpicReturn, GitHubReturn } from './EnvironmentPanel';
 import { useMediaQuery, usePreference } from './hooks';
+import { LimitsDialog } from './LimitsDialog';
 import { NewProjectDialog, type ProjectDraft } from './NewProjectDialog';
 import { ErrorNotice, Notice } from './Notice';
 import { DisciplineIcon } from '../components/DisciplineIcon';
@@ -114,6 +115,8 @@ export function Studio({
   const [creating, setCreating] = useState(draft !== null);
   const [credits, setCredits] = useState(false);
   const [claude, setClaude] = useState(false);
+  // The dialog of a turn's limits: closed, open from the menu, or open on the limit a turn reached.
+  const [limits, setLimits] = useState<TurnLimit | 'open' | null>(null);
   const [focusWanted, setFocusWanted] = useState(false);
   const [tab, setTab] = useState<MobileTab>('chat');
   const [firstMessage, setFirstMessage] = useState<{ project: string; text: string } | null>(null);
@@ -210,6 +213,9 @@ export function Studio({
         onConnectClaude={() => {
           setClaude(true);
         }}
+        onLimits={() => {
+          setLimits('open');
+        }}
         onSignOut={onSignOut}
         mobileHidden={narrow && tab !== 'projects'}
       />
@@ -245,6 +251,7 @@ export function Studio({
           onAddCredits={() => {
             setCredits(true);
           }}
+          onLimits={account.me?.limits === undefined ? null : setLimits}
           standIn={standIn}
         />
       )}
@@ -273,6 +280,17 @@ export function Studio({
         }}
         onCheckout={checkout}
       />
+      {account.me?.limits === undefined ? null : (
+        <LimitsDialog
+          open={limits !== null}
+          onClose={() => {
+            setLimits(null);
+          }}
+          limits={account.me.limits}
+          reached={limits === 'open' ? null : limits}
+          onSave={account.setLimits}
+        />
+      )}
       <ConnectClaudeDialog
         open={claude}
         onClose={() => {

@@ -163,7 +163,39 @@ export interface Me {
   credits: number;
   /** How many sessions the account may have active at once. */
   max_sessions: number;
+  /** What a turn of the account's may spend and take; absent from a control plane without such limits. */
+  limits?: Limits;
 }
+
+/** The limits a turn has, by what reaching one is called: its spend on the model, and its steps. */
+const TURN_LIMITS = ['budget', 'steps'] as const;
+
+/** One limit of a turn. */
+export type TurnLimit = (typeof TURN_LIMITS)[number];
+
+/** The two limits of a turn, as numbers. */
+export interface TurnLimits {
+  /** What one turn may spend on the model, in US dollars. */
+  turn_budget_usd: number;
+  /** How many steps one turn may take. */
+  turn_limit: number;
+}
+
+/**
+ * What a turn of the person's may spend on the model and how many steps it may take: the numbers
+ * that apply, what the person set themselves, the deployment's defaults, and its ceilings.
+ */
+export interface Limits extends TurnLimits {
+  /** What the person set themselves; `null` for a limit left on the deployment's default. */
+  own: { [Limit in keyof TurnLimits]: number | null };
+  /** The deployment's defaults, which apply where the person set nothing. */
+  default: TurnLimits;
+  /** The deployment's ceilings, which no account sets a limit above. */
+  max: TurnLimits;
+}
+
+/** The limits to change; one left out stays as it is, and `null` puts one back on the default. */
+export type LimitChanges = { [Limit in keyof TurnLimits]?: number | null };
 
 /**
  * What the control plane says about itself, to anyone who asks.
@@ -492,6 +524,8 @@ export interface PreviewData {
 export interface ErrorData {
   /** What went wrong, for the person. */
   message: string;
+  /** The limit of the person's the turn stopped at, for a turn that stopped at one. */
+  limit?: TurnLimit;
 }
 
 /** Where a subagent stands; `completed`, `failed`, and `stopped` are final. */
@@ -764,6 +798,11 @@ export interface ControlPlane {
   health(): Promise<Health>;
   /** Reads the signed-in account. */
   me(): Promise<Me>;
+  /**
+   * Changes the limits of the account's turns and returns the account; rejects with status 400 for
+   * a value that is not positive or is over the deployment's ceiling.
+   */
+  updateMe(changes: LimitChanges): Promise<Me>;
   /** Mints a fresh link that opens a running session's desktop, or the picture `stream` names. */
   sessionLink(id: string, stream?: string): Promise<string>;
   /** Stops a session. */
@@ -1009,13 +1048,29 @@ const isHealthReport: Guard<HealthReport> = (value): value is HealthReport =>
   optional(isNullableBoolean)(value.billing) &&
   optional(isStrings)(value.tiers);
 
+/** Checks a value into a {@link TurnLimits}. */
+const isTurnLimits: Guard<TurnLimits> = (value): value is TurnLimits =>
+  isRecord(value) && isNumber(value.turn_budget_usd) && isNumber(value.turn_limit);
+
+/** Checks a value into a {@link Limits}. */
+const isLimits: Guard<Limits> = (value): value is Limits =>
+  isRecord(value) &&
+  isNumber(value.turn_budget_usd) &&
+  isNumber(value.turn_limit) &&
+  isRecord(value.own) &&
+  isNullableNumber(value.own.turn_budget_usd) &&
+  isNullableNumber(value.own.turn_limit) &&
+  isTurnLimits(value.default) &&
+  isTurnLimits(value.max);
+
 /** Checks a value into a {@link Me}. */
 const isMe: Guard<Me> = (value): value is Me =>
   isRecord(value) &&
   isString(value.id) &&
   isString(value.email) &&
   isNumber(value.credits) &&
-  isNumber(value.max_sessions);
+  isNumber(value.max_sessions) &&
+  optional(isLimits)(value.limits);
 
 /** Checks a value into a {@link PlanItem}. */
 const isPlanItem: Guard<PlanItem> = (value): value is PlanItem =>
@@ -1251,7 +1306,15 @@ function parseEvent(value: unknown): StudioEvent | null {
     case 'turn_end':
       return { ...envelope, kind: 'turn_end', data };
     case 'error':
-      return isString(data.message) ? { ...envelope, kind: 'error', data: { message: data.message } } : null;
+      if (!isString(data.message)) {
+        return null;
+      }
+      // A limit this page does not know still reads as the error it is.
+      return {
+        ...envelope,
+        kind: 'error',
+        data: { message: data.message, ...(oneOf(TURN_LIMITS)(data.limit) ? { limit: data.limit } : {}) },
+      };
     default:
       return null;
   }
@@ -1512,6 +1575,7 @@ export function createControlPlane(baseUrl: string, accessToken: () => Promise<s
       };
     },
     me: async () => expect(await request('GET', '/v1/me'), isMe),
+    updateMe: async (changes) => expect(await request('PATCH', '/v1/me', changes), isMe),
     sessionLink: async (id, stream) =>
       field(
         await request(

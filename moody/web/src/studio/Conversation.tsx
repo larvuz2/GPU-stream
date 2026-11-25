@@ -18,7 +18,10 @@
  * it in the gutter while it is being written, and its answer grows while it is written, ending
  * in a caret until it is whole. Before a tool that costs or changes something it asks, as a card
  * with three answers (`ApprovalCard.tsx`), and a turn ends on one small line of what it took:
- * time, tokens, cost, and subagents.
+ * time, tokens, cost, and subagents. A turn that stopped at one of the person's own limits (an
+ * `error` that names the `limit`) is no failure: its line is a caution, not an error, and offers
+ * the dialog where that limit is set, beside the message where both fit on a line and under it on
+ * a phone.
  *
  * An interactive card (`ui`) is drawn by `ui/UiCard.tsx`. This module decides when it can be
  * answered (it is the newest thing the agent showed, no turn is running, and it is not locked
@@ -55,7 +58,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { ArrowDown, Check, ChevronRight, CircleAlert, ListChecks, Lock, MonitorPlay } from 'lucide-react';
 import { MoodyFace } from '../components/Moody';
 import { MoodyEyes } from '../components/MoodyEyes';
-import type { ApprovalDecision, Asset, PlanItem, Project, Session, UiData } from '../lib/api';
+import type { ApprovalDecision, Asset, PlanItem, Project, Session, TurnLimit, UiData } from '../lib/api';
 import { findApp, findTier } from '../lib/catalog';
 import { cx } from '../lib/cx';
 import { price, spanText, tokenCount } from '../lib/format';
@@ -119,6 +122,8 @@ interface ConversationProps {
   onChoose: (text: string) => Promise<void>;
   /** Answers an approval the running turn waits on. */
   onApprove: (approvalId: string, decision: ApprovalDecision) => Promise<void>;
+  /** Opens the dialog of a turn's limits on the one a turn reached, or `null` where there are none to set. */
+  onLimits: ((reached: TurnLimit) => void) | null;
   /** Locks an interactive card in with its state, as the person's next message. */
   onLock: (ui: UiData, value: unknown) => Promise<void>;
   /** Puts a suggestion in the composer. */
@@ -539,6 +544,7 @@ function Entry({
   onShowPlan,
   onChoose,
   onApprove,
+  onLimits,
   onLock,
   reveal,
 }: EntryProps) {
@@ -641,12 +647,33 @@ function Entry({
       return <LibraryLine asset={item.asset} onOpenAsset={onOpenAsset} />;
     case 'engine':
       return <EngineLine engine={item.engine} onShowEngine={onShowEngine} />;
-    case 'error':
-      return (
+    case 'error': {
+      const { limit } = item;
+      return limit === null ? (
         <li className="pl-10">
           <Notice tone="bad">{item.message}</Notice>
         </li>
+      ) : (
+        <li className="pl-10" data-limit={limit}>
+          <Notice tone="warn">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+              <span className="min-w-56 flex-1">{item.message}</span>
+              {onLimits === null ? null : (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm -my-1 flex-none"
+                  onClick={() => {
+                    onLimits(limit);
+                  }}
+                >
+                  Change limits
+                </button>
+              )}
+            </div>
+          </Notice>
+        </li>
       );
+    }
   }
 }
 
