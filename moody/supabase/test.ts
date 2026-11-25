@@ -17,8 +17,9 @@
  * only in its user's project and a seat-capped app stops at its seats, that a
  * project runs one turn at a time and a dead turn does not hold it, that the
  * agent's transcript is kept in the order written with a batch sent twice kept
- * once, that an approval is answered once and "always" is remembered, and that
- * the keys a browser holds reach no row and no function. The migrations also
+ * once, that an approval is answered once and "always" is remembered, that an
+ * account's limits of a turn are unset until it sets them and are never zero,
+ * and that the keys a browser holds reach no row and no function. The migrations also
  * apply to a database with no Storage at all, as the first did, moving to the
  * GitHub App drops the OAuth App's grants a database already held, and moving
  * to the agent's loop keeps a project's events while its replayed conversation
@@ -105,6 +106,13 @@ check("a new profile gets its sign-up credits", p.credits === 60 && p.max_sessio
 p = await one("select * from moody_ensure_profile($1,$2,$3)", [A, "a@x.test", 60]);
 check("asking again grants nothing more", p.credits === 60, p);
 check("one ledger row for the sign-up", (await one("select count(*)::int n from credit_ledger where user_id=$1", [A])).n === 1);
+check("a profile has set no limit of a turn, which is the deployment's default", p.turn_budget_usd === null && p.turn_limit === null, p);
+await db.exec(`update profiles set turn_budget_usd = 40.5, turn_limit = 350 where id='${A}'`);
+p = await one("select * from moody_ensure_profile($1,$2,$3)", [A, "a@x.test", 60]);
+check("its own limits come back with it", Number(p.turn_budget_usd) === 40.5 && p.turn_limit === 350, p);
+check("a limit is never zero or less", /check/.test(await refused(`update profiles set turn_budget_usd = 0 where id='${A}'`) ?? "")
+  && /check/.test(await refused(`update profiles set turn_limit = -1 where id='${A}'`) ?? ""));
+await db.exec(`update profiles set turn_budget_usd = null, turn_limit = null where id='${A}'`);
 await one("select * from moody_ensure_profile($1,$2,$3)", [B, "b@x.test", 60]);
 await one("select * from moody_ensure_profile($1,$2,$3)", [C, "c@x.test", 0]);
 
@@ -304,6 +312,9 @@ check("moving to the agent's loop keeps a project's events and its running turn,
   ((await upgraded.query<Row>("select count(*)::int n from project_events where project_id=$1", [old.id])).rows[0] ?? {}).n === 2
   && kept.agent_session === null && JSON.stringify(kept.permissions) === "{}" && kept.turn_id === before, kept);
 check("and the conversation it replayed is gone", ((await upgraded.query<Row>("select to_regclass('public.agent_messages') t")).rows[0] ?? {}).t === null);
+await upgraded.exec(migrations[migration("limits")] ?? "");
+const earlier = (await upgraded.query<Row>("select * from moody_ensure_profile($1,$2,$3)", [A, "a@x.test", 60])).rows[0] ?? {};
+check("an account from before limits were its own has set none", earlier.credits === 60 && earlier.turn_budget_usd === null && earlier.turn_limit === null, earlier);
 const bare = new PGlite();
 await bare.exec(SUPABASE);
 check("the migrations apply where there is no Storage", await (async () => {

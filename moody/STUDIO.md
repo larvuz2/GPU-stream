@@ -259,7 +259,10 @@ Event    {id, turn_id, kind, data, created_at}, kind one of
                                               that returned it, and an item whose file is gone
                                               is left out
            turn_end      {}
-           error         {message}
+           error         {message, limit?: "budget" | "steps"}  `limit` names the limit of the
+                                              person's the turn reached, where that is why it
+                                              stopped; the message says how much it was and
+                                              that they change it in their settings
 ```
 
 The agent runs one turn at a time per project, as a Modal function the message
@@ -397,8 +400,11 @@ a process the model steers.
   (`profiles.turn_budget_usd`, `profiles.turn_limit`), which they change in
   the app. An account that has not set one runs on the deployment's default
   (`MOODY_TURN_BUDGET_USD`, 15; `MOODY_TURN_LIMIT`, 200), and no account sets
-  one above the deployment's ceiling (`MOODY_TURN_BUDGET_MAX_USD`,
-  `MOODY_TURN_LIMIT_MAX`).
+  one above the deployment's ceiling (`MOODY_TURN_BUDGET_MAX_USD`, 100;
+  `MOODY_TURN_LIMIT_MAX`, 1000). A turn runs on its person's limits as they
+  were when it began. A setting made before the ceiling was lowered runs at
+  the ceiling, and so does a default set above it. The number of steps is a
+  whole number.
 - **Sessions.** A project's conversation is one SDK session
   (`projects.agent_session`), its transcript stored in the database
   (`agent_transcripts`) through the SDK's session store as the turn writes
@@ -408,12 +414,12 @@ a process the model steers.
   engines, what was shown) is sent with each message, after the person's
   words. A project that has events and no session yet starts one that is
   first told what was said before.
-- **Spending.** A turn has a budget (`MOODY_TURN_BUDGET_USD`, 10 by default,
-  0 for none) and a limit of steps (`MOODY_TURN_LIMIT`, 200 by default) the
-  loop enforces, each ending the turn with an `error` event that says so, and
-  every turn ends with a `usage` event. `cost_usd` is the loop's own pricing
-  of the turn's model calls, subagents' included; generation and engines are
-  not in it.
+- **Spending.** The loop enforces the person's two limits. A turn that
+  reaches one ends with an `error` event that names it (`limit`), and the
+  calls of the answer that reached the budget still run. Every turn ends with
+  a `usage` event. `cost_usd` is the loop's own pricing of the turn's model
+  calls, subagents' included, and is what the budget is counted in;
+  generation and engines are not in it.
 - **Stopping.** `POST /v1/projects/{pid}/stop` interrupts the loop: a call
   still running ends with a `tool_end` that is not ok, a subagent's card ends
   `stopped`, and what was written of the answer stays as its last snapshot.

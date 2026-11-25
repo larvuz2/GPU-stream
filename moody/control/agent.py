@@ -60,9 +60,12 @@ end its turn and ask. The answer is recorded in the database once
 (`moody_resolve_approval`), whoever is first.
 
 The model is `MOODY_AGENT_MODEL`, Claude Fable 5.2 by default, with summarized
-thinking, which the page shows; effort, the budget of one turn, and the most
-steps one turn may take are configuration (`loop_settings`). A subagent runs
-on the tier its definition names, which the deployment maps to a model.
+thinking, which the page shows; effort is configuration (`loop_settings`). A
+subagent runs on the tier its definition names, which the deployment maps to
+a model. What one turn may spend on the model and how many steps it may take
+are its person's own settings (`Sessions.limits`), read as the turn begins;
+a turn that reaches one ends with an `error` event that names the limit, so
+the page can offer the setting where it tells the person.
 
 The turn's worker beats every `HEARTBEAT_SECONDS` on a thread of its own
 (`moody_turn_alive`), which both shows the turn is alive, so a turn whose
@@ -824,8 +827,8 @@ def check_activities(catalog: Catalog) -> None:
         raise ValueError(f"these tools name activities catalog.json does not have: {unknown}")
 
 
-def loop_settings(config: Config) -> Settings:
-    """What the deployment configures of the loop.
+def loop_settings(config: Config, limits: dict[str, Any]) -> Settings:
+    """What the deployment configures of the loop, and the limits of the person whose turn it runs (`Sessions.limits`).
 
     Raises:
         ValueError: The configured effort is none the loop knows.
@@ -838,8 +841,8 @@ def loop_settings(config: Config) -> Settings:
         effort=config.agent_effort,
         thinking=config.agent_thinking,
         fallback_model=config.agent_fallback_model,
-        budget_usd=config.turn_budget_usd,
-        turn_limit=config.turn_limit,
+        budget_usd=float(limits["turn_budget_usd"]),
+        turn_limit=int(limits["turn_limit"]),
         base_url=config.anthropic_base_url,
         passed=config.loop_env,
         cli=config.loop_cli,
@@ -1099,6 +1102,8 @@ class Turn:
         self.turn_id = turn_id
         profile = sessions.me(User(id=project["user_id"], email=""))
         self.user = User(id=project["user_id"], email=profile["email"])
+        # What this turn may spend and how many steps it may take: its person's limits as the turn began
+        self.limits: dict[str, Any] = profile["limits"]
         self.stopped = threading.Event()
         self.done = threading.Event()
         self.heartbeat_seconds = heartbeat_seconds
@@ -1263,7 +1268,7 @@ class Agent:
                 workspace=workspace,
             )
             activities = {name: definition["activity"] for name, definition in SPECS.items()}
-            await TurnLoop(self, turn, brief, loop_settings(config), activities).run(self.loop)
+            await TurnLoop(self, turn, brief, loop_settings(config, turn.limits), activities).run(self.loop)
 
     def session(self, turn: Turn, store: Transcript, workspace: Workspace) -> tuple[str, bool]:
         """The loop's session that is the project's conversation, and whether it is resumed or begins now.

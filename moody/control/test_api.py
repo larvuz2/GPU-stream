@@ -149,7 +149,7 @@ class FakeStore:
         self.keys: dict[str, dict[str, Any]] = {}
         self.ledger: list[tuple[str, int, str | None]] = []
         self.tables: dict[str, dict[Any, dict[str, Any]]] = {
-            "sessions": self.sessions, "api_keys": self.keys,
+            "sessions": self.sessions, "api_keys": self.keys, "profiles": self.profiles,
             **{
                 table: {}
                 for table in ("projects", "assets", "project_events", "agent_transcripts", "github_connections", "epic_connections")
@@ -173,7 +173,8 @@ class FakeStore:
 
     def moody_ensure_profile(self, p_user: str, p_email: str, p_signup_credits: int) -> dict[str, Any]:
         return self.profiles.setdefault(
-            p_user, {"id": p_user, "email": p_email, "credits": p_signup_credits, "max_sessions": 1}
+            p_user,
+            {"id": p_user, "email": p_email, "credits": p_signup_credits, "max_sessions": 1, "turn_budget_usd": None, "turn_limit": None},
         )
 
     def moody_request_session(
@@ -990,7 +991,81 @@ def test_no_credential_and_a_wrong_one_are_refused(world):
 def test_a_first_visit_makes_a_profile_with_the_sign_up_credits(world):
     client = world[0]
     me = client.get("/v1/me", headers=auth("alice-token")).json()
-    assert me == {"id": ALICE.id, "email": ALICE.email, "credits": CATALOG.signup_credits, "max_sessions": 1}
+    limits = {
+        "turn_budget_usd": 15.0, "turn_limit": 200,
+        "own": {"turn_budget_usd": None, "turn_limit": None},
+        "default": {"turn_budget_usd": 15.0, "turn_limit": 200},
+        "max": {"turn_budget_usd": 100.0, "turn_limit": 1000},
+    }
+    assert me == {"id": ALICE.id, "email": ALICE.email, "credits": CATALOG.signup_credits, "max_sessions": 1, "limits": limits}
+
+
+def test_what_a_turn_may_spend_and_how_many_steps_it_may_take_are_the_persons_own_settings(studio):
+    client, model, store = studio.client, studio.model, studio.store
+    mine = lambda token="alice-token": client.get("/v1/me", headers=auth(token)).json()["limits"]
+    change = lambda **limits: client.patch("/v1/me", headers=auth("alice-token"), json=limits)
+    assert (mine()["turn_budget_usd"], mine()["turn_limit"], mine()["own"]) == (15.0, 200, {"turn_budget_usd": None, "turn_limit": None})
+
+    changed = change(turn_budget_usd=40, turn_limit=350)
+    assert changed.status_code == 200 and changed.json() == client.get("/v1/me", headers=auth("alice-token")).json(), "the answer is the profile"
+    assert (mine()["turn_budget_usd"], mine()["turn_limit"], mine()["own"]) == (40, 350, {"turn_budget_usd": 40, "turn_limit": 350})
+    assert mine()["default"] == {"turn_budget_usd": 15.0, "turn_limit": 200} and mine()["max"] == {"turn_budget_usd": 100.0, "turn_limit": 1000}
+    assert mine("bob-token")["own"] == {"turn_budget_usd": None, "turn_limit": None}, "one person's limits are not another's"
+    assert change(turn_limit=None).status_code == 200
+    assert (mine()["turn_budget_usd"], mine()["turn_limit"], mine()["own"]) == (40, 200, {"turn_budget_usd": 40, "turn_limit": None}), (
+        "null puts a limit back on the default, and a limit left out is left as it is"
+    )
+    assert change().status_code == 200 and mine()["own"]["turn_budget_usd"] == 40
+    assert change(turn_budget_usd=0.5, turn_limit=1000.0).status_code == 200 and mine()["own"] == {"turn_budget_usd": 0.5, "turn_limit": 1000}
+    for refused in ({"turn_budget_usd": 0}, {"turn_budget_usd": -3}, {"turn_budget_usd": "ten"}, {"turn_budget_usd": True}, {"turn_budget_usd": 100.01},
+                    {"turn_limit": 0}, {"turn_limit": 2.5}, {"turn_limit": 1001}, {"turn_limit": [200]}):
+        answer = change(**refused)
+        assert answer.status_code == 400 and answer.json()["detail"], refused
+    assert "at most $100" in change(turn_budget_usd=250).json()["detail"] and "at most 1000 steps" in change(turn_limit=5000).json()["detail"]
+    assert mine()["own"] == {"turn_budget_usd": 0.5, "turn_limit": 1000}, "a refused change changes nothing"
+    assert client.patch("/v1/me", json={"turn_limit": 5}).status_code == 401
+
+    # A turn runs on its person's limits, and on no more than the deployment's ceiling
+    film = new_project(client)
+    change(turn_budget_usd=40, turn_limit=350)
+    model.script(reply(say("Hello.")), reply(say("Hello.")), reply(say("Hello.")))
+    message(client, film["id"], "Hi")
+    assert (model.options[-1].max_budget_usd, model.options[-1].max_turns) == (40.0, 350)
+    with_config(studio, turn_budget_max_usd=20.0, turn_limit_max=100, turn_budget_usd=30.0, turn_limit=500)
+    assert (mine()["turn_budget_usd"], mine()["turn_limit"], mine()["own"]) == (20.0, 100, {"turn_budget_usd": 40, "turn_limit": 350}), (
+        "a setting made before the ceiling came down runs at the ceiling"
+    )
+    assert mine("bob-token")["default"] == {"turn_budget_usd": 20.0, "turn_limit": 100} and mine("bob-token")["turn_limit"] == 100
+    message(client, film["id"], "Hi")
+    assert (model.options[-1].max_budget_usd, model.options[-1].max_turns) == (20.0, 100)
+    store.profiles[ALICE.id].update(turn_budget_usd=None, turn_limit=None)
+    with_config(studio, turn_budget_max_usd=100.0, turn_limit_max=1000, turn_budget_usd=15.0, turn_limit=200)
+    message(client, film["id"], "Hi")
+    assert (model.options[-1].max_budget_usd, model.options[-1].max_turns) == (15.0, 200), "an account that set none runs on the default"
+
+    # A turn that reaches one says which and how much, and that it is the person's to change
+    wrong = lambda: [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "error"]
+    change(turn_limit=2)
+    model.script(reply(use("library_list")), reply(use("library_list")), reply(say("never")))
+    message(client, film["id"], "Loop")
+    assert wrong()[-1] == {
+        "message": "This turn reached your limit of 2 steps and stopped. You can change the limit in your settings. Send a message to go on.",
+        "limit": "steps",
+    }
+    model.steps.clear()
+    change(turn_limit=None, turn_budget_usd=0.0015)
+    model.script(reply(use("library_list")), reply(use("library_list")), reply(say("never")))
+    message(client, film["id"], "Spend")
+    assert wrong()[-1] == {
+        "message": "This turn reached your spending limit of $0.0015 and stopped. You can change the limit in your settings. Send a message to go on.",
+        "limit": "budget",
+    }
+    assert len(wrong()) == 2 and kinds(client, film["id"])[-3:] == ["error", "usage", "turn_end"]
+    model.steps.clear()
+
+    for none in ({"turn_budget_usd": 0}, {"turn_limit_max": 0}):
+        with pytest.raises(ValueError, match="positive"):
+            config(**none)
 
 
 def test_a_session_starts_in_the_users_own_workspace_and_hands_back_a_link(world):
@@ -1622,12 +1697,8 @@ def test_a_turn_the_model_could_not_finish_ends_with_an_error_the_person_can_rea
     message(client, film["id"], "Again")
     assert told()[-1] == "The model could not be reached. Try again."
 
-    # The most steps one turn may take, and a loop that breaks, are told too
-    with_config(studio, turn_limit=2)
-    model.script(reply(use("library_list")), reply(use("library_list")), reply(say("never")))
-    message(client, film["id"], "Loop")
-    assert "limit of steps" in told()[-1] and model.options[-1].max_turns == 2
-    model.steps.clear()
+    # A loop that breaks is told too, and none of these names a limit of the person's
+    assert not any("limit" in e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "error")
     model.may_run_dry = True
     message(client, film["id"], "The script is empty, which breaks the loop")
     assert told()[-1] == "Something went wrong on our side, and this turn stopped."
@@ -3198,10 +3269,10 @@ def test_the_loop_is_configured_by_the_deployment_and_keeps_none_of_its_own_file
     assert options.include_partial_messages and options.forward_subagent_text and options.session_store_flush == "eager"
     assert options.disallowed_tools == ["Agent(fork)"] and options.cwd == str(studio.tmp / "loop" / film["id"])
 
-    with_config(studio, agent_model="", agent_thinking=False, agent_fallback_model="", turn_budget_usd=0, turn_limit=0)
+    with_config(studio, agent_model="", agent_thinking=False, agent_fallback_model="")
     message(client, film["id"], "Hi")
     options = model.options[1]
-    assert (options.model, options.fallback_model, options.max_budget_usd, options.max_turns) == ("claude-fable-5-2", None, None, None)
+    assert (options.model, options.fallback_model) == ("claude-fable-5-2", None)
     assert options.thinking == {"type": "disabled"}
 
     with_config(studio, agent_effort="enormous")

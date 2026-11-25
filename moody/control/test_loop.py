@@ -28,6 +28,8 @@ agent counts on.
 - A deploy that changes the prompt or a tool reaches the next turn of a
   session that began before it.
 - The pictures a tool hands over reach the model as pictures.
+- A turn stops at its person's own limit of steps or of spending, and says
+  which.
 
 The tests are skipped, with the reason, where the bundled program is not
 there or does not start (an install of the SDK for another platform). Run as
@@ -980,13 +982,51 @@ def test_a_turn_the_model_could_not_finish_says_so_and_holds_nothing(
         for e in events(client, film["id"])["events"]
     )
 
-    with_config(studio, turn_limit=2)
+
+def test_a_turn_stops_at_its_persons_own_limits_and_says_which(studio):
+    client, model = studio.client, studio.model
+    film = new_project(client)
+    limits = lambda **changes: client.patch(
+        "/v1/me", headers=auth("alice-token"), json=changes
+    )
+    wrong = lambda: [
+        e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "error"
+    ]
+
+    assert limits(turn_limit=2).status_code == 200
     model.script(AGENT, reply(use("library_list")), reply(use("library_list")))
     message(client, film["id"], "Loop")
+    assert wrong() == [
+        {
+            "message": "This turn reached your limit of 2 steps and stopped. You can change the limit in your "
+            "settings. Send a message to go on.",
+            "limit": "steps",
+        }
+    ]
     assert (
-        told()[-1] == "This turn reached its limit of steps. Send a message to go on."
-        and events(client, film["id"])["running"] is False
+        len(model.asked(AGENT)) == 2 and events(client, film["id"])["running"] is False
     )
+
+    assert limits(turn_limit=None, turn_budget_usd=0.0001).status_code == 200
+    model.script(AGENT, reply(say("Listing."), use("library_list")))
+    message(client, film["id"], "Spend")
+    assert wrong()[-1] == {
+        "message": "This turn reached your spending limit of $0.0001 and stopped. You can change the limit in your "
+        "settings. Send a message to go on.",
+        "limit": "budget",
+    }
+    log = events(client, film["id"])["events"]
+    assert len(model.asked(AGENT)) == 3, (
+        "the answer that reached the budget is the last one asked for"
+    )
+    assert [e["kind"] for e in log][-5:] == [
+        "tool_start",
+        "tool_end",
+        "error",
+        "usage",
+        "turn_end",
+    ], "its call still runs"
+    assert log[-2]["data"]["cost_usd"] > 0.0001
 
 
 def one_turn(phase: str, state: Path, root: Path, definitions: Path) -> dict[str, Any]:
