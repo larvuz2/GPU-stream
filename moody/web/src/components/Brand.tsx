@@ -5,15 +5,24 @@
  */
 
 /**
- * The product's own mark and wordmark.
+ * The product's own mark: the pixel wordmark, and its two eyes where the whole word does not fit.
  *
- * The mark is two open rings around a center, a workpiece turning on a moody, drawn inline so it
- * needs no file. The name beside it is the catalog's.
+ * The wordmark is lowercase pixels (`lib/moody.ts`), drawn in the current text color, and alive:
+ * {@link Brand} carries it as a canvas with the header behavior (`MoodyLogo`). {@link BrandMark} is
+ * the eyes alone as a static drawing, for a dialog's head or a collapsed sidebar. The name a
+ * person reads or hears is the catalog's.
  * @module
  */
-import { useId } from 'react';
 import { brand } from '../lib/catalog';
 import { cx } from '../lib/cx';
+import { RAW } from '../lib/moody';
+import { MoodyLogo } from './Moody';
+
+/** The grid columns the two eyes span, and the rows, with a cell of room around them. */
+const EYES = { left: 6, top: 1, cols: 11, rows: 6 } as const;
+
+/** The wordmark's cells that belong to its eyes, the two o's. */
+const EYE_CELLS = RAW.filter(([x]) => (x >= 7 && x <= 10) || (x >= 12 && x <= 15));
 
 /** Props of {@link BrandMark}. */
 interface BrandMarkProps {
@@ -22,44 +31,23 @@ interface BrandMarkProps {
 }
 
 /**
- * Renders the mark alone, as decoration.
+ * Renders the mark alone, the wordmark's two eyes, as decoration.
  *
  * @param props The component's props.
  * @returns The mark.
  */
 export function BrandMark({ className }: BrandMarkProps) {
-  const gradient = useId();
-  const paint = `url(#${gradient})`;
   return (
-    <svg viewBox="0 0 32 32" fill="none" className={className} aria-hidden="true">
-      <defs>
-        <linearGradient id={gradient} x1="3" y1="3" x2="29" y2="29" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#ffc48f" />
-          <stop offset="0.45" stopColor="#ff7a1a" />
-          <stop offset="1" stopColor="#a678ff" />
-        </linearGradient>
-      </defs>
-      <circle
-        cx="16"
-        cy="16"
-        r="13"
-        stroke={paint}
-        strokeWidth="2.6"
-        strokeLinecap="round"
-        strokeDasharray="60 21.7"
-        transform="rotate(-58 16 16)"
-      />
-      <circle
-        cx="16"
-        cy="16"
-        r="7.4"
-        stroke={paint}
-        strokeWidth="2.6"
-        strokeLinecap="round"
-        strokeDasharray="30 16.5"
-        transform="rotate(118 16 16)"
-      />
-      <circle cx="16" cy="16" r="2.7" fill={paint} />
+    <svg
+      viewBox={`${EYES.left} ${EYES.top} ${EYES.cols} ${EYES.rows}`}
+      fill="currentColor"
+      shapeRendering="crispEdges"
+      className={className}
+      aria-hidden="true"
+    >
+      {EYE_CELLS.map(([x, y]) => (
+        <rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" />
+      ))}
     </svg>
   );
 }
@@ -70,23 +58,20 @@ interface BrandProps {
   href: string;
   /** Extra classes for the link. */
   className?: string;
+  /** Whether the wordmark plays the moods the page asks for (`lib/mood.ts`). */
+  reactive?: boolean;
 }
 
 /**
- * Renders the mark and the product's name as a link home.
+ * Renders the wordmark as a link home, named by the product's name.
  *
  * @param props The component's props.
  * @returns The link.
  */
-export function Brand({ href, className }: BrandProps) {
+export function Brand({ href, className, reactive }: BrandProps) {
   return (
-    <a
-      href={href}
-      aria-label={`${brand} home`}
-      className={cx('inline-flex items-center gap-2.5 rounded-lg text-[1.15rem] font-semibold tracking-tight', className)}
-    >
-      <BrandMark className="size-7" />
-      <span>{brand}</span>
+    <a href={href} aria-label={`${brand} home`} className={cx('inline-flex items-center rounded-md', className)}>
+      <MoodyLogo className="h-12" reactive={reactive} />
     </a>
   );
 }

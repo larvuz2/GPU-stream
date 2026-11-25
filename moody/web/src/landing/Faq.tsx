@@ -107,7 +107,6 @@ export function Faq() {
             eyebrow="FAQ"
             title="Fair questions, straight answers"
             lede="The things people ask before they start their first project."
-            start
           />
         </div>
         <div className="grid gap-3">

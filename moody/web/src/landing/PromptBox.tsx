@@ -15,6 +15,9 @@
  * a signed-out visitor sign up first. As in a chat composer, Enter sends and Shift+Enter breaks the
  * line.
  *
+ * The box tells the page's wordmark what it feels (`lib/mood.ts`): surprised when the field takes
+ * the focus, happy when the pointer reaches the button that sends.
+ *
  * The navigation's call to action links to `#create`: the box answers that fragment by taking the
  * focus and clearing it, so the same link works again the next time it is followed.
  * @module
@@ -22,8 +25,10 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type SubmitEvent } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { catalog, findDiscipline, isAvailable, type Discipline } from '../lib/catalog';
+import { DisciplineIcon } from '../components/DisciplineIcon';
 import { replaceHash, useHash } from '../lib/hash';
-import { DisciplineIcon } from './DisciplineIcon';
+import { express } from '../lib/mood';
+import { ANIMATION } from '../lib/moody';
 import { CREATE_HASH, enginesOf, listFormat, newProjectUrl } from './studio';
 
 /**
@@ -85,7 +90,7 @@ export function PromptBox() {
   };
 
   return (
-    <form id="create" className="mt-8 w-full" onSubmit={onSubmit} aria-labelledby={labelId}>
+    <form id="create" className="w-full" onSubmit={onSubmit} aria-labelledby={labelId}>
       <div className="prompt-box">
         <label id={labelId} htmlFor={`${labelId}-field`} className="block px-5 pt-4 text-sm font-semibold text-fg">
           What do you want to create?
@@ -103,6 +108,9 @@ export function PromptBox() {
             setPrompt(event.target.value);
           }}
           onKeyDown={onKeyDown}
+          onFocus={() => {
+            express(ANIMATION.surprised);
+          }}
         />
         <div className="flex flex-col gap-3 border-t border-line px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
           <fieldset className="flex min-w-0 flex-wrap gap-1.5">
@@ -123,7 +131,13 @@ export function PromptBox() {
               </label>
             ))}
           </fieldset>
-          <button type="submit" className="btn btn-primary flex-none">
+          <button
+            type="submit"
+            className="btn btn-primary flex-none"
+            onPointerEnter={() => {
+              express(ANIMATION.happy);
+            }}
+          >
             Start creating
             <ArrowRight className="size-4" aria-hidden="true" />
           </button>
@@ -135,17 +149,17 @@ export function PromptBox() {
         <div className="chip-row">
           {catalog.disciplines.map((option) => (
             <label key={option.id} className="chip">
-                <input
-                  type="radio"
-                  name="discipline"
-                  value={option.id}
-                  className="sr-only"
-                  checked={option.id === discipline.id}
-                  onChange={() => {
-                    choose(option);
-                  }}
-                />
-              <DisciplineIcon discipline={option.id} className="size-3.5 flex-none" />
+              <input
+                type="radio"
+                name="discipline"
+                value={option.id}
+                className="sr-only"
+                checked={option.id === discipline.id}
+                onChange={() => {
+                  choose(option);
+                }}
+              />
+              <DisciplineIcon id={option.id} className="size-3" />
               {option.name}
             </label>
           ))}

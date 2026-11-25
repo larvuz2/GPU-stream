@@ -74,7 +74,7 @@ const LOGIN = 'moody-demo';
 
 /** An avatar drawn inline, so the demo fetches nothing. */
 const AVATAR = `data:image/svg+xml,${encodeURIComponent(
-  "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop stop-color='#ffb070'/><stop offset='1' stop-color='#8b5cf6'/></linearGradient></defs><rect width='64' height='64' fill='url(#g)'/><text x='32' y='41' font-family='system-ui,sans-serif' font-size='26' font-weight='700' text-anchor='middle' fill='#1c0d02'>L</text></svg>",
+  "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='#191919'/><text x='32' y='41' font-family='system-ui,sans-serif' font-size='26' font-weight='700' text-anchor='middle' fill='#ffffff'>M</text></svg>",
 )}`;
 
 /** A still of the site's artwork, as a media file. */

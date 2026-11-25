@@ -28,7 +28,7 @@ import type { NewProject } from '../lib/api';
 import { catalog, findApp, findDiscipline, type Discipline } from '../lib/catalog';
 import { cx } from '../lib/cx';
 import { ErrorNotice } from './Notice';
-import { DisciplineIcon } from './DisciplineIcon';
+import { DisciplineIcon } from '../components/DisciplineIcon';
 import { GitHubMark } from './Menu';
 import { appStatusLabel } from './present';
 import { RepoList } from './RepoList';
@@ -159,7 +159,7 @@ function DisciplinePicker({ titleId, onPick }: DisciplinePickerProps) {
                 <span className="flex items-center gap-2 font-semibold tracking-tight">
                   <DisciplineIcon
                     id={candidate.id}
-                    className={cx('size-4', index === 0 ? 'text-ember-300' : 'text-muted')}
+                    className={cx('size-6', index === 0 ? 'text-fg' : 'text-muted')}
                   />
                   {candidate.name}
                 </span>
@@ -263,7 +263,7 @@ function Details({ titleId, discipline, draft, github, onBack, onCreate }: Detai
       </button>
       <h2 id={titleId} className="display mt-2 flex items-center gap-2.5 pr-10 text-[1.6rem]">
         <span className="icon-tile size-9 rounded-xl">
-          <DisciplineIcon id={discipline.id} className="size-4" />
+          <DisciplineIcon id={discipline.id} className="size-3" />
         </span>
         New {discipline.name.toLowerCase()} project
       </h2>

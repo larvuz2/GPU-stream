@@ -68,7 +68,7 @@ export function Pricing() {
 
         <ul className="mt-12 grid gap-4 md:grid-cols-3">
           {PARTS.map(({ icon: Icon, title, body }) => (
-            <li key={title} className="flex gap-4 rounded-2xl border border-line bg-white/[0.02] p-5">
+            <li key={title} className="glass flex gap-4 p-5">
               <span className="icon-tile">
                 <Icon className="size-5" aria-hidden="true" />
               </span>
@@ -80,9 +80,7 @@ export function Pricing() {
           ))}
         </ul>
 
-        <h3 className="mt-14 text-center text-sm font-semibold tracking-[0.16em] text-faint uppercase">
-          Engine tiers
-        </h3>
+        <h3 className="eyebrow mt-14">Engine tiers</h3>
         <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {catalog.tiers.map((tier) => (
             <li key={tier.id} className="flex">
@@ -92,17 +90,13 @@ export function Pricing() {
         </ul>
 
         <div className="mt-5 grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,2fr)]">
-          <div className="glass relative overflow-hidden p-7">
-            <div
-              className="pointer-events-none absolute -top-24 -left-16 size-64 rounded-full bg-ember/25 blur-3xl"
-              aria-hidden="true"
-            />
+          <div className="glass relative overflow-hidden border-line-strong p-7">
             <div className="relative">
               <span className="icon-tile">
                 <Gift className="size-5" aria-hidden="true" />
               </span>
               <h3 className="display mt-5 text-3xl">
-                {creditCount(catalog.signup_credits)} credits, <span className="text-gradient">free</span>
+                {creditCount(catalog.signup_credits)} credits, free
               </h3>
               <p className="lede mt-3 text-[0.9375rem]">
                 Every new {brand} account starts with them
@@ -152,7 +146,7 @@ function TierCard({ tier }: TierCardProps) {
   const specs = [gpuLabel(tier), `${tier.cpu} vCPU`, `${tier.memory_gb} GB memory`];
   return (
     <article className="glass glass-hover flex w-full flex-col p-6">
-      <h3 className="text-sm font-semibold tracking-[0.14em] text-ember-300 uppercase">{tier.name}</h3>
+      <h3 className="eyebrow text-fg">{tier.name}</h3>
       <p className="mt-4 flex items-baseline gap-1.5">
         <span className="display text-[2.6rem]">{price(hourlyUsd(tier))}</span>
         <span className="text-sm text-muted">/ hour</span>
@@ -164,7 +158,7 @@ function TierCard({ tier }: TierCardProps) {
       <ul className="mt-5 grid gap-2.5 border-t border-line pt-5 text-sm">
         {specs.map((spec) => (
           <li key={spec} className="flex items-center gap-2.5">
-            <Check className="size-4 flex-none text-ember-300" aria-hidden="true" />
+            <Check className="size-4 flex-none text-fg" aria-hidden="true" />
             {spec}
           </li>
         ))}
@@ -192,9 +186,9 @@ interface PackCardProps {
 function PackCard({ pack }: PackCardProps) {
   const bonus = packBonus(pack);
   return (
-    <div className="relative flex h-full flex-col rounded-2xl border border-line bg-white/[0.03] p-5">
+    <div className="relative flex h-full flex-col rounded-lg border border-line bg-ink-950 p-5">
       {bonus > 0 ? (
-        <span className="pill absolute top-3.5 right-3.5 h-6 border-ember/40 bg-ember/10 text-[0.6875rem] text-ember-200 backdrop-blur-none">
+        <span className="pill mono absolute top-3.5 right-3.5 h-6 border-fg bg-fg text-[0.6875rem] text-ink-950">
           +{percentage(bonus)}
         </span>
       ) : null}

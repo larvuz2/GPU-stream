@@ -14,12 +14,13 @@
  * is the user's own, such as Nuke), and the rest as compact chips. Every name, status, tagline, and version is the catalog's. An engine
  * is pictured by its own interface where it is open source; software that is someone else's
  * product is pictured by concept art of the work made in it, never by its interface or its logo.
+ * A live engine carries the green LED; an engine's catalog accent shows only as a dot.
  *
  * The hand-offs name the engines they join by catalog identifier and are drawn only while the
  * catalog lists every engine of one; an engine not live yet is marked as coming.
  * @module
  */
-import { ArrowRight, ArrowDown, Globe, KeyRound } from 'lucide-react';
+import { ArrowDown, ArrowRight, Globe, KeyRound } from 'lucide-react';
 import { ArtImage } from '../components/Art';
 import { findApp, findDiscipline, isAvailable, type CatalogApp } from '../lib/catalog';
 import { cx } from '../lib/cx';
@@ -112,11 +113,11 @@ export function Engines() {
 
         {soon.length === 0 ? null : (
           <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:items-start">
-            <p className="flex-none pt-1.5 text-xs font-semibold tracking-[0.16em] text-faint uppercase">On the way</p>
+            <p className="eyebrow flex-none pt-2">On the way</p>
             <ul className="flex flex-wrap gap-2">
               {soon.map((app) => (
                 <li key={app.id} className="engine-chip" style={{ '--accent': app.accent }}>
-                  <span className="size-2 flex-none rounded-full bg-(--accent)" aria-hidden="true" />
+                  <span className="size-1.5 flex-none bg-(--accent)" aria-hidden="true" />
                   {app.name}
                 </li>
               ))}
@@ -150,7 +151,7 @@ function EngineCard({ app, large }: EngineCardProps) {
   const purpose = madeFor(app);
   const disciplines = app.disciplines.flatMap((id) => findDiscipline(id)?.name ?? []);
   return (
-    <article className={cx('app-card w-full', live ? 'app-card-live' : 'app-card-soon')} style={{ '--accent': app.accent }}>
+    <article className={cx('app-card bloom w-full', live && 'app-card-live')}>
       <div className="art art-scrim aspect-video">
         {picture === undefined ? null : <ArtImage src={picture} width={1280} height={720} />}
         <span className="pill absolute top-3.5 left-3.5 z-10">
@@ -171,7 +172,7 @@ function EngineCard({ app, large }: EngineCardProps) {
         <div className="flex items-start justify-between gap-4">
           <h3 className={cx('font-semibold tracking-tight', large ? 'text-2xl' : 'text-xl')}>{app.name}</h3>
           {app.version === '' ? null : (
-            <span className="pill flex-none border-line bg-white/5 text-muted backdrop-blur-none">{app.version}</span>
+            <span className="pill mono flex-none border-line text-muted">{app.version}</span>
           )}
         </div>
         <p className={cx('lede mt-2 flex-1', large ? 'text-[0.9375rem]' : 'text-sm')}>{app.tagline}</p>
@@ -199,11 +200,7 @@ interface TeamCardProps {
  */
 function TeamCard({ app }: TeamCardProps) {
   return (
-    <article className="glass relative flex w-full flex-col overflow-hidden p-6" style={{ '--accent': app.accent }}>
-      <div
-        className="pointer-events-none absolute -top-20 -right-16 size-56 rounded-full bg-(--accent) opacity-15 blur-3xl"
-        aria-hidden="true"
-      />
+    <article className="glass relative flex w-full flex-col overflow-hidden p-6">
       <span className="pill w-fit text-muted">{statusLabel(app)} · bring your own license</span>
       <span className="icon-tile mt-6">
         <KeyRound className="size-5" aria-hidden="true" />
@@ -211,7 +208,7 @@ function TeamCard({ app }: TeamCardProps) {
       <div className="mt-5 flex items-start justify-between gap-4">
         <h3 className="text-xl font-semibold tracking-tight">{app.name}</h3>
         {app.version === '' ? null : (
-          <span className="pill flex-none border-line bg-white/5 text-muted backdrop-blur-none">{app.version}</span>
+          <span className="pill mono flex-none border-line text-muted">{app.version}</span>
         )}
       </div>
       <p className="lede mt-2 flex-1 text-sm">{app.tagline}</p>
@@ -265,7 +262,7 @@ function HandOffs() {
                 <li className="contents">
                   <Arrow />
                   <span className="handoff-node">
-                    <Globe className="size-4 flex-none text-ember-300" aria-hidden="true" />
+                    <Globe className="size-4 flex-none text-fg" aria-hidden="true" />
                     <span className="min-w-0">
                       <span className="block text-sm font-semibold">Your tab</span>
                       <span className="block text-xs text-muted">{handOff.end}</span>
@@ -298,7 +295,7 @@ interface HandOffNodeProps {
 function HandOffNode({ app, role }: HandOffNodeProps) {
   return (
     <span className="handoff-node" style={{ '--accent': app.accent }}>
-      <span className="size-2.5 flex-none rounded-full bg-(--accent) shadow-[0_0_12px_var(--accent)]" aria-hidden="true" />
+      <span className="size-2 flex-none bg-(--accent)" aria-hidden="true" />
       <span className="min-w-0">
         <span className="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold">
           {app.name}

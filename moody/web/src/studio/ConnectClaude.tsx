@@ -135,7 +135,7 @@ function ConnectClaude({ titleId, connected, onList, onCreate, onRevoke }: Conne
     <div>
       <div>
         <h2 id={titleId} className="flex items-center gap-2.5 pr-10 text-xl font-semibold tracking-tight">
-          <Sparkles className="size-[1.1rem] text-ember-300" aria-hidden="true" />
+          <Sparkles className="size-[1.1rem] text-fg" aria-hidden="true" />
           Connect Claude
         </h2>
         <p className="lede mt-2 text-sm">
@@ -144,10 +144,10 @@ function ConnectClaude({ titleId, connected, onList, onCreate, onRevoke }: Conne
         </p>
 
         {created === null ? null : (
-          <div className="mt-5 rounded-2xl border border-ember/40 bg-ember/[0.07] p-4">
+          <div className="mt-5 rounded-2xl border border-line-strong bg-ink-800 p-4">
             <div className="flex items-start justify-between gap-3">
               <p className="text-sm font-semibold">
-                Your new key, <span className="text-ember-200">{created.key.name}</span>
+                Your new key, <span className="text-fg">{created.key.name}</span>
               </p>
               <button
                 type="button"

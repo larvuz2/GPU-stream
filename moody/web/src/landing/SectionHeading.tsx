@@ -5,10 +5,10 @@
  */
 
 /**
- * The heading every section of the landing page opens with.
+ * The heading every section of the landing page opens with: a label set like a display's readout
+ * behind one lit pixel, the title, and a sentence or two, flush left.
  * @module
  */
-import { cx } from '../lib/cx';
 
 /** Props of {@link SectionHeading}. */
 interface SectionHeadingProps {
@@ -20,8 +20,6 @@ interface SectionHeadingProps {
   title: string;
   /** The sentence or two under the title. */
   lede?: string;
-  /** Whether the heading is set flush left instead of centered. */
-  start?: boolean;
 }
 
 /**
@@ -30,14 +28,17 @@ interface SectionHeadingProps {
  * @param props The component's props.
  * @returns The heading block.
  */
-export function SectionHeading({ id, eyebrow, title, lede, start = false }: SectionHeadingProps) {
+export function SectionHeading({ id, eyebrow, title, lede }: SectionHeadingProps) {
   return (
-    <div className={cx('max-w-3xl', !start && 'mx-auto text-center')}>
-      <p className="eyebrow">{eyebrow}</p>
-      <h2 id={id} className="display mt-4 text-[2rem] sm:text-5xl">
+    <div className="max-w-3xl">
+      <p className="eyebrow">
+        <span className="size-2 bg-fg" aria-hidden="true" />
+        {eyebrow}
+      </p>
+      <h2 id={id} className="display mt-5 text-[2.1rem] sm:text-5xl lg:text-[3.5rem]">
         {title}
       </h2>
-      {lede === undefined ? null : <p className="lede mt-5 text-[1.0625rem] sm:text-lg">{lede}</p>}
+      {lede === undefined ? null : <p className="lede mt-5 max-w-2xl text-[1.0625rem] sm:text-lg">{lede}</p>}
     </div>
   );
 }

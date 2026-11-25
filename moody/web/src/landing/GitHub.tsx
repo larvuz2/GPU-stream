@@ -48,11 +48,11 @@ export function GitHub() {
       <div className="shell grid grid-cols-[minmax(0,1fr)] items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16">
         <div>
           <p className="eyebrow">
-            <FolderGit2 className="size-4" aria-hidden="true" />
+            <span className="size-2 bg-fg" aria-hidden="true" />
             Version control
           </p>
-          <h2 id="github-title" className="display mt-4 text-[2rem] sm:text-5xl">
-            Your work lives in <span className="text-gradient">your GitHub</span>
+          <h2 id="github-title" className="display mt-5 text-[2.1rem] sm:text-5xl lg:text-[3.5rem]">
+            Your work lives in your GitHub
           </h2>
           <p className="lede mt-5 text-[1.0625rem] sm:text-lg">
             Connect your account and every project gets a repository. Every change the agent makes is a commit you
@@ -61,7 +61,7 @@ export function GitHub() {
           <ol className="mt-8 grid gap-3">
             {STEPS.map((step, index) => (
               <li key={step} className="flex items-start gap-3.5 text-[0.9375rem]">
-                <span className="grid size-7 flex-none place-items-center rounded-full border border-ember/40 bg-ember/10 text-xs font-bold text-ember-300">
+                <span className="mono grid size-7 flex-none place-items-center rounded-md border border-line-strong bg-ink-700 text-xs font-semibold text-fg">
                   {index + 1}
                 </span>
                 <span className="pt-0.5">{step}</span>
@@ -75,9 +75,9 @@ export function GitHub() {
         </div>
 
         <figure>
-          <div className="glass overflow-hidden rounded-3xl bg-ink-900/80" aria-hidden="true">
+          <div className="glass overflow-hidden shadow-[8px_8px_0_var(--color-ink-700)]" aria-hidden="true">
             <div className="flex items-center gap-3 border-b border-line px-5 py-4">
-              <FolderGit2 className="size-5 flex-none text-ember-300" />
+              <FolderGit2 className="size-5 flex-none text-fg" />
               <p className="min-w-0 truncate text-sm">
                 <span className="text-muted">your-name / </span>
                 <span className="font-semibold">night-shift</span>
@@ -96,7 +96,7 @@ export function GitHub() {
                 </li>
               ))}
             </ul>
-            <div className="border-t border-line bg-black/25 px-5 py-4">
+            <div className="border-t border-line bg-ink-950 px-5 py-4">
               <p className="text-[0.6875rem] font-semibold tracking-[0.14em] text-faint uppercase">Latest commits</p>
               <ul className="mt-3 grid gap-2.5 text-[0.8125rem]">
                 {COMMITS.map((commit) => (
@@ -105,8 +105,8 @@ export function GitHub() {
                     <span
                       className={
                         commit.author === 'Agent'
-                          ? 'flex-none rounded-full bg-ember/15 px-2 py-0.5 text-[0.6875rem] font-semibold text-ember-200'
-                          : 'flex-none rounded-full bg-white/10 px-2 py-0.5 text-[0.6875rem] font-semibold text-muted'
+                          ? 'flex-none rounded-sm bg-fg px-1.5 py-0.5 text-[0.6875rem] font-semibold text-ink-950'
+                          : 'flex-none rounded-sm border border-line-strong px-1.5 py-0.5 text-[0.6875rem] font-semibold text-muted'
                       }
                     >
                       {commit.author}
