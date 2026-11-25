@@ -5,24 +5,34 @@
  */
 
 /**
- * The Library panel's body: the project's assets by section, an asset's detail, and adding one.
+ * The Library panel's body: the project's assets under a tab per section, everything the session
+ * showed under Process, an asset's detail, and adding one.
  *
- * The sections are the project's own (`useProject`, `sections`): a film has characters,
- * environments, and props, a commercial products and shots, and the agent adds sections as the
- * work needs them, so nothing here names one. Each asset is a card of its thumbnail, its `@tag`,
- * and its name; its detail shows its media, description, and metadata, and takes more media. A
- * person adds an asset with a name, a tag, a description, and optionally a first file, in an
- * existing section or a new one.
+ * The tabs are "All", then the project's own sections (`useProject`, `sections`), then "Process".
+ * A film has characters, environments, and props, a commercial products and shots, and the agent
+ * adds sections as the work needs them, so nothing here names one: a tab appears when its section
+ * does. Each asset is a card of its thumbnail, its `@tag`, and its name; its detail shows its
+ * media, description, and metadata, and takes more media. A person adds an asset with a name, a
+ * tag, a description, and optionally a first file, in an existing section or a new one.
+ *
+ * Process is no section and holds no assets: it is every picture, video, and sound the session
+ * showed (what the agent's and its subagents' tools returned, previews, an engine's screenshots),
+ * newest first, derived from the conversation (`processMedia`), so it is there without anyone
+ * filing anything. A file there leads back to the entry of the conversation it appeared in. Its
+ * address is the signed one the log returned, which expires: a file that fails to load asks for
+ * the log to be read again (`refreshLinks`), is shown again once that reading brought another
+ * address for it, and otherwise says it is no longer available.
  * @module
  */
 import { useId, useMemo, useState, type SubmitEvent } from 'react';
-import { ArrowLeft, ImagePlus, Plus, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, CornerUpLeft, ImageOff, ImagePlus, Music, Play, Plus, Trash2, Upload } from 'lucide-react';
 import type { Asset, NewAsset } from '../lib/api';
 import { cx } from '../lib/cx';
 import { shortDateTime } from '../lib/format';
 import { MediaView } from './MediaView';
 import { ErrorNotice, Notice } from './Notice';
 import { Prose } from './Prose';
+import type { ProcessEntry } from './transcript';
 import type { ProjectData } from './useProject';
 
 /** The file types an asset's media upload offers first; any file is still accepted. */
@@ -42,7 +52,15 @@ interface LibraryBodyProps {
   onAdding: (adding: boolean) => void;
   /** Whether this server can generate media; `false` adds a note, `null` says nothing. */
   generation: boolean | null;
+  /** Every picture, video, and sound the session showed, newest first. */
+  process: ProcessEntry[];
+  /** Leads to where one of them appeared in the conversation. */
+  onShowInConversation: (entry: ProcessEntry) => void;
 }
+
+/** The tab that shows every section, and the tab that shows what the session showed. */
+const ALL_TAB = '\u0000all';
+const PROCESS_TAB = '\u0000process';
 
 /**
  * Normalizes a tag as prompts name it: lowercase, without the `@`, words joined by hyphens.
@@ -75,8 +93,18 @@ function thumbnailOf(asset: Asset): string | null {
  * @param props The component's props.
  * @returns The library's body.
  */
-export function LibraryBody({ data, openAssetId, onOpenAsset, adding, onAdding, generation }: LibraryBodyProps) {
-  const [filter, setFilter] = useState<string | null>(null);
+export function LibraryBody({
+  data,
+  openAssetId,
+  onOpenAsset,
+  adding,
+  onAdding,
+  generation,
+  process,
+  onShowInConversation,
+}: LibraryBodyProps) {
+  const [picked, setPicked] = useState(ALL_TAB);
+  const panelId = useId();
   const assets = useMemo(() => data.library?.assets ?? [], [data.library]);
   const open = openAssetId === null ? undefined : assets.find((asset) => asset.id === openAssetId);
 
@@ -111,7 +139,9 @@ export function LibraryBody({ data, openAssetId, onOpenAsset, adding, onAdding, 
     );
   }
 
-  const shown = filter === null || !data.sections.includes(filter) ? null : filter;
+  // A section that is gone leaves its tab's viewer on All.
+  const tab = picked === PROCESS_TAB || data.sections.includes(picked) ? picked : ALL_TAB;
+  const shown = tab === ALL_TAB || tab === PROCESS_TAB ? null : tab;
   const groups = (shown === null ? data.sections : [shown]).map((section) => ({
     section,
     assets: assets.filter((asset) => asset.section === section),
@@ -139,20 +169,29 @@ export function LibraryBody({ data, openAssetId, onOpenAsset, adding, onAdding, 
           }}
         />
       ) : null}
-      <SectionChips
+      <SectionTabs
         sections={data.sections}
         assets={assets}
-        selected={shown}
-        onSelect={setFilter}
+        processCount={process.length}
+        selected={tab}
+        panelId={panelId}
+        onSelect={setPicked}
         onAddSection={data.addSection}
       />
-      {data.sections.length === 0 ? (
-        <p className="mt-3 text-sm text-faint">
+      {tab === PROCESS_TAB ? (
+        <ProcessGrid
+          id={panelId}
+          entries={process}
+          onShow={onShowInConversation}
+          onStale={data.refreshLinks}
+        />
+      ) : data.sections.length === 0 ? (
+        <p id={panelId} role="tabpanel" className="mt-3 text-sm text-faint">
           Nothing here yet. The agent fills the library as the work takes shape: characters, places, products, whatever
           the project needs.
         </p>
       ) : (
-        <div className="mt-3 grid grid-cols-1 gap-4">
+        <div id={panelId} role="tabpanel" className="mt-3 grid grid-cols-1 gap-4">
           {groups.map((group) => (
             <section key={group.section} aria-label={group.section}>
               {shown === null ? (
@@ -187,27 +226,40 @@ export function LibraryBody({ data, openAssetId, onOpenAsset, adding, onAdding, 
   );
 }
 
-/** Props of {@link SectionChips}. */
-interface SectionChipsProps {
+/** Props of {@link SectionTabs}. */
+interface SectionTabsProps {
   /** The sections. */
   sections: string[];
   /** Every asset, to count each section's. */
   assets: Asset[];
-  /** The section shown alone, or `null` for all. */
-  selected: string | null;
-  /** Shows one section alone, or all. */
-  onSelect: (section: string | null) => void;
+  /** How many files the session showed. */
+  processCount: number;
+  /** The tab shown: a section, {@link ALL_TAB}, or {@link PROCESS_TAB}. */
+  selected: string;
+  /** The element the tabs control. */
+  panelId: string;
+  /** Shows a tab. */
+  onSelect: (tab: string) => void;
   /** Adds a section. */
   onAddSection: (name: string) => Promise<void>;
 }
 
 /**
- * Renders the section filter and the control that adds a section.
+ * Renders the library's tabs (All, the project's sections, Process) and the control that adds a
+ * section.
  *
  * @param props The component's props.
- * @returns The chips.
+ * @returns The tabs.
  */
-function SectionChips({ sections, assets, selected, onSelect, onAddSection }: SectionChipsProps) {
+function SectionTabs({
+  sections,
+  assets,
+  processCount,
+  selected,
+  panelId,
+  onSelect,
+  onAddSection,
+}: SectionTabsProps) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState('');
   const [error, setError] = useState<unknown>(null);
@@ -229,32 +281,35 @@ function SectionChips({ sections, assets, selected, onSelect, onAddSection }: Se
     }
   }
 
+  const tabs = [
+    { id: ALL_TAB, label: 'All', count: assets.length },
+    ...sections.map((section) => ({
+      id: section,
+      label: section,
+      count: assets.filter((asset) => asset.section === section).length,
+    })),
+    { id: PROCESS_TAB, label: 'Process', count: processCount },
+  ];
   return (
     <div>
       <div className="flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          className="chip h-7 px-2.5 text-xs"
-          aria-pressed={selected === null}
-          onClick={() => {
-            onSelect(null);
-          }}
-        >
-          All <span className="chip-count">{assets.length}</span>
-        </button>
-        {sections.map((section) => (
-          <button
-            key={section}
-            type="button"
-            className="chip h-7 px-2.5 text-xs"
-            aria-pressed={selected === section}
-            onClick={() => {
-              onSelect(section);
-            }}
-          >
-            {section} <span className="chip-count">{assets.filter((asset) => asset.section === section).length}</span>
-          </button>
-        ))}
+        <div className="contents" role="tablist" aria-label="Library">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              className="chip h-7 px-2.5 text-xs"
+              aria-selected={selected === tab.id}
+              aria-controls={panelId}
+              onClick={() => {
+                onSelect(tab.id);
+              }}
+            >
+              {tab.label} <span className="chip-count">{tab.count}</span>
+            </button>
+          ))}
+        </div>
         {naming ? (
           <form
             className="flex items-center gap-1"
@@ -298,6 +353,120 @@ function SectionChips({ sections, assets, selected, onSelect, onAddSection }: Se
         </div>
       )}
     </div>
+  );
+}
+
+/** Props of {@link ProcessGrid}. */
+interface ProcessGridProps {
+  /** The identifier the tabs control. */
+  id: string;
+  /** The files, newest first. */
+  entries: ProcessEntry[];
+  /** Leads to where a file appeared in the conversation. */
+  onShow: (entry: ProcessEntry) => void;
+  /** Reports that a file failed to load, as an expired address does. */
+  onStale: () => void;
+}
+
+/**
+ * Renders what the session showed, newest first.
+ *
+ * @param props The component's props.
+ * @returns The grid, or a line saying what will gather here.
+ */
+function ProcessGrid({ id, entries, onShow, onStale }: ProcessGridProps) {
+  if (entries.length === 0) {
+    return (
+      <p id={id} role="tabpanel" className="mt-3 text-sm text-faint">
+        Nothing yet. Every picture, video, and sound the agent shows while it works gathers here by itself, newest
+        first.
+      </p>
+    );
+  }
+  return (
+    <ul id={id} role="tabpanel" aria-label="Process" className="mt-3 grid grid-cols-2 gap-2.5 @[30rem]:grid-cols-3">
+      {entries.map((entry) => (
+        <li key={entry.key}>
+          <ProcessTile
+            entry={entry}
+            onShow={() => {
+              onShow(entry);
+            }}
+            onStale={onStale}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Props of {@link ProcessTile}. */
+interface ProcessTileProps {
+  /** The file, and where it appeared. */
+  entry: ProcessEntry;
+  /** Leads to where it appeared in the conversation. */
+  onShow: () => void;
+  /** Reports that it failed to load. */
+  onStale: () => void;
+}
+
+/**
+ * Renders one file the session showed, as a tile that leads back to the conversation.
+ *
+ * @param props The component's props.
+ * @returns The tile.
+ */
+function ProcessTile({ entry, onShow, onStale }: ProcessTileProps) {
+  const { media, caption } = entry;
+  // The address that failed: the file is tried again once the log returns another for it.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const fail = (): void => {
+    setFailedUrl(media.url);
+    onStale();
+  };
+  const gone = failedUrl === media.url;
+  const name = media.name ?? caption;
+  return (
+    <button
+      type="button"
+      className="asset-card group w-full"
+      aria-label={`Show ${name} in the conversation`}
+      title="Show in the conversation"
+      onClick={onShow}
+    >
+      <span className="asset-thumb block">
+        {gone ? (
+          <span className="absolute inset-0 grid place-items-center text-faint">
+            <ImageOff className="size-5" aria-label="No longer available here" />
+          </span>
+        ) : media.kind === 'image' ? (
+          <img src={media.url} alt="" loading="lazy" decoding="async" onError={fail} />
+        ) : media.kind === 'video' ? (
+          <video src={media.url} muted playsInline preload="metadata" onError={fail} />
+        ) : (
+          <>
+            <span className="absolute inset-0 grid place-items-center text-lavender">
+              <Music className="size-6" aria-hidden="true" />
+            </span>
+            <audio src={media.url} preload="metadata" className="hidden" onError={fail} />
+          </>
+        )}
+        {media.kind === 'video' && !gone ? (
+          <span className="preview-badge bottom-1.5 left-1.5">
+            <Play className="size-3 fill-current" aria-hidden="true" />
+          </span>
+        ) : null}
+        <span className="preview-badge top-1.5 right-1.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+          <CornerUpLeft className="size-3" aria-hidden="true" />
+        </span>
+      </span>
+      <span className="block min-w-0 px-2.5 pt-2 pb-2.5">
+        <span className="block truncate text-[0.8125rem] font-medium">{caption}</span>
+        <span className="block truncate text-[0.6875rem] text-faint">
+          {gone ? 'No longer available here' : (media.name ?? media.kind)}
+        </span>
+      </span>
+    </button>
   );
 }
 

@@ -1045,6 +1045,12 @@
     line-height: 1.6;
   }
 
+  /* An entry another part of the page led to is lit for a moment, in the intelligence's color. */
+  [data-revealed] {
+    border-radius: 0.6rem;
+    animation: revealed 1.8s ease-out;
+  }
+
   /* The person's message that locked an interactive card in: one compact line, on their side. */
   .lock-line {
     display: flex;
@@ -1317,6 +1323,7 @@
   }
 
   .chip[aria-pressed='true'],
+  .chip[aria-selected='true'],
   .chip:has(input:checked) {
     border-color: var(--color-lime);
     background: var(--selection-bg);
@@ -1373,5 +1380,19 @@
     height: 100%;
     background: var(--color-fg);
     transition: width 0.4s ease;
+  }
+}
+
+@keyframes revealed {
+  from {
+    box-shadow:
+      0 0 0 2px var(--color-lavender),
+      0 0 0 7px var(--ai-bg);
+  }
+
+  to {
+    box-shadow:
+      0 0 0 2px transparent,
+      0 0 0 7px transparent;
   }
 }

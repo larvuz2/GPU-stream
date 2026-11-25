@@ -684,6 +684,16 @@ export function agentActivity(items: readonly TranscriptItem[]): Activity | null
   return { activity: THINKING_ACTIVITY, detail: null };
 }
 
+/** An entry of the conversation another part of the page leads to, such as a file's under Process. */
+export interface Reveal {
+  /** The entry's key. */
+  key: string;
+  /** The subagent whose card holds what is led to, or `null` for the entry itself. */
+  agentId: string | null;
+  /** Which request this is, so asking for the same entry again leads there again. */
+  seq: number;
+}
+
 /** A picture, video, or sound the session showed, and where in the conversation it appeared. */
 export interface ProcessEntry {
   /** A key of its own among the session's media. */

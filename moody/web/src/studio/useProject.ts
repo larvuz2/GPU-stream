@@ -33,6 +33,13 @@
  * awake that would otherwise stop, and the reading ends with the clone. A running engine
  * reported without stream links (by an event, since the log carries none, or by a listing that
  * could not mint them) keeps the ones it had, so a picture on screen never loses its frame.
+ *
+ * The media of the log (a tool's results, previews, what a card shows) are served from signed
+ * addresses that expire, and the control plane signs them afresh for each reading. The page reads
+ * each event once, so an address it holds can go stale while the project stays open:
+ * {@link ProjectData.refreshLinks}, which a view calls when one of those files fails to load,
+ * reads the log again from its start and takes the events as that reading returned them. It runs
+ * at most once a minute, since a file that is truly gone fails every time.
  * @module
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -70,6 +77,8 @@ const RETRY_MS = 8000;
 const TURN_GRACE_MS = 20_000;
 /** How often the engines are re-read while one is coming up or cloning the project's repository. */
 const ENGINE_POLL_MS = 3000;
+/** The least time between two readings of the whole log for fresh addresses. */
+const LINK_REFRESH_MS = 60_000;
 
 /** A message the control plane accepted, shown as sent until the log has it. */
 export interface PendingMessage {
@@ -97,6 +106,8 @@ export interface ScreenRequest {
 export interface ProjectData {
   /** The project's events, in log order. */
   events: StudioEvent[];
+  /** Reads the log again for freshly signed addresses, after a file of it failed to load. */
+  refreshLinks: () => void;
   /** How far the log has come. */
   eventsStatus: Availability;
   /** Why the latest read of the log failed, or `null`. */
@@ -479,6 +490,34 @@ export function useProject(client: ControlPlane | null, project: Project, callba
     };
   }, [comingUp, refreshEngines]);
 
+  const linksRead = useRef(0);
+  const refreshLinks = useCallback((): void => {
+    if (client === null || Date.now() - linksRead.current < LINK_REFRESH_MS) {
+      return;
+    }
+    linksRead.current = Date.now();
+    const upTo = cursor.current;
+    void (async (): Promise<void> => {
+      const fresh = new Map<number, StudioEvent>();
+      try {
+        for (let after = 0; after < upTo; ) {
+          const page = await client.listEvents(projectId, after);
+          for (const event of page.events) {
+            fresh.set(event.id, event);
+          }
+          if (page.cursor === null || page.cursor <= after) {
+            break;
+          }
+          after = page.cursor;
+        }
+      } catch {
+        // The addresses held stay as they are; the next file that fails asks again.
+        return;
+      }
+      setEvents((previous) => previous.map((event) => fresh.get(event.id) ?? event));
+    })();
+  }, [client, projectId]);
+
   const send = useCallback(
     async (text: string, ui?: UiLock): Promise<void> => {
       const turn = await connected(client).sendMessage(projectId, text, ui);
@@ -614,6 +653,7 @@ export function useProject(client: ControlPlane | null, project: Project, callba
 
   return {
     events,
+    refreshLinks,
     eventsStatus,
     eventsError,
     running: serverRunning || pending !== null,

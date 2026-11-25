@@ -39,7 +39,9 @@
  * the person answers it, then plays the rest. An answer of "always" is kept in the project's
  * permissions, so the same tool runs without asking from then on, until the person revokes it.
  * Each project also has an environment: the connectors, subagents, and skills its agent works
- * with.
+ * with. Every reading of a log returns its files under addresses of that reading (`?read=`), as
+ * the control plane signs them afresh each time, so a page that reads the log again gets other
+ * addresses for the same files.
  *
  * The scene parameter (`?demo=<scene>`) picks a state: the film by default, `offline` for a
  * server with no integrations configured, `empty` for an account with no projects, `legacy` for a
@@ -862,6 +864,31 @@ function demoRepos(now: number): GitHubRepo[] {
   ];
 }
 
+/**
+ * An event as one reading of the log returns it: each file it carries under an address of that
+ * reading, the way the control plane signs a file afresh for each one.
+ *
+ * @param event The event as it was written.
+ * @param read Which reading of the log this is.
+ * @returns The event with that reading's addresses.
+ */
+function readAs(event: EventBody, read: number): EventBody {
+  const sign = <File extends Media>(file: File): File => ({
+    ...file,
+    url: `${file.url}${file.url.includes('?') ? '&' : '?'}read=${read}`,
+  });
+  switch (event.kind) {
+    case 'tool_end':
+      return event.data.media === undefined ? event : { ...event, data: { ...event.data, media: event.data.media.map(sign) } };
+    case 'preview':
+      return { ...event, data: { ...event.data, items: event.data.items.map(sign) } };
+    case 'ui':
+      return { ...event, data: { ...event.data, media: event.data.media.map(sign) } };
+    default:
+      return event;
+  }
+}
+
 /** The skill every project's agent reads in the demo. */
 const STUDIO_SKILL: SkillInfo = {
   name: 'studio',
@@ -1057,6 +1084,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     },
   ];
   let counter = 100;
+  let reads = 0;
   const me: Me = { id: 'demo-user', email: DEMO_EMAIL, credits: 412, max_sessions: 3 };
   const health: Health = {
     ok: true,
@@ -1417,10 +1445,11 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
         const now = Date.now();
         const entries = log(projectId);
         const events: StudioEvent[] = [];
+        reads += 1;
         entries.forEach((scheduled, index) => {
           const id = index + 1;
           if (scheduled.at <= now && id > after) {
-            events.push({ ...scheduled.event, id, created_at: new Date(scheduled.at).toISOString() });
+            events.push({ ...readAs(scheduled.event, reads), id, created_at: new Date(scheduled.at).toISOString() });
           }
         });
         const running = pauses.has(projectId) || entries.some((scheduled) => scheduled.at > now);

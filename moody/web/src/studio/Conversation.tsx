@@ -42,6 +42,13 @@
  * their pointer rather than being pushed out of view by a jump to the end. An approval is the
  * exception: the agent's turn waits on it, so it comes into view when it arrives, wherever the
  * person is reading.
+ *
+ * Another part of the page can lead to an entry (`reveal`, from a file under the library's
+ * Process tab): the entry is unfolded where it was folded away, scrolled to, and lit for a moment.
+ *
+ * Media in the log are served from signed addresses that expire. One that fails to load here
+ * reports it (`onStale`), which re-reads the log for fresh addresses; a file whose address then
+ * changed is loaded again, since its address is part of its identity in every list.
  * @module
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -65,11 +72,11 @@ import { ToolCard } from './ToolCard';
 import { UiCard } from './ui/UiCard';
 import {
   agentActivity,
-  buildTranscript,
   foldPreviews,
   openQuestion,
   type Activity,
   type Locked,
+  type Reveal,
   type TranscriptItem,
 } from './transcript';
 import type { PendingMessage, ProjectData } from './useProject';
@@ -89,6 +96,12 @@ interface ConversationProps {
   project: Project;
   /** Its live data. */
   data: ProjectData;
+  /** The conversation, folded from the project's events. */
+  items: TranscriptItem[];
+  /** An entry another part of the page leads to, or `null`. */
+  reveal: Reveal | null;
+  /** Reports that a file of the log failed to load, as an expired address does. */
+  onStale: () => void;
   /** The library's tags, lowercase, which become references in the agent's prose. */
   tags: ReadonlySet<string>;
   /** Whether the agent can take a message now. */
@@ -118,8 +131,7 @@ interface ConversationProps {
  * @returns The scrolling conversation.
  */
 export function Conversation(props: ConversationProps) {
-  const { project, data, canSend } = props;
-  const items = useMemo(() => buildTranscript(data.events), [data.events]);
+  const { project, data, items, reveal, onStale, canSend } = props;
   const question = openQuestion(items);
   const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
   const folds = useMemo(() => foldPreviews(items, PREVIEWS_IN_VIEW, unfolded), [items, unfolded]);
@@ -172,6 +184,58 @@ export function Conversation(props: ConversationProps) {
       observer.disconnect();
     };
   }, [following]);
+
+  const [revealed, setRevealed] = useState(0);
+  if (reveal !== null && reveal.seq !== revealed) {
+    setRevealed(reveal.seq);
+    const led = items.find((item) => item.key === reveal.key);
+    if (led?.type === 'preview' && folds.hidden.has(led.key)) {
+      setUnfolded(new Set(unfolded).add(String(led.turn)));
+    }
+  }
+  useEffect(() => {
+    if (reveal === null) {
+      return;
+    }
+    const entry = scroller.current?.querySelector(`[data-entry="${CSS.escape(reveal.key)}"]`);
+    const card = reveal.agentId === null ? null : entry?.querySelector(`[data-agent="${CSS.escape(reveal.agentId)}"]`);
+    const target = card ?? entry;
+    if (target === null || target === undefined) {
+      return;
+    }
+    // Being led here is the person's own doing: the view goes to the entry and stays on it.
+    touched.current = performance.now();
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    target.setAttribute('data-revealed', 'true');
+    const done = (): void => {
+      target.removeAttribute('data-revealed');
+    };
+    target.addEventListener('animationend', done, { once: true });
+    return () => {
+      target.removeEventListener('animationend', done);
+      done();
+    };
+  }, [reveal]);
+
+  // A file that fails to load does not say so to its ancestors, so the failure is caught on its way down.
+  useEffect(() => {
+    const element = scroller.current;
+    if (element === null) {
+      return;
+    }
+    const onError = (event: Event): void => {
+      if (
+        event.target instanceof HTMLImageElement ||
+        event.target instanceof HTMLMediaElement
+      ) {
+        onStale();
+      }
+    };
+    element.addEventListener('error', onError, true);
+    return () => {
+      element.removeEventListener('error', onError, true);
+    };
+  }, [onStale]);
 
   /** Notes whether the person is at the bottom, which decides whether new entries scroll into view. */
   function onScroll(): void {
@@ -471,7 +535,7 @@ function Welcome({ project, canSend, onSuggest }: WelcomeProps) {
 }
 
 /** Props of {@link Entry}. */
-interface EntryProps extends ConversationProps {
+interface EntryProps extends Omit<ConversationProps, 'items' | 'onStale'> {
   /** The entry. */
   item: TranscriptItem;
   /** Whether it is the question the person has yet to answer. */
@@ -497,6 +561,7 @@ function Entry({
   onChoose,
   onApprove,
   onLock,
+  reveal,
 }: EntryProps) {
   switch (item.type) {
     case 'user':
@@ -536,7 +601,7 @@ function Entry({
       const sent = data.pending?.ui?.ui_id === item.ui.ui_id ? { value: data.pending.ui.value } : null;
       const locked = item.locked ?? sent;
       return (
-        <AgentRow first={item.first}>
+        <AgentRow first={item.first} entry={item.key}>
           <UiEntry
             ui={item.ui}
             locked={locked}
@@ -550,14 +615,19 @@ function Entry({
       return <UsageLine usage={item} />;
     case 'tool':
       return (
-        <AgentRow first={item.first}>
+        <AgentRow first={item.first} entry={item.key}>
           <ToolCard title={item.title} tool={item.tool} state={item.state} summary={item.summary} media={item.media} />
         </AgentRow>
       );
     case 'agents':
       return (
-        <AgentRow first={item.first}>
-          <AgentsBlock agents={item.agents} tags={tags} onTag={onTag} reveal={null} />
+        <AgentRow first={item.first} entry={item.key}>
+          <AgentsBlock
+            agents={item.agents}
+            tags={tags}
+            onTag={onTag}
+            reveal={reveal?.key === item.key ? reveal : null}
+          />
         </AgentRow>
       );
     case 'ask':
@@ -575,7 +645,7 @@ function Entry({
     case 'preview': {
       const engine = data.engines.find((candidate) => candidate.id === item.engineId);
       return (
-        <AgentRow first={item.first}>
+        <AgentRow first={item.first} entry={item.key}>
           <PreviewCard
             caption={item.caption}
             files={item.files}
@@ -606,6 +676,8 @@ interface AgentRowProps {
   first: boolean;
   /** What stands in the gutter instead of the mark: the eyes, for an entry still under way. */
   mark?: ReactNode;
+  /** The entry's key, for an entry another part of the page can lead to. */
+  entry?: string;
   /** The entry. */
   children: ReactNode;
 }
@@ -616,9 +688,9 @@ interface AgentRowProps {
  * @param props The component's props.
  * @returns The list item.
  */
-function AgentRow({ first, mark, children }: AgentRowProps) {
+function AgentRow({ first, mark, entry, children }: AgentRowProps) {
   return (
-    <li className={cx('flex gap-3', first && 'mt-5 first:mt-0')}>
+    <li className={cx('flex gap-3', first && 'mt-5 first:mt-0')} data-entry={entry}>
       {mark === undefined ? (
         <span className="w-7 flex-none pt-0.5">
           {first ? (

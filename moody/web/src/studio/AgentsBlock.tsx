@@ -20,7 +20,7 @@
  * only a subagent's final report is the agent's to use.
  *
  * `reveal` names a subagent whose card another part of the page leads to (a file under the
- * library's Process tab): that card unfolds.
+ * library's Process tab): that card unfolds, each time it is asked for.
  * @module
  */
 import { useId, useState } from 'react';
@@ -33,7 +33,7 @@ import { showActivity } from './activity';
 import { Prose } from './Prose';
 import { ThinkingEyes, ThinkingNote } from './ThinkingNote';
 import { ToolCard } from './ToolCard';
-import type { Subagent } from './transcript';
+import type { Reveal, Subagent } from './transcript';
 
 /** How each state of a subagent is said and drawn. */
 const STATES: Readonly<Record<AgentState, { label: string; className: string; tone: EyesTone }>> = {
@@ -83,8 +83,8 @@ interface AgentsBlockProps {
   tags: ReadonlySet<string>;
   /** Opens the asset a tag names. */
   onTag: (tag: string) => void;
-  /** A subagent whose card to unfold, or `null`. */
-  reveal: string | null;
+  /** What another part of the page leads to in this block, or `null`. */
+  reveal: Reveal | null;
 }
 
 /**
@@ -95,12 +95,12 @@ interface AgentsBlockProps {
  */
 export function AgentsBlock({ agents, tags, onTag, reveal }: AgentsBlockProps) {
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
-  const [revealed, setRevealed] = useState<string | null>(null);
-  if (reveal !== revealed) {
-    // A card another part of the page leads to unfolds once, and stays the person's to fold.
-    setRevealed(reveal);
-    if (reveal !== null && agents.some((agent) => agent.id === reveal)) {
-      setOpened(new Set(opened).add(reveal));
+  const [revealed, setRevealed] = useState(0);
+  if (reveal !== null && reveal.seq !== revealed) {
+    // A card another part of the page leads to unfolds once per request, and stays the person's to fold.
+    setRevealed(reveal.seq);
+    if (reveal.agentId !== null && agents.some((agent) => agent.id === reveal.agentId)) {
+      setOpened(new Set(opened).add(reveal.agentId));
     }
   }
   const working = agents.filter((agent) => agent.state === 'working').length;
