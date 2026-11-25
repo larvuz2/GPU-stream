@@ -622,4 +622,19 @@ export const EXAMPLES: Example[] = [
     },
     locked: { warmth: 34, contrast: 22, saturation: -18, fade: 16, grain: 38, vignette: 42 },
   },
+  {
+    id: 'idle',
+    asked: 'Actually, hold on. First tell me what the scene costs.',
+    says: 'Of course. The card above stays where it is while I work that out: you can still try things on it, and I will ask again when the look is the next thing to settle.',
+    ui: {
+      ui_id: 'ui-look-idle',
+      title: 'The look of the night market',
+      kind: 'components',
+      spec: LOOK_SPEC,
+      submit: 'Lock in this look',
+      waits: true,
+      media: [file('shot', 'discipline-media.webp')],
+    },
+    idle: true,
+  },
 ];

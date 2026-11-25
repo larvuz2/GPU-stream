@@ -152,7 +152,8 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
         return;
       }
       if (message.type === 'height' && isNumber(message.height)) {
-        setHeight(clamp(message.height, least, most));
+        // The document may be shorter than the least a card may ask to start at, down to a line of text.
+        setHeight(clamp(message.height, limit('frame_min', 40), most));
       } else if (message.type === 'state') {
         setValue(message.value);
         setReported(true);
@@ -174,7 +175,7 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
     return () => {
       window.removeEventListener('message', onMessage);
     };
-  }, [id, least, most]);
+  }, [id, most]);
 
   // A card locked while it is open is told so; one that started locked was built that way.
   const lockedValue = locked?.value;

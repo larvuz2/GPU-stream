@@ -55,6 +55,37 @@ export interface UiData {
   media: UiMedia[];
 }
 
+/**
+ * Whether a value is one file of a card.
+ *
+ * @param value The value to check.
+ * @returns `true` for a name, a kind, and an address.
+ */
+function isUiMedia(value: unknown): value is UiMedia {
+  return isRecord(value) && isString(value.name) && isString(value.kind) && isString(value.url);
+}
+
+/**
+ * Whether a value is the data of a `ui` event.
+ *
+ * @param value The value to check, as an event's `data` arrives.
+ * @returns `true` for a card this page can draw: its tree or document is checked where it is drawn.
+ */
+export function isUiData(value: unknown): value is UiData {
+  return (
+    isRecord(value) &&
+    isString(value.ui_id) &&
+    isString(value.title) &&
+    (value.kind === 'components' || value.kind === 'html') &&
+    (value.html === undefined || isString(value.html)) &&
+    (value.height === undefined || isNumber(value.height)) &&
+    (value.submit === null || isString(value.submit)) &&
+    isBoolean(value.waits) &&
+    Array.isArray(value.media) &&
+    value.media.every(isUiMedia)
+  );
+}
+
 /** A card's values, by the id of the input each belongs to. */
 export type UiState = Readonly<Record<string, unknown>>;
 

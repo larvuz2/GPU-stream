@@ -59,7 +59,7 @@ export interface UiCardProps {
  */
 export function UiCard({ ui, locked, live, onSubmit }: UiCardProps) {
   const title = useId();
-  const state = locked !== null ? 'Locked in' : ui.submit === null ? 'Take a look' : 'Your call';
+  const state = locked !== null ? 'Locked in' : ui.submit === null ? 'Take a look' : live ? 'Your call' : 'On hold';
   return (
     <section
       className="ai-card ui-card"

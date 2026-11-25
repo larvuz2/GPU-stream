@@ -14,7 +14,8 @@
  * the conversation would send, with the value as JSON beneath it. That is also what the
  * end-to-end checks read (`data-answer`).
  *
- * `?only=<id>` shows one card alone, for a screenshot or a check of that card.
+ * `?only=<id>` shows one card alone, for a screenshot or a check of that card, and
+ * `#card=<a show_ui call>` shows the card that call would make (`try.ts`).
  * @module
  */
 import { useState } from 'react';
@@ -22,6 +23,7 @@ import { MoodyFace } from '../../../components/Moody';
 import { describeAnswer } from '../answer';
 import { UiCard } from '../UiCard';
 import { EXAMPLES, type Example } from './examples';
+import { cardFromAddress } from './try';
 
 /** Props of {@link Exchange}. */
 interface ExchangeProps {
@@ -80,10 +82,11 @@ function Exchange({ example }: ExchangeProps) {
  */
 export function Gallery() {
   const only = new URLSearchParams(window.location.search).get('only');
-  const shown = only === null ? EXAMPLES : EXAMPLES.filter((example) => example.id === only);
+  const tried = cardFromAddress();
+  const shown = tried !== null ? [tried] : only === null ? EXAMPLES : EXAMPLES.filter((example) => example.id === only);
   return (
     <main className="mx-auto w-full max-w-[46rem] px-4 pt-6 pb-16 sm:px-6">
-      {only === null ? (
+      {only === null && tried === null ? (
         <header className="mb-8">
           <p className="eyebrow">Development</p>
           <h1 className="display mt-2 text-2xl">Interactive cards</h1>
