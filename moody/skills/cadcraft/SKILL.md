@@ -120,8 +120,10 @@ the plan's Brief item.
 
 ## Coming back to earlier work
 
-A person returns days later and expects their drawing. Every engine of a project opens in the
-project's folder, and CADCraft opens the newest `.dxf` or `.dwg` there.
+A person returns days later and expects their drawing. Where the project stands is in the
+turn's state and the repository's `README.md` and `drawings.md`, which need no engine: answer
+from those, and start an engine when the next step works on the drawing. Every engine of a
+project opens in the project's folder, and CADCraft opens the newest `.dxf` or `.dwg` there.
 
 1. `engine_list()`, and reuse a running CADCraft. Otherwise `engine_start("cadcraft", "cpu")`.
 2. `engine_files(engine_id)` to see what the folder holds: drawings, `exports/`, `handoff/`,

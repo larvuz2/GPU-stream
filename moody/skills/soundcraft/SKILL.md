@@ -160,8 +160,10 @@ sfx/                     one file per effect
 
 ### Picking up earlier work
 
-A person comes back after days; the engine they worked in is long gone. Everything that matters
-is in the project folder, and a new engine opens it:
+A person comes back after days; the engine they worked in is long gone. Where the project
+stands is in the turn's state, the library, and the notes, which need no engine: answer from
+those, and start an engine when the next step works in the session. Everything that matters is
+in the project folder, and a new engine opens it:
 
 1. `engine_start("soundcraft", "cpu")`. It opens the newest session file in the project folder.
    If the last engine stopped with changes unsaved, SoundCraft reopens **with those changes,
