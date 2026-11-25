@@ -80,6 +80,7 @@ SAMPLE: dict[str, Any] = {
         {
             "type": "tabs",
             "id": "view",
+            "recommended": "Grade",
             "children": [
                 {
                     "type": "tab",
@@ -106,7 +107,12 @@ SAMPLE: dict[str, Any] = {
                                     "max": 100,
                                     "value": 20,
                                 },
-                                {"type": "slider", "id": "grain", "label": "Grain"},
+                                {
+                                    "type": "slider",
+                                    "id": "grain",
+                                    "label": "Grain",
+                                    "value": 12,
+                                },
                                 {
                                     "type": "number",
                                     "id": "frames",
@@ -125,7 +131,12 @@ SAMPLE: dict[str, Any] = {
                             "adjust": {"vignette": 30},
                             "when": {"vignette_on": True},
                         },
-                        {"type": "toggle", "id": "vignette_on", "label": "Vignette"},
+                        {
+                            "type": "toggle",
+                            "id": "vignette_on",
+                            "label": "Vignette",
+                            "value": False,
+                        },
                     ],
                 },
                 {
@@ -136,6 +147,7 @@ SAMPLE: dict[str, Any] = {
                         {
                             "type": "pick",
                             "id": "lead",
+                            "recommended": "mara",
                             "options": [
                                 {"value": "mara", "label": "Mara", "image": "mara"},
                                 {"value": "theo", "image": "theo", "note": "Older"},
@@ -153,12 +165,13 @@ SAMPLE: dict[str, Any] = {
                             "id": "note",
                             "label": "Anything to change?",
                             "lines": 3,
+                            "value": "",
                         },
                         {
                             "type": "checkboxes",
                             "id": "keep",
                             "options": ["Coat", "Scar", "Lantern"],
-                            "value": ["Coat"],
+                            "recommended": ["Coat"],
                         },
                     ],
                 },
@@ -176,7 +189,7 @@ SAMPLE: dict[str, Any] = {
                                     "columns": ["Shot", "Lens", "Seconds"],
                                     "rows": [["1A", "35mm", 4], ["1B", "85mm", 2.5]],
                                     "pick": "many",
-                                    "value": ["1B"],
+                                    "recommended": ["1B"],
                                 },
                                 {
                                     "type": "chart",
@@ -195,12 +208,13 @@ SAMPLE: dict[str, Any] = {
                             "id": "area",
                             "label": "Spend",
                             "options": ["Cast", "Sets"],
-                            "value": "Sets",
+                            "recommended": "Sets",
                         },
                         {
                             "type": "segmented",
                             "id": "aspect",
                             "options": ["16:9", "2.39:1", "4:3"],
+                            "recommended": "2.39:1",
                         },
                         {
                             "type": "reorder",
@@ -234,11 +248,18 @@ SAMPLE: dict[str, Any] = {
             "type": "model",
             "id": "angle",
             "src": "robot",
+            "azimuth": 30,
+            "elevation": 10,
             "finish": "$finish",
             "color": "$accent",
             "spin": True,
         },
-        {"type": "select", "id": "finish", "options": list(CATALOG.data["finishes"])},
+        {
+            "type": "select",
+            "id": "finish",
+            "options": list(CATALOG.data["finishes"]),
+            "recommended": "clay",
+        },
         {
             "type": "layers",
             "id": "comp",
@@ -251,9 +272,11 @@ SAMPLE: dict[str, Any] = {
 }
 
 
-def problems(spec: Any, media: dict[str, str] | None = None) -> list[str]:
-    """What the check finds wrong with a card's tree."""
-    check = Check(CATALOG, MEDIA if media is None else media)
+def problems(
+    spec: Any, media: dict[str, str] | None = None, answers: bool = False
+) -> list[str]:
+    """What the check finds wrong with a card's tree, as one that sends an answer back or one that does not."""
+    check = Check(CATALOG, MEDIA if media is None else media, answers)
     try:
         check.run(spec)
     except Invalid as invalid:
@@ -320,6 +343,16 @@ def test_every_property_of_the_catalog_is_of_a_kind_the_check_knows():
             != entry.get("optional_id", False)
             or not answers
         ), name
+        start = entry.get("start", [])
+        assert bool(start) == answers, (
+            f"{name} names what states its recommendation exactly when it answers"
+        )
+        assert set(start) <= set(entry["props"]), name
+        assert all("doc" in entry["props"][prop] for prop in start), (
+            f"{name}: a problem says what to state with the property's own words"
+        )
+        if "recommended" in entry["props"]:
+            assert start == ["recommended"], name
     for shape in CATALOG.shapes.values():
         assert shape.get("short", next(iter(shape["props"]))) in shape["props"]
 
@@ -328,7 +361,7 @@ def test_a_card_that_uses_every_component_passes_and_its_inputs_are_its_ids():
     assert used(SAMPLE) == set(CATALOG.components), (
         "the sample is what holds every component to the check"
     )
-    check = Check(CATALOG, MEDIA)
+    check = Check(CATALOG, MEDIA, answers=True)
     check.run(SAMPLE)
     assert check.inputs == {
         "view": "tabs",
@@ -354,6 +387,8 @@ def test_a_card_that_uses_every_component_passes_and_its_inputs_are_its_ids():
 GRADE, CAST, PLAN = (
     ["children", 1, "children", index, "children"] for index in range(3)
 )
+# The sample's checkboxes, to change
+SAMPLE_KEEP = SAMPLE["children"][1]["children"][1]["children"][3]
 MISTAKES = [
     # What is wrong, the card, and what the problem has to say
     (
@@ -461,28 +496,52 @@ MISTAKES = [
         ["(number): min (1) should be below max (0)"],
     ),
     (
-        "a starting choice that is no option",
-        changed([*PLAN, 1, "value"], "Music"),
-        ['(select).value should be one of its options: "Cast", "Sets"'],
+        "a recommended choice that is no option",
+        changed([*PLAN, 1, "recommended"], "Music"),
+        ['(select).recommended should be one of its options: "Cast", "Sets"'],
     ),
     (
         "one choice where the answer is always a list",
-        changed([*CAST, 3, "value"], "Coat"),
-        ['(checkboxes).value should be a list; it is "Coat"'],
+        changed([*CAST, 3, "recommended"], "Coat"),
+        ['(checkboxes).recommended should be a list; it is "Coat"'],
     ),
     (
         "one choice where many are picked",
-        changed([*PLAN, 0, "children", 0, "value"], "1B"),
-        ["(table).value should be a list of the values chosen at first"],
+        changed([*PLAN, 0, "children", 0, "recommended"], "1B"),
+        ["(table).recommended should be a list of the ones you would choose"],
     ),
     (
         "many choices where one is picked",
-        changed([*CAST, 0, "value"], ["mara"]),
-        ["(pick).value should be one value, not a list"],
+        changed([*CAST, 0, "recommended"], ["mara"]),
+        ["(pick).recommended should be one value, not a list"],
+    ),
+    (
+        "a recommended row that is no row",
+        changed([*PLAN, 0, "children", 0, "recommended"], ["1C"]),
+        [
+            "(table).recommended should be among its rows, each named by its first cell",
+            '"1A", "1B"',
+        ],
+    ),
+    (
+        "a recommended tab that is no tab",
+        changed(["children", 1, "recommended"], "Grading"),
+        [
+            "(tabs).recommended should be one of its tabs",
+            '"Grade", "cast", "Plan"',
+        ],
+    ),
+    (
+        "a required choice recommended as nothing",
+        changed([*CAST, 3], {**SAMPLE_KEEP, "recommended": [], "required": True}),
+        [
+            '(checkboxes) is required, but its "recommended" is empty',
+            "could not be locked in as it opens",
+        ],
     ),
     (
         "two options of one value",
-        changed([*PLAN, 2, "options"], ["16:9", "16:9"]),
+        changed([*PLAN, 2, "options"], ["16:9", "2.39:1", "16:9"]),
         [
             "(segmented).options: option values should each be different",
             '"16:9" is there more than once',
@@ -490,7 +549,10 @@ MISTAKES = [
     ),
     (
         "too many options for the component",
-        changed([*PLAN, 2, "options"], [str(n) for n in range(6)]),
+        changed(
+            [*PLAN, 2, "options"],
+            ["16:9", "2.39:1", "4:3", "1:1", "9:16", "1.85:1"],
+        ),
         ["(segmented).options should have from 2 to 5 items; it has 6"],
     ),
     (
@@ -556,10 +618,136 @@ MISTAKES = [
     [pytest.param(spec, says, id=what) for what, spec, says in MISTAKES],
 )
 def test_a_problem_names_the_component_the_property_and_what_was_expected(spec, says):
-    found = problems(spec)
+    found = problems(spec, answers=True)
     assert len(found) == 1, found
     for words in says:
         assert words in found[0], found[0]
+
+
+def inputs_of(spec: Any, path: tuple[Any, ...] = ()):
+    """Every component of a tree that has an id, with the path of keys and indexes to it."""
+    if isinstance(spec, dict):
+        if "id" in spec and "type" in spec:
+            yield path, spec
+        for name, value in spec.items():
+            yield from inputs_of(value, (*path, name))
+    elif isinstance(spec, list):
+        for index, value in enumerate(spec):
+            yield from inputs_of(value, (*path, index))
+
+
+def test_a_card_that_answers_states_a_recommendation_on_every_input():
+    reason = "opens on the answer you recommend, so the person can agree in one click"
+    asked: set[str] = set()
+    for path, node in inputs_of(SAMPLE):
+        entry = CATALOG.components[node["type"]]
+        for prop in entry["start"]:
+            spec = entry["props"][prop]
+            if spec.get("required"):
+                continue
+            asked.add(node["type"])
+            bare = changed([*path, prop], drop=True)
+            (found,) = problems(bare, answers=True)
+            assert f'({node["type"]}) has no "{prop}". {spec["doc"]}' in found, found
+            assert reason in found, "the first problem of the kind says why"
+            assert problems(bare) == [], (
+                "a card with nothing to send back needs no recommendation"
+            )
+    assert asked == {
+        name
+        for name, entry in CATALOG.components.items()
+        if any(
+            not entry["props"][prop].get("required") for prop in entry.get("start", [])
+        )
+    }, "the sample holds every component that states a recommendation to the check"
+
+    # What can be chosen is listed, as one value or as several
+    (one,) = problems(changed([*PLAN, 2, "recommended"], drop=True), answers=True)
+    assert 'It can be one of: "16:9", "2.39:1", "4:3".' in one
+    (several,) = problems(changed([*CAST, 3, "recommended"], drop=True), answers=True)
+    assert 'It can be any of: "Coat", "Scar", "Lantern".' in several
+    (row,) = problems(
+        changed([*PLAN, 0, "children", 0, "recommended"], drop=True), answers=True
+    )
+    assert 'It can be any of: "1A", "1B".' in row
+
+    # A table, a model, tabs, and layers answer only with an id, so without one they recommend nothing
+    words = {"type": "text", "text": "x"}
+    loose = {
+        "type": "stack",
+        "children": [
+            {"type": "table", "columns": ["Shot"], "rows": [["1A"]]},
+            {"type": "model", "src": "robot"},
+            {
+                "type": "tabs",
+                "children": [{"type": "tab", "label": "A", "children": [words]}],
+            },
+            {"type": "layers", "layers": [{"name": "Sky", "src": "shot"}]},
+        ],
+    }
+    assert problems(loose, answers=True) == []
+
+
+def test_the_reason_for_a_recommendation_is_said_once_and_every_gap_is_listed():
+    bare = {
+        "type": "stack",
+        "children": [
+            {"type": "segmented", "id": "mood", "options": ["Dusk", "Noon"]},
+            {"type": "slider", "id": "grain"},
+            {"type": "toggle", "id": "loop", "label": "Loop"},
+            {"type": "color", "id": "accent"},
+        ],
+    }
+    assert problems(bare) == []
+    found = problems(bare, answers=True)
+    assert [one.split(" has no ")[0] for one in found] == [
+        "components.children[0] (segmented)",
+        "components.children[1] (slider)",
+        "components.children[2] (toggle)",
+        "components.children[3] (color)",
+    ]
+    assert sum("agree in one click" in one for one in found) == 1
+    assert "agree in one click" in found[0]
+
+
+def test_a_required_input_in_view_cannot_open_empty_on_a_card_that_answers():
+    def card_of(*children: dict[str, Any]) -> dict[str, Any]:
+        return {"type": "stack", "children": list(children)}
+
+    name = {"type": "field", "id": "name", "label": "Name", "required": True}
+    empty = card_of({**name, "value": ""})
+    (found,) = problems(empty, answers=True)
+    assert (
+        'components.children[0] (field) is required, but its "value" is empty' in found
+        and 'State what you would answer, or set "required" to false.' in found
+    )
+    assert problems(card_of({**name, "value": "Pip"}), answers=True) == []
+    assert problems(empty) == []
+
+    # A pick is required unless it says otherwise, so with many it recommends at least one
+    looks = {
+        "type": "pick",
+        "id": "looks",
+        "many": True,
+        "options": ["Dusk", "Noon"],
+        "recommended": [],
+    }
+    (found,) = problems(card_of(looks), answers=True)
+    assert '(pick) is required, but its "recommended" is empty' in found
+    assert problems(card_of({**looks, "required": False}), answers=True) == []
+    assert problems(card_of({**looks, "recommended": ["Dusk"]}), answers=True) == []
+
+    # One shown only on a condition, its own or of what holds it, is out of view as the card opens
+    other = {"type": "segmented", "id": "kind", "options": ["Pip", "Other"]}
+    other["recommended"] = "Pip"
+    asked = {**name, "value": "", "when": {"kind": "Other"}}
+    assert problems(card_of(other, asked), answers=True) == []
+    held = {
+        "type": "row",
+        "when": {"kind": "Other"},
+        "children": [{**name, "value": ""}],
+    }
+    assert problems(card_of(other, held), answers=True) == []
 
 
 def test_every_problem_of_a_card_is_reported_at_once_up_to_the_limit():
@@ -655,10 +843,23 @@ def test_a_components_card_becomes_an_event_with_its_tree_and_its_inputs():
     plain, none = shown(components={"type": "image", "src": "shot"})
     assert plain["submit"] is None and plain["waits"] is False and none == {}
 
+    # The same inputs with no recommendation are a card to look at, and no card to answer
+    bare = {"type": "segmented", "id": "mood", "options": ["Dusk", "Noon"]}
+    assert shown(components=bare)[1] == {"mood": "segmented"}
+    message = refusal(components=bare, submit="Lock in the mood")
+    assert message.startswith(
+        'The card was not shown. Fix this and call show_ui again:\n- components (segmented) has no "recommended". '
+        "The option you would choose, by its value; the card opens on it. "
+        'It can be one of: "Dusk", "Noon".'
+    )
+
 
 def test_an_html_card_is_bounded_and_has_to_report_its_value_to_be_locked_in():
     limits = CATALOG.limits
-    page = "<canvas id=c></canvas><script>c.onclick = () => moody.setState({taps: 1})</script>"
+    page = (
+        "<canvas id=c></canvas><script>moody.recommend({taps: 0}); "
+        "c.onclick = () => moody.setState({taps: 1})</script>"
+    )
     data, inputs = shown(html=page, submit="Keep this", height=480)
     assert data == {
         "ui_id": "ui-1",
@@ -674,8 +875,22 @@ def test_an_html_card_is_bounded_and_has_to_report_its_value_to_be_locked_in():
         shown(html="<p>Nothing to send back</p>")[0]["height"]
         == limits["height_default"]
     )
-    assert "never calls moody.setState or moody.submit" in refusal(
-        html="<p>No bridge</p>", submit="Keep this"
+    silent = refusal(html="<p>No bridge</p>", submit="Keep this")
+    assert "never calls moody.setState or moody.submit" in silent
+    assert "never calls moody.recommend" in silent, "both are said at once"
+    unsaid = refusal(
+        html="<button onclick='moody.setState(1)'>One</button>", submit="Keep this"
+    )
+    assert "never calls moody.setState" not in unsaid
+    assert (
+        "Draw the document on the answer you recommend and call moody.recommend(value)"
+        in unsaid
+        and "agree in one click" in unsaid
+    )
+    # A document with nothing to send back recommends nothing
+    assert (
+        shown(html="<button onclick='moody.setState(1)'>One</button>")[0]["submit"]
+        is None
     )
     heavy = "<!-- " + "x" * limits["html_bytes"] + " -->"
     assert (
@@ -790,13 +1005,17 @@ def test_the_tools_reference_is_written_from_the_catalog():
         )
         assert entry["doc"] in line and all(prop in line for prop in entry["props"])
     assert (
-        "- slider(id*, label, min=0, max=100, step=1, value, unit): A number the person drags. Answer: a number."
+        "- slider(id*, label, min=0, max=100, step=1, value!, unit): A number the person drags. Answer: a number."
         in reference
     )
     assert (
-        '- model(id, src*, azimuth=35, elevation=15, finish~="original", color~, spin~=false)'
+        '- model(id, src*, azimuth!=35, elevation!=15, finish~="original", color~, spin~=false)'
         in reference
     )
+    assert "- segmented(id*, label, options*, recommended!)" in reference
+    assert "- reorder(id*, label, options*!)" in reference
+    head = reference.splitlines()[0]
+    assert "! your recommendation" in head and '"(recommended)"' in head
     assert "- option {value*, label, image, note}" in reference
     for name, spec in CATALOG.adjustments.items():
         assert f"{name} {spec['min']}..{spec['max']}" in reference
@@ -870,7 +1089,14 @@ LOOK = {
             "adjust": {"warmth": "$warmth"},
         },
         {"type": "image", "src": "mara"},
-        {"type": "slider", "id": "warmth", "label": "Warmth", "min": -100, "max": 100},
+        {
+            "type": "slider",
+            "id": "warmth",
+            "label": "Warmth",
+            "min": -100,
+            "max": 100,
+            "value": 20,
+        },
     ],
 }
 
@@ -890,6 +1116,8 @@ def test_show_ui_is_a_tool_whose_definition_carries_the_catalog():
     }
     assert schema["properties"]["components"]["description"] == CATALOG.reference()
     assert "moody.setState" in schema["properties"]["html"]["description"]
+    assert "moody.recommend(value)" in schema["properties"]["html"]["description"]
+    assert '"(recommended)"' in definition["description"]
     assert str(CATALOG.limits["media"]) in schema["properties"]["media"]["description"]
 
 
@@ -1007,6 +1235,21 @@ def test_a_card_that_is_not_valid_is_refused_before_any_file_is_read(stage):
         "/previews/" in path for path in store.files
     )
 
+    # A card that asks for an answer without recommending one is refused the same way, and a card to look at is not
+    unsure = copy.deepcopy(LOOK)
+    del unsure["children"][2]["value"]
+    with pytest.raises(Refused) as refused:
+        agent.tool_show_ui(
+            turn, title="The look", components=unsure, submit="Lock in", media=files
+        )
+    assert refused.value.status == 400
+    assert (
+        '(slider) has no "value". Where it starts: the value you recommend.'
+        in refused.value.message
+        and "agree in one click" in refused.value.message
+    )
+    assert launcher.reads == [] and cards(stage, film["id"]) == []
+
     with pytest.raises(Refused, match="media\\[0\\] should name one file"):
         agent.tool_show_ui(
             turn, title="The look", components=LOOK, media=[{"name": "shot"}]
@@ -1078,7 +1321,10 @@ def test_an_html_card_carries_its_document_and_a_model_file_is_stored_as_it_is(s
         )
     )
     turn = turn_of(stage, film["id"])
-    page = "<canvas id=c></canvas><script>c.onclick = () => moody.setState({taps: 1})</script>"
+    page = (
+        "<canvas id=c></canvas><script>moody.recommend({taps: 0}); "
+        "c.onclick = () => moody.setState({taps: 1})</script>"
+    )
 
     result = agent.tool_show_ui(
         turn,
@@ -1122,6 +1368,13 @@ def test_an_html_card_carries_its_document_and_a_model_file_is_stored_as_it_is(s
     with pytest.raises(Refused, match="never calls moody.setState or moody.submit"):
         agent.tool_show_ui(
             turn, title="Nothing to send", html="<p>Hello</p>", submit="Keep this"
+        )
+    with pytest.raises(Refused, match="never calls moody.recommend"):
+        agent.tool_show_ui(
+            turn,
+            title="No recommendation",
+            html="<button onclick='moody.submit(1)'>One</button>",
+            submit="Keep this",
         )
 
 
@@ -1180,6 +1433,10 @@ def test_the_cards_skill_is_read_for_every_project_and_names_only_what_exists():
         "chart",
         "audio",
     } <= typed | set(re.findall(r"`([a-z]+)`", skill.body))
+    # The rule of recommending, for both kinds of card
+    assert "## Recommend an answer" in skill.body
+    assert "`recommended`" in skill.body and "moody.recommend(value)" in skill.body
+    assert 'class="moody-recommended"' in skill.body
     limits = CATALOG.limits
     for number in ("nodes", "depth", "spec_bytes", "list_items", "media", "html_bytes"):
         assert f"{limits[number]:,}" in skill.body, (

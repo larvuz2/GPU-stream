@@ -6,7 +6,8 @@
 
 /**
  * The table of components: for each one the catalog defines, what draws it, and for one that
- * answers, what it starts as and how its value reads in words.
+ * answers, what it starts as, how its value reads in words, and when two of its values are one
+ * answer.
  *
  * The table is keyed by the catalog's own component names ({@link ComponentType}), so adding a
  * component to `moody/ui.json` fails this file's compilation until it has an entry here: the
@@ -25,7 +26,7 @@ import { Model } from './components/Model';
 import { Pick, Reorder } from './components/pick';
 import { Table } from './components/Table';
 import type { UiNode } from './tree';
-import { STARTS, WORDS } from './values';
+import { SAME, STARTS, WORDS } from './values';
 import type { View } from './view';
 
 /** One component of the table. */
@@ -36,6 +37,8 @@ export interface ComponentDef {
   start?: (node: UiNode) => unknown;
   /** Its value in words, where that is more than the value itself. */
   words?: (node: UiNode, value: unknown) => string;
+  /** Whether two of its values are the same answer, where that is not plain equality. */
+  same?: (one: unknown, other: unknown) => boolean;
 }
 
 /** Every component of the catalog. */
@@ -54,8 +57,8 @@ export const COMPONENTS: Record<ComponentType, ComponentDef> = {
   swatches: { view: Swatches },
   table: { view: Table, start: STARTS.table },
   chart: { view: Chart },
-  model: { view: Model, start: STARTS.model, words: WORDS.model },
-  layers: { view: Layers, start: STARTS.layers, words: WORDS.layers },
+  model: { view: Model, start: STARTS.model, words: WORDS.model, same: SAME.model },
+  layers: { view: Layers, start: STARTS.layers, words: WORDS.layers, same: SAME.layers },
   slider: { view: Slider, start: STARTS.slider, words: WORDS.slider },
   number: { view: NumberInput, start: STARTS.number, words: WORDS.number },
   select: { view: Select, start: STARTS.select, words: WORDS.select },
@@ -63,7 +66,7 @@ export const COMPONENTS: Record<ComponentType, ComponentDef> = {
   toggle: { view: Toggle, start: STARTS.toggle },
   checkboxes: { view: Checkboxes, start: STARTS.checkboxes, words: WORDS.checkboxes },
   field: { view: Field, start: STARTS.field },
-  color: { view: ColorInput, start: STARTS.color },
+  color: { view: ColorInput, start: STARTS.color, same: SAME.color },
   pick: { view: Pick, start: STARTS.pick, words: WORDS.pick },
   reorder: { view: Reorder, start: STARTS.reorder, words: WORDS.reorder },
 };
