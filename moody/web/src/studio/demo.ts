@@ -50,12 +50,14 @@
  * server with no integrations configured, `empty` for an account with no projects, `legacy` for a
  * control plane from before the studio, which answers its routes with 404, `no-epic` for an
  * Epic connection whose GitHub account is not linked to Epic, where opening the game in Unreal
- * answers with the steps that link it, and `movie` for a new film that starts from its first
+ * answers with the steps that link it, `movie` for a new film that starts from its first
  * message with no engine, which plays the agent thinking, asking, delegating to subagents, and
- * asking before it starts one (`demoMovie.ts`).
+ * asking before it starts one (`demoMovie.ts`), and `limit` for that film further on, on an
+ * account that set its spend for a turn low, where a long job has stopped at it.
  *
  * The account has the limits of a turn as settings ({@link DEFAULT_LIMITS}, {@link MAX_LIMITS}),
- * which `updateMe` changes and refuses as the control plane does.
+ * which `updateMe` changes and refuses as the control plane does, and which the film's long job
+ * keeps to.
  * @module
  */
 import {
@@ -102,7 +104,15 @@ import {
   type Script,
   type Simulation,
 } from './demoKit';
-import { FILM_DISCIPLINES, MOVIE_AGENTS, MOVIE_PROJECT, movieOpening, movieProject, movieTurn } from './demoMovie';
+import {
+  FILM_DISCIPLINES,
+  MOVIE_AGENTS,
+  MOVIE_PROJECT,
+  movieOpening,
+  movieProject,
+  movieSoFar,
+  movieTurn,
+} from './demoMovie';
 
 /** The address the demo's account is shown under. */
 export const DEMO_EMAIL = 'you@example.com';
@@ -112,6 +122,9 @@ const DEFAULT_LIMITS: TurnLimits = { turn_budget_usd: 15, turn_limit: 200 };
 
 /** The demo deployment's ceilings, which no account sets a limit above. */
 const MAX_LIMITS: TurnLimits = { turn_budget_usd: 100, turn_limit: 1000 };
+
+/** The spend for a turn the account of the `limit` scene set itself, low enough for a long job to reach. */
+const LOW_BUDGET_USD = 1;
 
 /** The status a refusal of the demo carries: a feature it does not have. */
 const NOT_CONFIGURED = 503;
@@ -941,7 +954,8 @@ const ENGINE_SKILLS: Readonly<Record<string, string | undefined>> = {
  * @param turn The turn it starts.
  * @param start When the turn starts.
  * @param epicLinked Whether the demo's Epic connection is linked to Epic.
- * @param said How many messages the person had sent in the project before this one.
+ * @param history What was written in the project before this message.
+ * @param limits The account's limits for a turn.
  * @returns The turn.
  */
 function reply(
@@ -950,11 +964,12 @@ function reply(
   turn: TurnId,
   start: number,
   epicLinked: boolean,
-  said: number,
+  history: readonly Scheduled[],
+  limits: TurnLimits,
 ): Script {
   const at = (seconds: number): number => start + seconds * SECOND;
   if (project.id === MOVIE_PROJECT) {
-    return movieTurn(said, turn, start);
+    return movieTurn(history, turn, start, limits);
   }
   if (project.id === 'demo-game' && /\bopen\b.*\bunreal\b/i.test(text)) {
     return { events: openInUnreal(turn, at, epicLinked) };
@@ -1041,7 +1056,8 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   const legacy = scene === 'legacy';
   const offline = scene === 'offline';
   const epicLinked = scene !== 'no-epic';
-  const movie = scene === 'movie';
+  const atLimit = scene === 'limit';
+  const movie = scene === 'movie' || atLimit;
   let projects = scene === 'empty' ? [] : [...(movie ? [movieProject(opened)] : []), ...demoProjects(opened)];
   const libraries = new Map<string, Asset[]>([['demo-film', filmLibrary(opened)]]);
   const filmSimulation: Simulation = {
@@ -1107,7 +1123,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   let counter = 100;
   let reads = 0;
   /** What the account set of a turn's limits itself. */
-  let own: Limits['own'] = { turn_budget_usd: null, turn_limit: null };
+  let own: Limits['own'] = { turn_budget_usd: atLimit ? LOW_BUDGET_USD : null, turn_limit: null };
   /**
    * The account's limits for a turn: what it set, and the deployment's default where it set nothing.
    *
@@ -1308,7 +1324,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   }
 
   if (movie) {
-    play(MOVIE_PROJECT, movieOpening(opened));
+    play(MOVIE_PROJECT, atLimit ? movieSoFar(opened, limits()) : movieOpening(opened));
   }
 
   /**
@@ -1538,12 +1554,11 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
         }
         counter += 1;
         const turn = `turn-${counter}`;
-        const said = entries.filter((scheduled) => scheduled.event.kind === 'user_message').length;
         const message: Scheduled = {
           at: now,
           event: { turn_id: turn, kind: 'user_message', data: ui === undefined ? { text } : { text, ui } },
         };
-        const answer = reply(project, text, turn, now, epicLinked, said);
+        const answer = reply(project, text, turn, now, epicLinked, entries, limits());
         play(projectId, { ...answer, events: [message, ...answer.events] });
         change(projectId, { updated_at: new Date(now).toISOString() });
         return turn;
