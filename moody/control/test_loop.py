@@ -564,6 +564,7 @@ def test_a_question_ends_the_turn_and_holds_no_process_and_the_answer_resumes_th
         "ask_user",
         question="Color or black and white?",
         options=["Color", "Black and white"],
+        recommended="Black and white",
     )
     model.script(AGENT, reply(say("One thing first."), question))
     began = time.monotonic()
@@ -587,6 +588,7 @@ def test_a_question_ends_the_turn_and_holds_no_process_and_the_answer_resumes_th
     assert next(e["data"] for e in log["events"] if e["kind"] == "ask") == {
         "question": "Color or black and white?",
         "options": ["Color", "Black and white"],
+        "recommended": "Black and white",
     }
     assert not any(e["kind"] == "error" for e in log["events"])
 
@@ -1041,7 +1043,12 @@ def one_turn(phase: str, state: Path, root: Path, definitions: Path) -> dict[str
                 AGENT,
                 reply(
                     say("I will remember HELIOTROPE."),
-                    use("ask_user", question="Which color?", options=["Blue", "Red"]),
+                    use(
+                        "ask_user",
+                        question="Which color?",
+                        options=["Blue", "Red"],
+                        recommended="Blue",
+                    ),
                 ),
             )
             message(client, film["id"], "Remember the word HELIOTROPE.")

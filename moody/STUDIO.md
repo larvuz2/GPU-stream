@@ -383,7 +383,10 @@ a process the model steers.
   model reads them as a line after the person's words.
 - **The agent recommends.** Every decision it puts to the person carries the
   answer it would give, chosen for the project's taste and brief. A question
-  (`ask_user`) names one of its options as `recommended`. An interactive card
+  (`ask_user`) names one of its options as `recommended`; one whose
+  `recommended` is none of its options, or one of whose options says in its
+  own text that it is recommended, is sent back to the agent and does not
+  reach the person, so an option's text is only the option. An interactive card
   that sends an answer back opens on the agent's recommendation: an input that
   chooses among options says which one is recommended, and an input that sets
   a value (a slider, a color, an order) starts at the recommended value. The

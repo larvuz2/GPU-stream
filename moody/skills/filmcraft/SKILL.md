@@ -38,9 +38,11 @@ engines' work on the same project folder: see [Hand-offs](#hand-offs).
 
 ## The loop: propose, decide, execute
 
-1. **Propose.** Two to four options, your recommendation first and marked "(recommended)", each
+1. **Propose.** Two to four options, your recommendation first, each
    with one line of why. Say what it costs in engine time when it is more than a few minutes.
-2. **Ask.** `ask_user(question, options)` ends your turn. One decision per question; the last
+2. **Ask.** `ask_user(question, options, recommended)` ends your turn. `recommended` is the
+   option you would choose, in its own words: the page marks it, so no option's text says it is
+   recommended. One decision per question; the last
    option is a way out ("Something else"). Never ask a question you can answer yourself: track
    layout, codecs, file names, and command details are yours to decide and report.
 3. **Execute** exactly what was chosen, and read the result back (`sequence.inspect`).

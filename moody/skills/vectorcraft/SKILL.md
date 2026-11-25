@@ -34,10 +34,12 @@ render is Blender's. Draw the vector part here and hand it over (see [Hand-offs]
 
 ## The loop: propose, decide, draw, look
 
-1. **Propose.** Two to four options, your recommendation first and marked "(recommended)", each
+1. **Propose.** Two to four options, your recommendation first, each
    with one line of why, in the language of the brief ("reads at 16 px", "owns the letter M", "no
    competitor uses green"), never in adjectives.
-2. **Ask.** `ask_user(question, options)` ends your turn. One decision per question; the last
+2. **Ask.** `ask_user(question, options, recommended)` ends your turn. `recommended` is the
+   option you would choose, in its own words: the page marks it, so no option's text says it is
+   recommended. One decision per question; the last
    option is a way out ("Something else"). Decide yourself, and report, what is production: file
    names, artboard sizes, anchor counts, export formats.
 3. **Draw** exactly what was chosen, in VectorCraft, on its own artboard.

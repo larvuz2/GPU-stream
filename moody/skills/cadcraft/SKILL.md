@@ -65,9 +65,11 @@ because the drawing is the source and the model follows it.
 
 ## The loop: propose, decide, draw, check
 
-1. **Propose.** Two to four options, your recommendation first and marked "(recommended)", each
+1. **Propose.** Two to four options, your recommendation first, each
    with one line of why: a layout, a wall thickness, a hole pattern, a sheet scale.
-2. **Ask.** `ask_user(question, options)` ends your turn. One decision per question, the last
+2. **Ask.** `ask_user(question, options, recommended)` ends your turn. `recommended` is the
+   option you would choose, in its own words: the page marks it, so no option's text says it is
+   recommended. One decision per question, the last
    option a way out ("Something else"). Never ask what you can decide and report: layer names,
    line weights, text heights, dimension style, file names, and command details are yours.
 3. **Draw** exactly what was chosen, to real size, on its layer.

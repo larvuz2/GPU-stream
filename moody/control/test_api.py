@@ -1629,14 +1629,16 @@ def test_the_agent_works_through_its_tools_and_its_conversation_is_one_session_i
 def test_ask_user_ends_the_turn_and_the_answer_starts_the_next_on_the_same_session(studio):
     client, model = studio.client, studio.model
     film = new_project(client)
-    question = use("ask_user", question="Do you have a script, or shall we write one?", options=["I have one", "Let's write one"])
+    question = use("ask_user", question="Do you have a script, or shall we write one?", options=["I have one", "Let's write one"],
+                   recommended="Let's write one")
     model.script(reply(say("Let's begin."), use("library_list"), question), reply(say("This is never asked for.")))
     message(client, film["id"], "Hi")
     log = events(client, film["id"])
     assert [e["kind"] for e in log["events"]] == [
         "user_message", "text", "tool_start", "tool_end", "tool_start", "ask", "tool_end", "usage", "turn_end"]
     asked = next(e["data"] for e in log["events"] if e["kind"] == "ask")
-    assert asked == {"question": "Do you have a script, or shall we write one?", "options": ["I have one", "Let's write one"]}
+    assert asked == {"question": "Do you have a script, or shall we write one?", "options": ["I have one", "Let's write one"],
+                     "recommended": "Let's write one"}, "the question carries the answer the agent would give"
     assert log["running"] is False and len(model.requests) == 1, "the turn ended at the question: no machine waits for the person"
 
     model.steps.clear()
@@ -1651,7 +1653,8 @@ def test_ask_user_ends_the_turn_and_the_answer_starts_the_next_on_the_same_sessi
 def test_one_question_ends_a_turn_and_a_second_in_it_is_refused(studio):
     client, model = studio.client, studio.model
     film = new_project(client)
-    first, second = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"]), use("ask_user", question="How long?", options=["Short", "Feature"])
+    first = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended="Color")
+    second = use("ask_user", question="How long?", options=["Short", "Feature"], recommended="Short")
     turn = SimpleNamespace(asked=False, event=lambda kind, data: None)
     assert studio.agent.tool_ask_user(turn, **first["input"]).ends_turn
     with pytest.raises(Refused, match="one question at a time"):
@@ -1661,6 +1664,28 @@ def test_one_question_ends_a_turn_and_a_second_in_it_is_refused(studio):
     model.script(reply(first))
     message(client, film["id"], "Hi")
     assert kinds(client, film["id"]).count("ask") == 1
+
+
+def test_a_question_names_the_option_the_agent_would_choose_or_is_sent_back_to(studio):
+    client, model = studio.client, studio.model
+    film = new_project(client)
+    unnamed = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"])
+    other = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended="Sepia")
+    marked = use("ask_user", question="Color or black and white?", options=["Color (Recommended for a comedy)", "Black and white"],
+                 recommended="Color (Recommended for a comedy)")
+    spaced = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended=" Black and white ")
+    model.script(reply(unnamed), reply(other), reply(marked), reply(spaced))
+    message(client, film["id"], "Hi")
+    told = [next(iter(tool_results(request).values())) for request in model.requests[1:]]
+    assert all(result["is_error"] for result in told) and len(model.requests) == 4, "each is answered, and the turn goes on"
+    assert "recommended" in told[0]["content"], "the loop holds the input to the tool's schema, which requires it"
+    assert "recommended has to be one of the options, written exactly as it is there: Color / Black and white" in told[1]["content"]
+    assert "An option's text is only the option" in told[2]["content"] and "name that option in recommended" in told[2]["content"]
+    log = events(client, film["id"])["events"]
+    assert [e["data"] for e in log if e["kind"] == "ask"] == [
+        {"question": "Color or black and white?", "options": ["Color", "Black and white"], "recommended": "Black and white"}
+    ], "one question reached the person, its recommendation as the option is written"
+    assert [e["kind"] for e in log][-3:] == ["tool_end", "usage", "turn_end"]
 
 
 def test_a_tool_input_that_fails_its_schema_is_answered_not_run(studio):
@@ -3707,7 +3732,7 @@ def test_a_subagents_steps_show_in_the_conversation_and_its_card_follows_what_it
 
     # A tool kept to the agent itself is refused to a subagent, whatever its definition came to list
     turn = SimpleNamespace(beat=lambda: True, acting=lambda agent_id: nullcontext(), event=lambda kind, data: None)
-    refusal = studio.agent.run_tool(turn, "ask_user", {"question": "Which?", "options": ["A", "B"]}, "call_1", first)
+    refusal = studio.agent.run_tool(turn, "ask_user", {"question": "Which?", "options": ["A", "B"], "recommended": "A"}, "call_1", first)
     assert not refusal.ok and "Only the agent itself can use ask_user" in refusal.content
 
 
@@ -3978,7 +4003,7 @@ def test_the_environment_lists_what_a_projects_agent_can_use(studio):
 def test_a_session_that_begins_in_a_project_with_a_past_is_told_what_was_said(studio):
     client, model, store = studio.client, studio.model, studio.store
     film = new_project(client)
-    question = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"])
+    question = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended="Color")
     model.script(reply(say("A film about Mara. One thing first."), question), reply(say("Color it is.")))
     message(client, film["id"], "Make a film about Mara")
     message(client, film["id"], "Color")
@@ -3996,7 +4021,7 @@ def test_a_session_that_begins_in_a_project_with_a_past_is_told_what_was_said(st
     before = state[: state.index("The project's state at the start of this turn:")]
     assert before.splitlines()[1:-1] == [
         "The person: Make a film about Mara", "You: A film about Mara. One thing first.",
-        "You asked: Color or black and white? (Color / Black and white)", "The person: Color", "You: Color it is.",
+        "You asked: Color or black and white? (Color / Black and white; you recommended Color)", "The person: Color", "You: Color it is.",
     ], "the recap is the conversation the page shows, without this turn's own message"
 
     log = [{"kind": "user_message", "data": {"text": "x" * 5000}}] * 5 + [{"kind": "text", "data": {"text": "partial", "partial": True}},

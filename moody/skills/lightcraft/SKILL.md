@@ -42,7 +42,9 @@ development: say so, and offer it as its own step.
    reason: "The sky is clipped in 2% of the frame and the faces sit at 95. I'd pull highlights to
    -50 and lift exposure a third of a stop." For a matter of taste, offer two or three directions,
    your recommendation first.
-3. **Ask** with `ask_user(question, options)`: one decision per question, two to five short
+3. **Ask** with `ask_user(question, options, recommended)`, where `recommended` is the option you
+   would choose, in its own words (the page marks it, so no option's text says it is
+   recommended): one decision per question, two to five short
    options, the last a way out ("Something else"). Never ask what you can decide: file names,
    folders, formats for a stated purpose, and the order of steps are yours to choose and report.
 4. **Execute** exactly what was chosen, one stage at a time, in the development order.
