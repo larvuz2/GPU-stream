@@ -115,7 +115,7 @@ export function PreviewCard({ caption, files, compare, engine }: PreviewCardProp
   const pictures = files.filter((file) => file.kind === 'image');
   const others = files.filter((file) => file.kind !== 'image');
   return (
-    <figure className="ai-card preview-card max-w-xl rounded-2xl p-3">
+    <figure className="ai-card preview-card max-w-lg rounded-2xl p-3">
       <div className="flex items-center justify-between gap-3">
         <p className="ai-label">Work in progress</p>
         {engine === null ? null : <span className="mono truncate text-[0.6875rem] text-faint">{engine}</span>}

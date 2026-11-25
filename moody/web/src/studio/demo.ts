@@ -19,6 +19,13 @@
  * here starts a turn whose events arrive over a few seconds, under the studio's own polling, and
  * an engine started here queues, starts, and runs. The images are the site's own artwork.
  *
+ * The film's agent shows its work before it asks: four previews of every kind a card takes (a
+ * file, a frame, a before and after pair of a grade, and a six-second animatic), one more than a
+ * turn keeps in view, so the earliest is folded. A third project, Lighthouse theme, is a score in
+ * SoundCraft whose agent plays the person the first eight bars as a preview. The clip, the graded
+ * frame, and the eight bars are made for the demo: the clip and the frame from the site's own
+ * artwork with ffmpeg, the bars synthesized with it (`public/media/preview-*`).
+ *
  * Beside the film is a game, Ember Ridge, part way through a studio's onboarding (`moody/UNREAL.md`):
  * the agent started an Unreal engine and put its Desktop on the screen, the developer cloned the
  * game there, and the agent found it and reported what it is, which the engine's card in the
