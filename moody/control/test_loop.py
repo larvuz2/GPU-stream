@@ -25,6 +25,8 @@ agent counts on.
 - Stopping a turn interrupts the program while it is answering.
 - A skill is loaded when it is opened, with its reference file, and nothing
   else of the machine can be read.
+- A deploy that changes the prompt or a tool reaches the next turn of a
+  session that began before it.
 
 The tests are skipped, with the reason, where the bundled program is not
 there or does not start (an install of the SDK for another platform). Run as
@@ -49,7 +51,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from agent import TOOL_NAMES, Agent
+from agent import SPECS, TOOL_NAMES, Agent
 from api import create_app
 from definitions import operators, read_agents, read_skills
 from loop import PREFIX, bundled_cli, sdk_loop
@@ -600,6 +602,48 @@ def test_a_question_ends_the_turn_and_holds_no_process_and_the_answer_resumes_th
         "and follows the question's own result"
     )
     assert kinds(client, film["id"])[-3:] == ["text", "usage", "turn_end"]
+
+
+def test_a_deploy_that_changes_the_prompt_or_a_tool_reaches_the_next_turn_of_a_session_begun_before_it(
+    studio, monkeypatch
+):
+    client, model = studio.client, studio.model
+    film = new_project(client)
+    model.script(AGENT, reply(say("One.")))
+    message(client, film["id"], "First")
+    before = model.asked(AGENT)[-1]
+    plan = f"{PREFIX}update_plan"
+    assert "`t4`" in system_text(before)
+
+    with_config(studio, tiers=frozenset({"cpu"}))
+    monkeypatch.setitem(
+        SPECS["update_plan"],
+        "description",
+        SPECS["update_plan"]["description"] + " DEPLOYED-DESCRIPTION",
+    )
+    schema = SPECS["engine_stop"]["input_schema"]
+    monkeypatch.setitem(
+        SPECS["engine_stop"],
+        "input_schema",
+        {
+            **schema,
+            "properties": {**schema["properties"], "deployed": {"type": "string"}},
+        },
+    )
+    model.script(AGENT, reply(say("Two.")))
+    message(client, film["id"], "Second")
+    after = model.asked(AGENT)[-1]
+    tools = {tool["name"]: tool for tool in after["tools"]}
+    assert messages(after) == ["First", "Second"], "the session is the same one"
+    assert "`t4`" not in system_text(after), (
+        "the prompt is the one the code that runs the turn builds"
+    )
+    assert "DEPLOYED-DESCRIPTION" in tools[plan]["description"]
+    assert "deployed" in tools[f"{PREFIX}engine_stop"]["input_schema"]["properties"]
+    assert (
+        "DEPLOYED-DESCRIPTION"
+        not in {tool["name"]: tool for tool in before["tools"]}[plan]["description"]
+    )
 
 
 def test_a_session_resumes_in_a_fresh_process_that_has_nothing_of_the_first_but_the_database(

@@ -39,6 +39,14 @@ What the loop is given:
 - The person's words as they wrote them (`verbatim_prompts`): a message is
   text from outside, so nothing in it is read as a command of the loop or
   expanded into a file of the turn's machine.
+- The system prompt and the tools' definitions as the code that runs the turn
+  has them (`snapshot: False`). Left to itself the loop records both at a
+  session's first request and sends that record on every later one, resumed
+  turns included, so a deploy that changed the prompt, a tool's description,
+  or its input would not reach a project that had already talked to its
+  agent. Rendered every turn, they are the same text as the turn before
+  unless a deploy changed them, which is the one time the model's cache of
+  them is not reused.
 
 What comes back, in the order the child reports it (`TurnLoop.consume`): the
 answer as it is written, a block at a time, with a snapshot of a block about
@@ -760,7 +768,7 @@ class TurnLoop:
             ],
             # A step never copies the whole conversation into a subagent: a subagent is handed one job
             disallowed_tools=[f"{SUBAGENT_TOOL}(fork)"],
-            system_prompt=brief.system,
+            system_prompt={"type": "custom", "prompt": brief.system, "snapshot": False},
             mcp_servers={
                 SERVER: create_sdk_mcp_server(
                     SERVER, tools=[self.served(tool) for tool in brief.tools]

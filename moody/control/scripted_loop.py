@@ -355,7 +355,7 @@ class ScriptedClient:
         """Make one request of the scripted model, recording it as the Messages API would have seen it."""
         loop = self.loop
         system = (
-            self.options.system_prompt
+            self.options.system_prompt["prompt"]
             if agent is None
             else self.options.agents[agent].prompt
         )
