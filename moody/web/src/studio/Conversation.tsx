@@ -42,9 +42,9 @@
  * The view follows the newest entry while the person is at the bottom, and stays where they are
  * when they have scrolled up to read, offering a way back down instead. It also stays where it is
  * when the person unfolds something (a subagent's card, a tool call): what they opened grows under
- * their pointer rather than being pushed out of view by a jump to the end. An approval is the
- * exception: the agent's turn waits on it, so it comes into view when it arrives, wherever the
- * person is reading.
+ * their pointer rather than being pushed out of view by a jump to the end. Two things bring the
+ * end back into view wherever the person is reading: an approval, since the agent's turn waits on
+ * it, and a message the person sends, since it and the answer to it are what they look for next.
  *
  * Another part of the page can lead to an entry (`reveal`, from a file under the library's
  * Process tab): the entry is unfolded where it was folded away, scrolled to, and lit for a moment.
@@ -164,6 +164,14 @@ export function Conversation(props: ConversationProps) {
     setShownWaiting(waiting);
     if (waiting !== null) {
       // Following again brings the conversation's end, where the approval is, into view.
+      setFollowing(true);
+    }
+  }
+  const sending = data.pending !== null;
+  const [wasSending, setWasSending] = useState(false);
+  if (sending !== wasSending) {
+    setWasSending(sending);
+    if (sending) {
       setFollowing(true);
     }
   }
