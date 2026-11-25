@@ -15,7 +15,7 @@ declare module 'react' {
     /** Where the lit part of a slider's track starts and ends, as percentages of the track. */
     '--ui-from'?: string;
     '--ui-to'?: string;
-    /** The color one mark of a chart is drawn in. */
-    '--ui-mark'?: string;
+    /** How a layer of a composite blends with the layers under it: one of the catalog's `blends`. */
+    '--ui-blend'?: string;
   }
 }

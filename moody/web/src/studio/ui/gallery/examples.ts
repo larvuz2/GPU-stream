@@ -11,9 +11,19 @@
  * Every `components` card here is a tree of `moody/ui.json`'s components and every `html` card a
  * document for the sandboxed frame, so the gallery is also the worked reference for both: a look
  * tuned by sliders over a before and after pair, a lead picked from portraits, a style chosen
- * from boards, a storyboard put in order.
+ * from boards, a storyboard put in order, a poster taken apart into its layers, a shot list with
+ * its budget, and two cues to choose between.
  *
- * The pictures are the site's own artwork (`public/media`), named here for the part they play.
+ * The photographs are the site's own artwork (`public/media`), named here for the part they play.
+ * The rest was made for the gallery, computed from nothing but code (`public/media/card-*`):
+ *
+ * - The poster's six layers (`card-layer-*.webp`, 800 by 1000) are drawn with numpy and Pillow:
+ *   gradients, a seeded scatter of stars, windows, and lanterns, a skyline of boxes, a band of
+ *   blurred noise for the fog, and a title set in a 5 by 7 pixel alphabet written for it. No
+ *   picture, font, or model went in.
+ * - The two cues (`card-cue-*.m4a`, eight seconds, mono) are synthesized with numpy, a pad of sine
+ *   partials and a pulse of plucked notes over a thump, written as WAV and encoded with
+ *   `ffmpeg -c:a aac -b:a 96k -movflags +faststart`.
  * @module
  */
 import type { UiData, UiMedia } from '../tree';
@@ -313,6 +323,161 @@ export const EXAMPLES: Example[] = [
         file('f_letter', 'discipline-writing.webp'),
         file('f_vista', 'discipline-games.webp'),
       ],
+    },
+  },
+  {
+    id: 'layers',
+    asked: 'The poster feels busy. What can go?',
+    says: 'Here is the poster as its layers. Pick one in the dropdown, hide it or pull it back, and lock in what you want kept: I will rebuild the poster in PhotoCraft from that.',
+    ui: {
+      ui_id: 'ui-layers',
+      title: 'The poster, layer by layer',
+      kind: 'components',
+      spec: {
+        type: 'stack',
+        children: [
+          {
+            type: 'layers',
+            id: 'poster',
+            layers: [
+              { name: 'Sky', src: 'sky' },
+              { name: 'Moon', src: 'moon' },
+              { name: 'Skyline', src: 'skyline' },
+              { name: 'Lanterns', src: 'lanterns', blend: 'screen' },
+              { name: 'Fog', src: 'fog', opacity: 80 },
+              { name: 'Title', src: 'title' },
+            ],
+          },
+          { type: 'text', tone: 'muted', text: 'Six layers, the sky at the bottom. The lanterns are screened over the street.' },
+        ],
+      },
+      submit: 'Keep these layers',
+      waits: true,
+      media: [
+        file('sky', 'card-layer-sky.webp'),
+        file('moon', 'card-layer-moon.webp'),
+        file('skyline', 'card-layer-skyline.webp'),
+        file('lanterns', 'card-layer-lanterns.webp'),
+        file('fog', 'card-layer-fog.webp'),
+        file('title', 'card-layer-title.webp'),
+      ],
+    },
+  },
+  {
+    id: 'shots',
+    asked: 'We are over budget on the opening. What do we cut?',
+    says: 'Every shot of the opening with what it costs to generate and finish, and where the money goes. Tick the shots you can live without: they light up in the chart, so you see what each cut buys back.',
+    ui: {
+      ui_id: 'ui-shots',
+      title: 'The opening: shots and budget',
+      kind: 'components',
+      spec: {
+        type: 'stack',
+        children: [
+          {
+            type: 'table',
+            id: 'cut',
+            pick: 'many',
+            columns: ['Shot', 'What happens', 'Lens', 'Seconds', 'Cost $'],
+            rows: [
+              ['1A', 'The city, far below', '24mm', 5, 420],
+              ['1B', 'The market wakes', '35mm', 6, 610],
+              ['2A', 'Mara, waiting', '85mm', 3, 180],
+              ['2B', 'Theo’s workshop', '50mm', 4, 240],
+              ['3A', 'The letter', '100mm macro', 2, 95],
+              ['3B', 'The road out', '24mm', 5, 455],
+            ],
+            value: ['3B'],
+          },
+          {
+            type: 'row',
+            children: [
+              {
+                type: 'chart',
+                kind: 'bar',
+                label: 'Cost by shot',
+                unit: '$',
+                highlight: '$cut',
+                data: [
+                  { label: '1A', value: 420 },
+                  { label: '1B', value: 610 },
+                  { label: '2A', value: 180 },
+                  { label: '2B', value: 240 },
+                  { label: '3A', value: 95 },
+                  { label: '3B', value: 455 },
+                ],
+              },
+              {
+                type: 'chart',
+                kind: 'share',
+                label: 'Where the $2,000 goes',
+                unit: '$',
+                data: [
+                  { label: 'Generation', value: 940 },
+                  { label: 'Compositing', value: 520 },
+                  { label: 'Sound', value: 310 },
+                  { label: 'Color', value: 230 },
+                ],
+              },
+            ],
+          },
+          {
+            type: 'chart',
+            kind: 'area',
+            label: 'Tension across the opening',
+            highlight: '$cut',
+            data: [
+              { label: '1A', value: 22 },
+              { label: '1B', value: 35 },
+              { label: '2A', value: 58 },
+              { label: '2B', value: 41 },
+              { label: '3A', value: 76 },
+              { label: '3B', value: 64 },
+            ],
+          },
+        ],
+      },
+      submit: 'Cut these shots',
+      waits: true,
+      media: [],
+    },
+  },
+  {
+    id: 'cue',
+    asked: 'What should the opening sound like?',
+    says: 'Two sketches of the opening cue, eight seconds each. Play both and tell me which one the film opens on.',
+    ui: {
+      ui_id: 'ui-cue',
+      title: 'A cue for the opening',
+      kind: 'components',
+      spec: {
+        type: 'stack',
+        children: [
+          { type: 'audio', src: 'harbor', label: 'A · Slow harbor pad' },
+          { type: 'audio', src: 'market', label: 'B · Market pulse' },
+          {
+            type: 'segmented',
+            id: 'cue',
+            label: 'Which one opens the film?',
+            options: [
+              { value: 'a', label: 'A · Harbor' },
+              { value: 'b', label: 'B · Market' },
+              { value: 'neither', label: 'Neither' },
+            ],
+          },
+          {
+            type: 'field',
+            id: 'instead',
+            label: 'What should it be instead?',
+            placeholder: 'Slower, no percussion, a solo instrument…',
+            required: true,
+            when: { cue: 'neither' },
+          },
+        ],
+      },
+      submit: 'Use this cue',
+      waits: true,
+      media: [file('harbor', 'card-cue-harbor.m4a', 'audio'), file('market', 'card-cue-market.m4a', 'audio')],
     },
   },
   {

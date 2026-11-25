@@ -213,13 +213,13 @@
     },
     "chart": {
       "group": "content",
-      "doc": "Values as bars, a line, an area, or a donut.",
+      "doc": "Values as ranked bars, a line or an area over an ordered axis, or the shares of one whole.",
       "props": {
-        "kind": { "kind": "enum", "values": ["bar", "line", "area", "donut"], "default": "bar" },
+        "kind": { "kind": "enum", "values": ["bar", "line", "area", "share"], "default": "bar" },
         "label": { "kind": "string" },
         "data": { "kind": "list", "of": "point", "required": true },
         "unit": { "kind": "string", "doc": "Written with each value: a leading $ or a trailing unit such as s or %." },
-        "highlight": { "kind": "string", "bind": true, "doc": "The label of the value to emphasize." }
+        "highlight": { "kind": "value", "bind": true, "doc": "The label of the value to emphasize." }
       }
     },
     "model": {

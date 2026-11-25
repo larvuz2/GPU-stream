@@ -145,7 +145,7 @@ SAMPLE: dict[str, Any] = {
                                 },
                                 {
                                     "type": "chart",
-                                    "kind": "donut",
+                                    "kind": "share",
                                     "data": [
                                         {"label": "Cast", "value": 1200},
                                         {"label": "Sets", "value": 800},
@@ -359,7 +359,7 @@ MISTAKES = [
     (
         "a value outside an enumeration",
         changed([*PLAN, 0, "children", 1, "kind"], "pie"),
-        ["(chart).kind should be one of bar, line, area, donut", '"pie"'],
+        ["(chart).kind should be one of bar, line, area, share", '"pie"'],
     ),
     (
         "a file the card does not carry",

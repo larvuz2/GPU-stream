@@ -1035,4 +1035,458 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  /* A table */
+  .ui-table-frame {
+    overflow-x: auto;
+    border: 1px solid var(--color-line);
+    border-radius: 0.6rem;
+    scrollbar-width: thin;
+  }
+
+  .ui-table-frame:focus-visible {
+    outline: 2px solid var(--color-lime);
+    outline-offset: 2px;
+  }
+
+  .ui-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+  }
+
+  .ui-table th,
+  .ui-table td {
+    padding: 0.45rem 0.7rem;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .ui-table th {
+    border-bottom: 1px solid var(--color-line);
+    color: var(--color-faint);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .ui-table td {
+    color: color-mix(in oklab, var(--color-fg) 90%, transparent);
+  }
+
+  .ui-table tbody tr + tr td {
+    border-top: 1px solid var(--color-line);
+  }
+
+  .ui-table td[data-number='true'] {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  /* A column of numbers is headed from the right, as its figures are set. */
+  .ui-table th[data-number='true'] {
+    text-align: right;
+  }
+
+  .ui-table[data-picks='true'] tbody tr {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+
+  .ui-table[data-picks='true'] tbody tr:hover {
+    background: rgb(255 255 255 / 0.04);
+  }
+
+  .ui-table tbody tr[data-picked='true'] {
+    background: var(--selection-bg);
+  }
+
+  .ui-table tbody tr[data-picked='true'] td {
+    color: var(--color-fg);
+  }
+
+  .ui-table .ui-table-pick {
+    width: 1.75rem;
+    padding-right: 0;
+  }
+
+  .ui-check-mark[data-round='true'] {
+    border-radius: 9999px;
+  }
+
+  .ui-table tr[data-picked='true'] .ui-check-mark {
+    border-color: var(--color-lime);
+    background: var(--color-lime);
+  }
+
+  .ui-table tr[data-picked='true'] .ui-check-mark::after {
+    content: '';
+    width: 0.35rem;
+    height: 0.35rem;
+    border-radius: inherit;
+    background: var(--color-ink-950);
+  }
+
+  .ui-card[data-locked='true'] .ui-table[data-picks='true'] tbody tr {
+    cursor: default;
+  }
+
+  /* A chart. The marks are the agent's lavender; what the card emphasizes is the person's lime. */
+  .ui-chart {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.55rem;
+    min-width: 0;
+  }
+
+  .ui-bars {
+    display: grid;
+    grid-template-columns: fit-content(42%) minmax(0, 1fr) max-content;
+    gap: 0.5rem 0.7rem;
+    align-items: center;
+  }
+
+  .ui-bar-row {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    align-items: center;
+  }
+
+  .ui-bar-name {
+    overflow: hidden;
+    color: var(--color-soft);
+    font-size: 0.8125rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ui-bar-track {
+    display: block;
+    height: 0.875rem;
+    border-left: 1px solid var(--color-line-strong);
+  }
+
+  /* A bar grows from the baseline: square there, rounded at the end that carries the value. */
+  .ui-bar {
+    display: block;
+    min-width: 2px;
+    height: 100%;
+    border-radius: 0 4px 4px 0;
+    background: var(--color-lavender);
+    transition: width 0.25s ease;
+  }
+
+  .ui-bar-value,
+  .ui-legend-value {
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .ui-bar-row[data-emphasis='on'] .ui-bar {
+    background: var(--color-lime);
+  }
+
+  .ui-bar-row[data-emphasis='on'] .ui-bar-name {
+    color: var(--color-fg);
+  }
+
+  .ui-bar-row[data-emphasis='off'] .ui-bar {
+    opacity: 0.38;
+  }
+
+  .ui-bar-row[data-emphasis='off'] .ui-bar-value {
+    color: var(--color-muted);
+  }
+
+  .ui-share-chart {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.6rem;
+  }
+
+  /* The parts of a whole, each its own block, parted by the surface showing through. */
+  .ui-share {
+    display: flex;
+    gap: 2px;
+    height: 1.75rem;
+  }
+
+  .ui-share-part {
+    display: flex;
+    flex: 0 1 0;
+    align-items: center;
+    overflow: hidden;
+    min-width: 3px;
+    padding-inline: 0.4rem;
+    border-radius: 4px;
+    color: var(--color-ink-950);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  /*
+   * One ramp of lavender, a step per rank, lightest for the largest part. The steps keep their
+   * order and stay apart in lightness against the card's surface, and the darkest still clears it.
+   */
+  :is(.ui-share-part, .ui-legend-key)[data-step='0'] {
+    --ui-step: 100%;
+  }
+
+  :is(.ui-share-part, .ui-legend-key)[data-step='1'] {
+    --ui-step: 82%;
+  }
+
+  :is(.ui-share-part, .ui-legend-key)[data-step='2'] {
+    --ui-step: 66%;
+  }
+
+  :is(.ui-share-part, .ui-legend-key)[data-step='3'] {
+    --ui-step: 52%;
+  }
+
+  :is(.ui-share-part, .ui-legend-key)[data-step='4'] {
+    --ui-step: 40%;
+  }
+
+  :is(.ui-share-part, .ui-legend-key)[data-step='5'] {
+    --ui-step: 30%;
+  }
+
+  .ui-share-part,
+  .ui-legend-key {
+    background: color-mix(in srgb, var(--color-lavender) var(--ui-step, 100%), transparent);
+  }
+
+  /* On the dark steps of the ramp the share reads in the light ink. */
+  .ui-share-part[data-step='3'],
+  .ui-share-part[data-step='4'],
+  .ui-share-part[data-step='5'] {
+    color: var(--color-fg);
+  }
+
+  .ui-share-part[data-emphasis='on'],
+  .ui-legend-key[data-emphasis='on'] {
+    background: var(--color-lime);
+    color: var(--color-ink-950);
+  }
+
+  .ui-legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: 0.3rem 1.2rem;
+  }
+
+  .ui-legend-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    font-size: 0.8125rem;
+  }
+
+  .ui-legend-key {
+    width: 0.7rem;
+    height: 0.7rem;
+    flex: none;
+    border-radius: 2px;
+  }
+
+  .ui-legend-name {
+    flex: 1 1 0;
+    overflow: hidden;
+    color: var(--color-soft);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ui-legend-row[data-emphasis='on'] .ui-legend-name {
+    color: var(--color-fg);
+  }
+
+  .ui-plot {
+    position: relative;
+    min-width: 0;
+    border-radius: 0.4rem;
+  }
+
+  .ui-plot > svg {
+    display: block;
+    overflow: visible;
+    touch-action: pan-y;
+  }
+
+  .ui-plot-grid {
+    stroke: var(--color-line);
+    stroke-width: 1;
+  }
+
+  .ui-plot-tick {
+    fill: var(--color-faint);
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ui-plot-line {
+    fill: none;
+    stroke: var(--color-lavender);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+  }
+
+  .ui-plot-area {
+    fill: var(--color-lavender);
+    opacity: 0.1;
+  }
+
+  /* A dot is ringed in the surface's color, so it reads where it sits on the line. */
+  .ui-plot-dot {
+    fill: var(--color-lavender);
+    stroke: var(--color-ink-900);
+    stroke-width: 2;
+  }
+
+  .ui-plot-dot[data-emphasis='on'] {
+    fill: var(--color-lime);
+  }
+
+  .ui-plot-value {
+    fill: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+  }
+
+  .ui-plot-cross {
+    stroke: var(--color-line-strong);
+    stroke-width: 1;
+  }
+
+  .ui-tooltip {
+    position: absolute;
+    display: grid;
+    gap: 0.05rem;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.4rem;
+    background: var(--color-ink-800);
+    font-size: 0.6875rem;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  .ui-tooltip strong {
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+
+  .ui-tooltip span {
+    color: var(--color-muted);
+  }
+
+  /* A composite of layers, and its inspector */
+  .ui-composite {
+    isolation: isolate;
+    margin-inline: auto;
+    width: 100%;
+    max-width: 22rem;
+  }
+
+  .ui-layer {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    mix-blend-mode: var(--ui-blend, normal);
+    transition: opacity 0.15s ease;
+  }
+
+  .ui-inspector {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 0.8rem 1rem;
+  }
+
+  .ui-inspector > .ui-input {
+    flex: 1 1 10rem;
+  }
+
+  .ui-inspector > .ui-toggle {
+    flex: none;
+    min-height: 2.25rem;
+  }
+
+  /* A sound: the play button, and the waveform that is also its seek bar */
+  .ui-audio {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.6rem;
+    background: rgb(255 255 255 / 0.03);
+  }
+
+  .ui-play {
+    display: grid;
+    place-items: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    flex: none;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.5rem;
+    background: var(--color-ink-700);
+    color: var(--color-fg);
+    transition: border-color 0.15s ease;
+  }
+
+  .ui-play:hover {
+    border-color: #777;
+  }
+
+  .ui-audio-body {
+    display: grid;
+    flex: 1 1 0;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.3rem;
+    min-width: 0;
+  }
+
+  .ui-wave {
+    position: relative;
+    height: 2.25rem;
+  }
+
+  .ui-wave > svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .ui-wave-bar {
+    fill: var(--color-line-strong);
+  }
+
+  .ui-wave-bar[data-played='true'] {
+    fill: var(--color-fg);
+  }
+
+  .ui-wave .ui-seek {
+    cursor: pointer;
+  }
 }
