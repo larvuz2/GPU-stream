@@ -8,9 +8,10 @@
 # read: PhotoCraft, in the session's project folder (`craft/project.sh`), the
 # one a FilmCraft engine of the same project opens in.
 #
-# PhotoCraft's settings (PHOTOCRAFT_CONFIG_DIR) and the recovery copies of
-# unsaved documents it keeps under XDG_STATE_HOME are in `.photocraft` in the
-# project folder, where they outlive the Sandbox and stay with their project.
+# PhotoCraft's settings (PHOTOCRAFT_CONFIG_DIR), and with them the recovery
+# copies of unsaved documents it keeps in the `Recovery` folder beside them, are
+# in `.photocraft` in the project folder, where they outlive the Sandbox and
+# stay with their project.
 #
 # A session comes back to the work the last one left, by PhotoCraft's own two
 # means, since it has no project file that names its open documents:
@@ -20,15 +21,20 @@
 #   changed and under the name and path it had. The interval is ten minutes
 #   unless set; a session can end at any minute (the idle timeout, `down`), so
 #   settings that do not say are given one minute, the shortest PhotoCraft
-#   takes. What was changed in the last minute before a session was stopped is
-#   what can still be lost; the idle timeout is longer than that, so a session
-#   it ends loses nothing.
-# - Saved work. With nothing to recover, PhotoCraft opens on the document of
-#   the project folder that was saved last (`.pcraft`, `.psd`, `.psb`, at the
-#   folder's top), as FilmCraft opens on the newest project file. With
-#   something to recover it opens on that alone: the recovered document is the
-#   newer state of the same work, and the saved one beside it would be a second
-#   tab of it.
+#   takes. PhotoCraft looks at that clock only as it draws a frame, and a
+#   window nobody touches draws none, so a change made just before its user
+#   walked away would never be written: a request on the control channel every
+#   20 s, which reads the list of open documents and changes nothing, has it
+#   draw one. It is not sent through `selkies-modal-run`, so it does not count
+#   as use of the session, and it ends with the PhotoCraft it was started for.
+#   What can still be lost is what changed in the last minute and a half before
+#   `down`; the idle timeout is longer than that, so a session it ends loses
+#   nothing.
+# - Saved work. PhotoCraft opens on the document of the project folder that
+#   was saved last (`.pcraft`, `.psd`, `.psb`, at the folder's top), as
+#   FilmCraft opens on the newest project file, unless a recovery copy is of
+#   that same file: the copy is its newer state, and the saved one beside it
+#   would be a second tab of the same work.
 #
 # Settings that do not say start PhotoCraft in its CPU compatibility rendering
 # mode. A Sandbox has no hardware adapter that can present into the display (no
@@ -45,10 +51,9 @@
 # (sandbox.py, `photocraft/control.sh`); what it may read and write is the
 # project folder alone.
 folder="$(selkies-modal-project)" || exit 1
-mkdir -p "${folder}/.photocraft/state"
-cd "${folder}" || exit 1
 export PHOTOCRAFT_CONFIG_DIR="${folder}/.photocraft"
-export XDG_STATE_HOME="${folder}/.photocraft/state"
+mkdir -p "${PHOTOCRAFT_CONFIG_DIR}"
+cd "${folder}" || exit 1
 
 settings="${PHOTOCRAFT_CONFIG_DIR}/preferences.json"
 [ -s "${settings}" ] || echo '{}' > "${settings}"
@@ -60,8 +65,19 @@ else
 fi
 
 set --
-if [ -z "$(find "${XDG_STATE_HOME}/photocraft/Recovery" -maxdepth 1 -name '*.json' -print -quit 2> /dev/null)" ]; then
-  file="$(find . -maxdepth 1 \( -name '*.pcraft' -o -name '*.psd' -o -name '*.psb' \) -printf '%T@ %p\n' 2> /dev/null | sort -rn | head -n 1 | cut -d ' ' -f 2-)"
-  [ -z "${file}" ] || set -- "${file#./}"
+file="$(find . -maxdepth 1 \( -name '*.pcraft' -o -name '*.psd' -o -name '*.psb' \) -printf '%T@ %p\n' 2> /dev/null | sort -rn | head -n 1 | cut -d ' ' -f 2-)"
+if [ -n "${file}" ]; then
+  # A recovery copy names the path its document had: the folder's real one for a file opened
+  # here, the one relative to the folder for a file the control channel opened
+  recovered="$(cat "${PHOTOCRAFT_CONFIG_DIR}"/Recovery/*.json 2> /dev/null |
+    jq -r --arg real "$(realpath "${file}")" --arg name "${file#./}" 'select(.original_path == $real or .original_path == $name) | .key')"
+  [ -n "${recovered}" ] || set -- "${file#./}"
 fi
+
+# $$ is PhotoCraft's own process once this script has become it
+(
+  while sleep 20 && kill -0 "$$" 2> /dev/null; do
+    echo '{"method": "engine.execute", "params": {"command": "session.inspect"}}' | selkies-modal-photocraft 5 > /dev/null 2>&1
+  done
+) &
 exec photocraft --automation-read-root "${folder}" --automation-write-root "${folder}" -- "$@"
