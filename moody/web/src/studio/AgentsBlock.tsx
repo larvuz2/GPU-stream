@@ -104,7 +104,16 @@ export function AgentsBlock({ agents, tags, onTag, reveal }: AgentsBlockProps) {
     }
   }
   const working = agents.filter((agent) => agent.state === 'working').length;
-  const failed = agents.some((agent) => agent.state === 'failed');
+  // The count's light: lavender while any works, then red where one failed, green where all
+  // completed, and unlit where some were stopped.
+  const light =
+    working > 0
+      ? 'dot-busy dot-live'
+      : agents.some((agent) => agent.state === 'failed')
+        ? 'dot-bad'
+        : agents.every((agent) => agent.state === 'completed')
+          ? 'dot-done'
+          : 'dot-idle';
   const tasks = agents.length === 1 ? 'a task' : 'tasks';
   const specialists = `${agents.length} specialized ${agents.length === 1 ? 'agent' : 'agents'}`;
   return (
@@ -131,10 +140,7 @@ export function AgentsBlock({ agents, tags, onTag, reveal }: AgentsBlockProps) {
         ))}
       </ul>
       <p className="agents-count" role="status">
-        <span
-          className={cx('dot', working > 0 ? 'dot-busy dot-live' : failed ? 'dot-bad' : 'dot-done')}
-          aria-hidden="true"
-        />
+        <span className={cx('dot', light)} aria-hidden="true" />
         {countText(agents)}
       </p>
     </section>

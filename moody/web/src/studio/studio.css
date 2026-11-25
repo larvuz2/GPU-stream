@@ -1193,9 +1193,14 @@
     font-size: 0.875rem;
   }
 
+  /* A phone has no room to indent what a subagent did, nor to keep what it is doing on one line. */
   @media (max-width: 479.98px) {
     .agent-card-body {
       padding-left: 0.9rem;
+    }
+
+    .agent-card-detail {
+      white-space: normal;
     }
   }
 

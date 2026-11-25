@@ -16,9 +16,9 @@
  *
  * What the agent reasons is a quiet note that unfolds (`ThinkingNote.tsx`), with the eyes beside
  * it in the gutter while it is being written, and its answer grows while it is written, ending
- * in a caret until it is whole. Before a tool that costs or changes
- * something it asks, as a card with three answers (`ApprovalCard.tsx`), and a turn ends on one
- * small line of what it took: time, tokens, cost, and subagents.
+ * in a caret until it is whole. Before a tool that costs or changes something it asks, as a card
+ * with three answers (`ApprovalCard.tsx`), and a turn ends on one small line of what it took:
+ * time, tokens, cost, and subagents.
  *
  * An interactive card (`ui`) is drawn by `ui/UiCard.tsx`. This module decides when it can be
  * answered (it is the newest thing the agent showed, no turn is running, and it is not locked
@@ -224,10 +224,7 @@ export function Conversation(props: ConversationProps) {
       return;
     }
     const onError = (event: Event): void => {
-      if (
-        event.target instanceof HTMLImageElement ||
-        event.target instanceof HTMLMediaElement
-      ) {
+      if (event.target instanceof HTMLImageElement || event.target instanceof HTMLMediaElement) {
         onStale();
       }
     };

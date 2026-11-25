@@ -13,7 +13,7 @@
  * /v1/projects/{pid}/environment`); nothing here lists one. A connector says what it is for by its
  * icon and whether the agent can use it by its state: connected, available once the person
  * connects it, or off on this server. A control plane that does not serve the route shows none of
- * the three, as it showed none before.
+ * the three, as it showed none before, and no permissions either unless the project has some.
  *
  * The last is the project's own `permissions`: each tool the person answered "always allow" for
  * in an approval, with a button that takes the answer back, after which the agent asks again.
@@ -66,6 +66,9 @@ export function AgentEnvironment({ environment, status, permissions, onRevoke }:
     .filter(([, answer]) => answer === ALWAYS)
     .map(([tool]) => tool)
     .sort();
+  if ((status === 'missing' || status === 'offline') && allowed.length === 0) {
+    return null;
+  }
   return (
     <>
       {status === 'loading' ? (
