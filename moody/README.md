@@ -282,7 +282,9 @@ Modal, Anthropic, fal, and GitHub: who a credential names, what each route and
 tool returns and refuses, that one user's sessions, projects, and connections do not exist
 for another, the agent driven by a scripted model through every tool, its
 subagents, approvals, and skills, that `ask_user` ends a turn and a second
-message waits for the first, the pictures the agent looks at its generations
+message waits for the first, that a question names the option the agent
+recommends, that a turn runs on its person's own limits and says which one
+stopped it, the pictures the agent looks at its generations
 and the library by (made by a real ffmpeg, so those tests skip where there is
 none) and that the ffmpeg which makes them gets nothing of the worker's
 environment, Nuke's gate and seats, Unreal Engine's gate on an
@@ -329,8 +331,9 @@ calls every function: what is refused and by which name, how a minute is
 charged and that a balance never goes below zero, that a payment delivered
 twice is credited once, that a project runs one agent turn at a time and a dead
 turn does not hold it, that the agent's transcript keeps its order and a batch
-sent twice is kept once, that an approval is answered once, and that the keys
-a browser holds reach no row and no function.
+sent twice is kept once, that an approval is answered once, that an account's
+limits of a turn are unset until it sets them, and that the keys a browser
+holds reach no row and no function.
 
 ## What is not here yet
 
@@ -347,7 +350,8 @@ turn costs, and how the loop summarizes a conversation that outgrows the
 model's context window are unmeasured (`trial.py::real` is the first step).
 The transcript's store has run against the tests' database and the SDK's
 conformance suite, not against Supabase, and neither has the read of a library
-file the agent looks at (`Store.download`). The agent's model and generation are
+file the agent looks at (`Store.download`) or the write of an account's limits
+(`PATCH /v1/me`). The agent's model and generation are
 not billed in credits yet, and only an Unreal engine clones the project's
 repository as it starts. The MCP endpoint has no project tools.
 
