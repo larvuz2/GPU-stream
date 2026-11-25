@@ -34,7 +34,8 @@ An application's own interface is reached from inside the Sandbox, the one
 place it listens: Blender runs the Python it finds in a spool directory
 (`blender_python`), and FilmCraft answers JSON requests on a control channel
 bound to the Sandbox's loopback, for the session's own token only
-(`filmcraft_call`). Neither is exposed beyond the Sandbox, so driving one takes
+(`filmcraft_call`), as SoundCraft does on its own, which takes no token
+(`soundcraft_call`). None is exposed beyond the Sandbox, so driving one takes
 the Modal credentials that started it, as a link does. An Unreal session
 describes the projects cloned into its workspace the same way
 (`unreal_projects`), and has a second page beside its desktop on a port of its
@@ -75,8 +76,8 @@ BASE_IMAGE = (
 )
 BLENDER_VERSION = "5.2.4"
 BLENDER_SHA256 = "2fd14c50987426897ba60237ee996edf2b4151f4b1a72a460ca20be58c1d2d86"
-# FilmCraft's and PhotoCraft's Debian packages from their GitHub releases, and the hash each
-# release's SHA256SUMS.txt lists for it
+# FilmCraft's, PhotoCraft's, and SoundCraft's Debian packages from their GitHub releases, and the
+# hash each release's SHA256SUMS.txt lists for it
 FILMCRAFT_VERSION = "0.20.1"
 FILMCRAFT_SHA256 = "5667c7505c91d2ad9de3c4acb15cb02fc9f138fae74dce9c7c5f08bc29edb3a8"
 PHOTOCRAFT_VERSION = "0.23.1"
@@ -236,10 +237,11 @@ def session_image(app: str = "blender") -> modal.Image:
     it out behind a login and a license its user accepts, so the session
     installs it into the workspace once that user has (`nuke/setup.sh`); the
     image carries what that takes, Firefox among it (`nuke/install-deps.sh`).
-    FilmCraft and PhotoCraft are the Debian packages of their GitHub releases,
-    each checked against the hash its release publishes (`craft/install.sh`),
-    with what finds the session's project folder (`craft/project.sh`); FilmCraft
-    adds the client of its control channel (`filmcraft/control.sh`). Unreal's
+    FilmCraft, PhotoCraft, and SoundCraft are the Debian packages of their
+    GitHub releases, each checked against the hash its release publishes
+    (`craft/install.sh`), with what finds the session's project folder
+    (`craft/project.sh`); FilmCraft and SoundCraft each add the client of their
+    control channel (`filmcraft/control.sh`, `soundcraft/control.sh`). Unreal's
     is the desktop its editor runs beside, without the editor
     (`unreal_desktop`); `unreal_image` is the same desktop with the editor.
     """

@@ -526,8 +526,8 @@
     {
       "id": "soundcraft",
       "name": "SoundCraft",
-      "version": "",
-      "status": "soon",
+      "version": "0.20",
+      "status": "available",
       "tagline": "A digital audio workstation for songs, scores, and podcasts.",
       "accent": "#2fd08a",
       "disciplines": [
