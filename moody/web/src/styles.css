@@ -362,6 +362,20 @@
     color: var(--color-fg);
   }
 
+  /*
+   * The pixel eyes that say what an agent is doing (`lib/moodyEyes.ts`): three CSS pixels per cell
+   * of their 11 by 8 grid, so every cell is whole device pixels at any ratio. Their color is the
+   * text color around them.
+   */
+  .moody-eyes {
+    display: inline-block;
+    width: 33px;
+    height: 24px;
+    flex: none;
+    vertical-align: middle;
+    pointer-events: none;
+  }
+
   /* A status LED: a lit pixel. A live one breathes. */
   .dot {
     position: relative;
