@@ -6,7 +6,8 @@
 
 /**
  * The open project: its header, conversation, and composer in the center, and in the right column
- * the Screen over the Environment, Plan, and Library panels.
+ * the Screen over the Environment (engines, repositories, and what the agent works with), Plan,
+ * and Library panels.
  *
  * It renders three regions of the studio's grid (`studio.css`) and is keyed by the project, so
  * opening another project starts its data afresh. Each region knows how to lead to the others: a
@@ -25,11 +26,12 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Layers, ListChecks, PanelRightClose, PanelRightOpen, Plus, Server } from 'lucide-react';
-import { isActive, type ControlPlane, type Project, type Session } from '../lib/api';
+import { ALWAYS, isActive, type ControlPlane, type Project, type Session } from '../lib/api';
 import { AUTO_REGION } from '../lib/catalog';
 import { isBoolean, isRecord, type Guard } from '../lib/narrow';
 import { Composer } from './Composer';
 import { Conversation } from './Conversation';
+import { AgentEnvironment } from './EnvironmentAgent';
 import { EngineSection, GitHubSection, type EpicReturn, type GitHubReturn } from './EnvironmentPanel';
 import { GitHubMark } from './Menu';
 import { usePreference } from './hooks';
@@ -413,6 +415,16 @@ export function Workspace(props: WorkspaceProps) {
                   projects.accept(await connected(client).unlinkRepo(project.id));
                 }}
               />
+              <AgentEnvironment
+                environment={data.environment}
+                status={data.environmentStatus}
+                permissions={project.permissions ?? NO_PERMISSIONS}
+                onRevoke={async (tool) => {
+                  projects.accept(
+                    await connected(client).updateProject(project.id, { permissions: withoutTool(project, tool) }),
+                  );
+                }}
+              />
             </div>
           </Panel>
         </div>
@@ -456,6 +468,24 @@ export function Workspace(props: WorkspaceProps) {
         </div>
       </aside>
     </>
+  );
+}
+
+/** The kept answers of a project that has none. */
+const NO_PERMISSIONS: Readonly<Record<string, string>> = {};
+
+/**
+ * The tools a project's agent may still run without asking once one is taken back.
+ *
+ * @param project The project.
+ * @param tool The tool to ask about again.
+ * @returns Every other tool the person always allows.
+ */
+function withoutTool(project: Project, tool: string): Record<string, typeof ALWAYS> {
+  return Object.fromEntries(
+    Object.entries(project.permissions ?? {}).flatMap(([name, answer]): [string, typeof ALWAYS][] =>
+      name !== tool && answer === ALWAYS ? [[name, ALWAYS]] : [],
+    ),
   );
 }
 

@@ -5,10 +5,16 @@
  */
 
 /**
- * The Environment panel: the project's engines, and its GitHub repository.
+ * The Environment panel: the project's engines, and its repositories. What the agent itself
+ * works with (connectors, subagents, skills, and the tools it may run without asking) follows
+ * them, from `EnvironmentAgent.tsx`.
  *
  * Engines are catalog apps running as sessions of the project. Each shows its state, its clock
- * while it runs, and the controls that put it on the screen or stop it. The start form offers the
+ * while it runs, and the controls that put it on the screen or stop it. One that is not up yet
+ * reads as work under way, which is lavender here as everywhere: its card is edged in it, a bar
+ * runs under its name, and its line counts the time since it was asked for ("Waiting for a
+ * machine", then "Starting"), so nobody mistakes a machine being built for one that is ready,
+ * whose light is lime. The start form offers the
  * discipline's engines first, then every other app; only an available app, a team one, which the
  * control plane admits for the team's accounts alone, or one with a part on the person's own
  * license can be started, and the rest show their status. A tier the control plane does not list
@@ -28,8 +34,11 @@
  * when the person asks to look again, never on a timer: reading the machine counts as use of it,
  * and a page left open must not keep an engine from shutting down once it is idle.
  *
- * GitHub is the person's own account, connected once through the control plane's GitHub App and
- * then linked per project to a repository of the app's installations they reach. A repository the
+ * Repositories are a list: the ones the project is linked to, each with its branch where one is
+ * set and the controls that open or unlink it. A project links one today, and the list holds as
+ * many as it comes to have. GitHub is the person's own account, connected once through the control
+ * plane's GitHub App and then linked per project to a repository of the app's installations they
+ * reach. A repository the
  * list lacks is one the app is not installed on: "Don't see your repository?" opens the app's
  * installation page, where the person installs it, or asks their organization's owners to. The app
  * makes no repositories, so a new one is made on GitHub's own page and then linked. The block says
@@ -244,13 +253,15 @@ interface EngineRowProps {
  */
 function EngineRow({ engine, onScreen, onShow, onStop, children }: EngineRowProps) {
   const running = engine.status === 'running';
-  const now = useNow(running);
+  const now = useNow(true);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const app = findApp(engine.app);
   const tier = findTier(engine.tier);
   const started = timestamp(engine.started_at);
+  const asked = timestamp(engine.created_at);
+  const waited = asked === null ? '' : ` · ${clock(now - asked)}`;
 
   /** Stops the engine. */
   async function stop(): Promise<void> {
@@ -268,11 +279,9 @@ function EngineRow({ engine, onScreen, onShow, onStop, children }: EngineRowProp
 
   const state =
     engine.status === 'queued'
-      ? engine.queue_position === null
-        ? 'Queued'
-        : `Queued · #${engine.queue_position}`
+      ? `Waiting for a machine${engine.queue_position === null ? '' : ` · #${engine.queue_position} in line`}${waited}`
       : engine.status === 'starting'
-        ? 'Starting'
+        ? `Starting${waited}`
         : started === null
           ? 'Running'
           : `Running · ${clock(now - started)}`;
@@ -280,9 +289,10 @@ function EngineRow({ engine, onScreen, onShow, onStop, children }: EngineRowProp
     <li
       className={cx(
         'rounded-xl border bg-white/[0.025] p-2.5 transition-colors',
-        onScreen ? 'border-line-strong' : 'border-line',
+        !running ? 'border-[var(--ai-line)]' : onScreen ? 'border-line-strong' : 'border-line',
       )}
       style={{ '--accent': app?.accent }}
+      aria-busy={!running}
     >
       <div className="flex items-center gap-2.5">
         <button
@@ -300,19 +310,9 @@ function EngineRow({ engine, onScreen, onShow, onStop, children }: EngineRowProp
           <span className="min-w-0">
             <span className="block truncate text-sm font-medium">{app?.name ?? engine.app}</span>
             <span className="flex items-center gap-1.5 text-xs text-muted">
-              <span
-                className={cx(
-                  'dot',
-                  engine.status === 'running'
-                    ? 'dot-live'
-                    : engine.status === 'starting'
-                      ? 'dot-busy dot-live'
-                      : 'dot-warn dot-live',
-                )}
-                aria-hidden="true"
-              />
-              <span className="tabular-nums">{state}</span>
-              {tier === undefined ? null : <span className="text-faint">· {tier.name}</span>}
+              <span className={cx('dot dot-live', running ? '' : 'dot-busy')} aria-hidden="true" />
+              <span className={cx('truncate tabular-nums', running ? '' : 'text-lavender')}>{state}</span>
+              {tier === undefined ? null : <span className="flex-none text-faint">· {tier.name}</span>}
             </span>
           </span>
         </button>
@@ -354,6 +354,16 @@ function EngineRow({ engine, onScreen, onShow, onStop, children }: EngineRowProp
           </button>
         )}
       </div>
+      {running ? null : (
+        <div className="mt-2.5">
+          <div className="progress progress-busy" role="progressbar" aria-label={`${app?.name ?? engine.app} is starting`} />
+          <p className="mt-1.5 text-[0.6875rem] text-faint">
+            {engine.status === 'queued'
+              ? 'A machine is being found for it. Nothing is billed until it runs.'
+              : 'Its machine is being built: usually about a minute. Nothing is billed until it runs.'}
+          </p>
+        </div>
+      )}
       {error === null ? null : (
         <div className="mt-2">
           <ErrorNotice error={error} />
@@ -904,15 +914,19 @@ interface GitHubSectionProps {
 }
 
 /**
- * Renders GitHub: connecting, the account, and the project's repository.
+ * Renders the project's repositories as a list, over GitHub's own block: connecting, the account,
+ * and linking a repository where none is.
  *
  * @param props The component's props.
- * @returns The GitHub block.
+ * @returns The repositories block.
  */
 export function GitHubSection({ project, github, health, returned, onLink, onUnlink }: GitHubSectionProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const status = github.status;
+  // A project links one repository today; the list below holds as many as it comes to have.
+  const repositories =
+    project.github_repo === null ? [] : [{ repo: project.github_repo, branch: project.github_branch ?? null }];
 
   /**
    * Runs an action, showing its progress and what it failed with.
@@ -1002,7 +1016,7 @@ export function GitHubSection({ project, github, health, returned, onLink, onUnl
             ]}
           />
         </div>
-        {project.github_repo === null ? (
+        {repositories.length === 0 ? (
           <RepoPicker
             project={project}
             loadRepos={github.repos}
@@ -1010,40 +1024,7 @@ export function GitHubSection({ project, github, health, returned, onLink, onUnl
             onLink={(link) => run(() => onLink(link))}
             onInstall={() => run(() => github.install())}
           />
-        ) : (
-          <div className="flex items-center gap-2 rounded-xl border border-line bg-white/[0.025] py-2 pr-1.5 pl-3">
-            <GitHubMark className="size-3.5 flex-none text-muted" />
-            <a
-              className="min-w-0 flex-1 truncate text-sm font-medium hover:underline"
-              href={`https://github.com/${project.github_repo}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {project.github_repo}
-            </a>
-            <a
-              className="icon-btn icon-btn-sm"
-              href={`https://github.com/${project.github_repo}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={`Open ${project.github_repo} on GitHub`}
-            >
-              <ExternalLink aria-hidden="true" />
-            </a>
-            <button
-              type="button"
-              className="icon-btn icon-btn-sm"
-              aria-label="Unlink the repository"
-              title="Unlink"
-              disabled={busy}
-              onClick={() => {
-                void run(onUnlink);
-              }}
-            >
-              <Unlink aria-hidden="true" />
-            </button>
-          </div>
-        )}
+        ) : null}
       </div>
     );
   }
@@ -1052,8 +1033,54 @@ export function GitHubSection({ project, github, health, returned, onLink, onUnl
     <div>
       <h3 className="section-label flex items-center gap-1.5">
         <GitHubMark className="size-3" />
-        GitHub
+        Repositories
+        {repositories.length === 0 ? null : (
+          <span className="font-normal tracking-normal tabular-nums">{repositories.length}</span>
+        )}
       </h3>
+      {repositories.length === 0 ? null : (
+        <ul className="mt-2 grid grid-cols-1 gap-1.5" aria-label="Linked repositories">
+          {repositories.map((repository) => (
+            <li key={repository.repo} className="env-row">
+              <span className="icon-tile size-8 rounded-lg">
+                <FolderGit2 className="size-3.5" aria-hidden="true" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <a
+                  className="block truncate text-sm font-medium hover:underline"
+                  href={`https://github.com/${repository.repo}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {repository.repo}
+                </a>
+                <span className="block truncate text-xs text-muted">{repository.branch ?? 'Default branch'}</span>
+              </span>
+              <a
+                className="icon-btn icon-btn-sm"
+                href={`https://github.com/${repository.repo}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Open ${repository.repo} on GitHub`}
+              >
+                <ExternalLink aria-hidden="true" />
+              </a>
+              <button
+                type="button"
+                className="icon-btn icon-btn-sm"
+                aria-label={`Unlink ${repository.repo}`}
+                title="Unlink"
+                disabled={busy}
+                onClick={() => {
+                  void run(onUnlink);
+                }}
+              >
+                <Unlink aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="mt-2">
         {returned === 'connected' && status?.connected === true ? (
           <div className="mb-2.5">

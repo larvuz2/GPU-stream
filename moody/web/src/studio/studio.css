@@ -431,6 +431,21 @@
     background-position: right 0.6rem center;
   }
 
+  /* A row of a list in the Environment panel: a repository, a connector, a subagent, a permission. */
+  .env-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.4rem 0.5rem 0.4rem 0.4rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.75rem;
+    background: rgb(255 255 255 / 0.025);
+  }
+
+  .env-row[data-state='off'] {
+    opacity: 0.65;
+  }
+
   /* The panels of the right column. */
   .panel + .panel {
     border-top: 1px solid var(--studio-line);

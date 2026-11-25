@@ -1124,6 +1124,11 @@
     animation: slide 1.6s steps(12) infinite;
   }
 
+  /* The same bar for work the intelligence or a machine has under way, which is lavender. */
+  .progress-busy::after {
+    background: var(--color-lavender);
+  }
+
   .spinner {
     width: 1rem;
     height: 1rem;
