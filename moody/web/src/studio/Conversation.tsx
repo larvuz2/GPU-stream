@@ -489,8 +489,9 @@ function AskCard({ question, options, answer, live, onChoose }: AskCardProps) {
 
   const answered = answer !== null;
   return (
-    <div className="glass rounded-2xl p-4">
-      <p className="font-medium text-fg">{question}</p>
+    <div className="ai-card rounded-2xl p-4">
+      <p className="ai-label">Moody asks</p>
+      <p className="mt-2 font-medium text-fg">{question}</p>
       <ul className="mt-3 grid grid-cols-1 gap-2">
         {options.map((option, index) => {
           const chosen = answered && answer.trim().toLowerCase() === option.trim().toLowerCase();

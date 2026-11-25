@@ -564,8 +564,9 @@
   }
 
   .segment[aria-pressed='true'] {
-    background: #fff;
-    color: #000;
+    border-color: var(--color-lime);
+    background: var(--selection-bg);
+    color: var(--color-fg);
   }
 
   /* The layer over the small stream that turns a click into focus mode. */
@@ -575,7 +576,7 @@
     display: grid;
     place-items: center;
     background: rgb(8 8 8 / 0);
-    color: #fff;
+    color: var(--color-fg);
     transition: background-color 0.2s ease;
   }
 
@@ -626,10 +627,11 @@
     width: 1.75rem;
     height: 1.75rem;
     flex: none;
-    border: 1px solid var(--color-line-strong);
+    border: 1px solid var(--ai-line);
     border-radius: 0.4rem;
-    background: var(--color-ink-700);
-    color: var(--color-fg);
+    background: var(--ai-bg);
+    /* The mascot's face stays pure white; lavender is the frame that says intelligence. */
+    color: var(--color-white);
   }
 
   /* The agent's prose: the Markdown subset at reading size. */
@@ -802,7 +804,7 @@
   }
 
   .ask-option:not(:disabled):hover {
-    border-color: #fff;
+    border-color: var(--color-lime);
     background: var(--color-ink-700);
   }
 
@@ -811,7 +813,7 @@
   }
 
   .ask-option[data-chosen='true'] {
-    border-color: #fff;
+    border-color: var(--color-lime);
     background: var(--color-ink-700);
     color: var(--color-fg);
   }
@@ -847,7 +849,7 @@
   .typing-dots i {
     width: 0.35rem;
     height: 0.35rem;
-    background: var(--color-fg);
+    background: var(--color-lavender);
     animation: typing 1.2s ease-in-out infinite;
   }
 
@@ -870,7 +872,7 @@
   }
 
   .composer:focus-within {
-    border-color: #fff;
+    border-color: var(--color-lime);
     box-shadow: 4px 4px 0 var(--color-line-strong);
   }
 
@@ -901,8 +903,8 @@
     width: 2.1rem;
     height: 2.1rem;
     border-radius: 0.7rem;
-    color: #000;
-    background: #fff;
+    color: var(--color-ink-950);
+    background: var(--color-lime);
     transition:
       filter 0.15s ease,
       opacity 0.15s ease;
@@ -984,13 +986,13 @@
 
   .chip[aria-pressed='true'],
   .chip:has(input:checked) {
-    border-color: #fff;
-    background: #fff;
-    color: #000;
+    border-color: var(--color-lime);
+    background: var(--selection-bg);
+    color: var(--color-fg);
   }
 
   .chip:has(input:focus-visible) {
-    outline: 2px solid #fff;
+    outline: 2px solid var(--color-lime);
     outline-offset: 2px;
   }
 

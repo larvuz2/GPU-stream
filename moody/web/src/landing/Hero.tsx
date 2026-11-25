@@ -110,7 +110,7 @@ function Display() {
       />
       <figcaption className="stage-bar min-h-12 text-[0.8125rem]" aria-hidden="true">
         <span className="text-faint">Make</span>
-        <span className="cursor truncate text-fg">{CAPTIONS[shape]}</span>
+        <span className="cursor truncate text-lavender">{CAPTIONS[shape]}</span>
       </figcaption>
     </figure>
   );

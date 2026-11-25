@@ -73,7 +73,7 @@ export function Nav({ signedIn }: NavProps) {
               Sign in
             </a>
           )}
-          <a href={CREATE_HASH} className="btn btn-primary btn-sm" onClick={closeMenu}>
+          <a href={CREATE_HASH} className="btn btn-ghost btn-sm" onClick={closeMenu}>
             Start creating
             <ArrowRight className="hidden size-3.5 sm:block" aria-hidden="true" />
           </a>

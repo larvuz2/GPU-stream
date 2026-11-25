@@ -42,7 +42,7 @@ export function BrandMark({ className }: BrandMarkProps) {
       viewBox={`${EYES.left} ${EYES.top} ${EYES.cols} ${EYES.rows}`}
       fill="currentColor"
       shapeRendering="crispEdges"
-      className={className}
+      className={cx('text-white', className)}
       aria-hidden="true"
     >
       {EYE_CELLS.map(([x, y]) => (
