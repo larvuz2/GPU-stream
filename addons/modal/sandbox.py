@@ -89,12 +89,16 @@ CADCRAFT_VERSION = "0.20.1"
 CADCRAFT_SHA256 = "8e6ad1f487d6cd44dbcb73cd88ef1efb52252a2071094f2c23a468a641a06faa"
 VECTORCRAFT_VERSION = "0.24.1"
 VECTORCRAFT_SHA256 = "ae6733083d2819efe980d76d41d1908d40fe487bb9a5e7679292b53fd8dc49d7"
+# LightCraft's, from its release's SHA256SUMS.txt as theirs are
+LIGHTCRAFT_VERSION = "0.21.1"
+LIGHTCRAFT_SHA256 = "c91ef47bec44995d99ce58e6c748af9fa6ab1ff1c11de9e290e0b8231176dad1"
 CRAFT_RELEASES = {
     "filmcraft": (FILMCRAFT_VERSION, FILMCRAFT_SHA256),
     "photocraft": (PHOTOCRAFT_VERSION, PHOTOCRAFT_SHA256),
     "soundcraft": (SOUNDCRAFT_VERSION, SOUNDCRAFT_SHA256),
     "cadcraft": (CADCRAFT_VERSION, CADCRAFT_SHA256),
     "vectorcraft": (VECTORCRAFT_VERSION, VECTORCRAFT_SHA256),
+    "lightcraft": (LIGHTCRAFT_VERSION, LIGHTCRAFT_SHA256),
 }
 # The Unreal session's GitHub client: Desktop Plus, a fork of GitHub Desktop kept current with it
 # that publishes Linux packages; its Debian package and the SHA-256 its GitHub release lists for it
@@ -131,6 +135,9 @@ CADCRAFT_CONTROL_PORT = 9878
 # session has brought the project's documents back (vectorcraft/resume.sh)
 VECTORCRAFT_CONTROL_PORT = 7979
 VECTORCRAFT_READY_FILE = "/tmp/selkies-modal/vectorcraft-ready"
+
+# LightCraft's, loopback only as theirs are, and the port its own documentation uses
+LIGHTCRAFT_CONTROL_PORT = 7980
 
 # What the session is, whoever starts it. Modal terminates TLS and its connect
 # token guards the address, so Selkies serves plain HTTP with no login of its
@@ -223,6 +230,17 @@ APP_ENV = {
         "VECTORCRAFT_CONTROL_PORT": str(VECTORCRAFT_CONTROL_PORT),
         "SELKIES_MODAL_VECTORCRAFT_READY": VECTORCRAFT_READY_FILE,
     },
+    "lightcraft": {
+        "SELKIES_MODAL_APP": "lightcraft",
+        # The control channel, which takes no token: loopback is what guards it (lightcraft/autostart)
+        "LIGHTCRAFT_CONTROL_PORT": str(LIGHTCRAFT_CONTROL_PORT),
+        # As FilmCraft: the window draws through Mesa's Vulkan in software on every machine, and
+        # Vulkan is what reaches a GPU where there is one, for the develop pipeline. Without one
+        # LightCraft develops on the CPU, having found only a software adapter. OpenGL is left
+        # out: its window was no quicker than the spread between runs on the machine without a
+        # GPU, and on a GPU machine LightCraft's kernels fail to build on NVIDIA's OpenGL.
+        "WGPU_BACKEND": "vulkan",
+    },
 }
 APPS = tuple(APP_ENV)
 
@@ -287,6 +305,10 @@ def session_image(app: str = "blender") -> modal.Image:
         )
         if app == "filmcraft":
             image = image.add_local_file(HERE / "filmcraft" / "control.sh", "/usr/local/bin/selkies-modal-filmcraft", copy=True)
+        if app == "lightcraft":
+            image = image.add_local_file(
+                HERE / "lightcraft" / "control.sh", "/usr/local/bin/selkies-modal-lightcraft", copy=True
+            ).add_local_file(HERE / "lightcraft" / "histogram.py", "/usr/local/bin/selkies-modal-histogram", copy=True)
         if app == "cadcraft":
             image = image.add_local_file(HERE / "cadcraft" / "control.sh", "/usr/local/bin/selkies-modal-cadcraft", copy=True)
             image = image.add_local_file(HERE / "cadcraft" / "keep.sh", "/usr/local/bin/selkies-modal-cadcraft-keep", copy=True)
@@ -946,6 +968,54 @@ def vectorcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any]
     return result if isinstance(result, dict) else {"result": result}
 
 
+def lightcraft_requests(sandbox: modal.Sandbox, requests: str, wait_seconds: int) -> modal.container_process.ContainerProcess:
+    """Hand JSON requests, one per line, to the session's LightCraft and return the process printing its replies.
+
+    As `filmcraft_requests`, through `lightcraft/control.sh`: from inside the
+    Sandbox, the only place the control channel listens, as a command of the
+    session, so it counts as use while it waits.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-lightcraft", str(wait_seconds), bufsize=1)
+    try:
+        process.stdin.write(requests)
+        process.stdin.write_eof()
+        process.stdin.drain()
+    except modal.exception.Error:
+        # The command ended before it read anything; its status and output say why
+        pass
+    return process
+
+
+def lightcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
+    """Send one request on the session's LightCraft control channel and return its result.
+
+    `method` and `params` are those of LightCraft's control protocol:
+    `engine.execute` with `{"command", "params"}` runs any of its commands, and
+    the `ui.*` methods read and drive its window. `timeout` is how many seconds
+    to wait for LightCraft to listen and then for the reply. LightCraft gives up
+    on a reply itself after 60 s, so a long export is started with
+    `background: true` and followed with `ui.inspect`'s `export`.
+
+    The result is the reply's `result`, an object for most methods; a result
+    that is not one, such as the list `develop.controls` returns or the `null`
+    of a command with nothing to say, comes back as `{"result": ...}`.
+
+    Raises:
+        RuntimeError: LightCraft refused the request, with its message, or did not answer within `timeout`.
+    """
+    request = json.dumps({"id": 1, "method": method, "params": params or {}})
+    process = lightcraft_requests(sandbox, request + "\n", timeout)
+    output = process.stdout.read()
+    status = process.wait()
+    if not output.strip():
+        raise RuntimeError(f"LightCraft did not answer: {process.stderr.read().strip() or f'status {status}'}")
+    reply = json.loads(output.splitlines()[-1])
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("error") or output.strip())
+    result = reply.get("result")
+    return result if isinstance(result, dict) else {"result": result}
+
+
 def screenshot(sandbox: modal.Sandbox) -> bytes:
     """The session's screen as a JPEG no wider than 1280 pixels, small enough to hand to a model.
 
@@ -1176,6 +1246,20 @@ def vectorcraft(args: argparse.Namespace) -> int:
     return status
 
 
+def lightcraft(args: argparse.Namespace) -> int:
+    """Send the JSON requests on standard input, one per line, to the session's LightCraft and print each reply."""
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    process = lightcraft_requests(sandbox, sys.stdin.read(), args.wait)
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    status = process.wait()
+    sys.stderr.write(process.stderr.read())
+    return status
+
+
 def down(args: argparse.Namespace) -> int:
     """Stop a session, which ends its billing; its workspace stays."""
     sandbox = find_session(args.name)
@@ -1346,6 +1430,12 @@ def parser() -> argparse.ArgumentParser:
         command("vectorcraft", vectorcraft, "Send the JSON requests on standard input to a session's VectorCraft control channel.")
     )
     vector.add_argument("--wait", type=int, default=60, help="seconds to wait for VectorCraft to answer (default: %(default)s)")
+    develop = named(
+        command("lightcraft", lightcraft, "Send the JSON requests on standard input, one per line, to a session's LightCraft.")
+    )
+    develop.add_argument(
+        "--wait", type=int, default=60, help="seconds to wait for LightCraft to listen and for each reply (default: %(default)s)"
+    )
     named(command("down", down, "Stop a session."))
     drive = named(
         command("drive-login", drive_login, "Connect Google Drive by a sign-in in a session's Firefox, kept as a Modal Secret.")

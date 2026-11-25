@@ -35,6 +35,7 @@ writes after you approve it in a browser.
 | `soundcraft` | Sends the JSON requests on standard input, one per line, to a SoundCraft session's control channel and prints each reply |
 | `cadcraft` | Sends the JSON requests on standard input, one per line, to a CADCraft session's control channel and prints each reply |
 | `vectorcraft` | Sends the JSON requests on standard input, one per line, to a VectorCraft session's control channel and prints each reply |
+| `lightcraft` | Sends the JSON requests on standard input, one per line, to a LightCraft session's control channel and prints each reply |
 | `ls` | Lists the running sessions |
 | `down` | Stops a session, with the scene Blender has open kept for the next one, and CADCraft's unsaved drawings saved |
 | `drive-login` | Opens Google's sign-in on a Nuke session's screen and keeps the Drive access it grants as a Modal Secret, which `up --secret` hands to a session as rclone's `gdrive:` |
@@ -405,6 +406,51 @@ addons/modal/selkies-modal vectorcraft --name mark <<'EOF'
 {"method": "engine.execute", "params": {"command": "file.saveAs", "params": {"path": "mark.vectorcraft"}}}
 {"method": "engine.execute", "params": {"command": "document.export", "params": {"path": "mark.svg", "artboard": 0}}}
 {"method": "engine.execute", "params": {"command": "document.export", "params": {"path": "/tmp/mark.svg"}}}
+## LightCraft
+
+`--app lightcraft` starts a session for
+[LightCraft](https://github.com/storytold/lightcraft), the same team's
+non-destructive photo developer, installed the same way from its release
+(`LIGHTCRAFT_VERSION`, `LIGHTCRAFT_SHA256`) and opened on the same project
+folder, so it develops the photographs a PhotoCraft session retouches and a
+FilmCraft session cuts in:
+
+```bash
+addons/modal/selkies-modal up --app lightcraft --name lab --gpu none --env SELKIES_MODAL_PROJECT=projects/shoot
+```
+
+LightCraft never changes a photograph: an edit is a record in its library, and
+the library is in the project folder, so a person's work is there in the next
+session with nothing to save.
+
+- `lightcraft-library` holds the catalog (every photo's develop settings,
+  history, versions, masks, ratings, and albums), the user's develop presets
+  and saved export presets, and the preview cache. LightCraft appends each
+  change to the catalog's journal and syncs it before it answers, so a session
+  that ends by the idle timeout or `down` loses nothing. A new library starts
+  empty, without LightCraft's demo photos.
+- `.lightcraft` is its settings folder: the interface's state, the lens
+  database once it is downloaded (LightCraft offers it at a project's first
+  start), and the logs.
+- Photos are imported in place, from wherever they are in the project folder,
+  and stay there for the project's other engines.
+
+One LightCraft session per project folder at a time: a library's lock file
+does not reach from one Sandbox to another, so a second session opens the same
+library and the two overwrite each other's catalog.
+
+### Its command channel
+
+Every menu item, slider, and brush stroke in LightCraft is one of its 600-odd
+commands, which its control channel runs as the window does
+([LightCraft's protocol](https://github.com/storytold/lightcraft/blob/main/docs/control-protocol.md)).
+`lightcraft` sends JSON requests, one per line, and prints each reply:
+
+```bash
+addons/modal/selkies-modal lightcraft --name lab <<'EOF'
+{"method": "engine.execute", "params": {"command": "library.import", "params": {"paths": ["/home/ubuntu/workspace/projects/shoot/photos"], "mode": "add"}}}
+{"method": "engine.execute", "params": {"command": "develop.set", "params": {"values": {"light.exposure": 0.15, "light.highlights": -55}, "ids": [1]}}}
+{"method": "engine.execute", "params": {"command": "app.export", "params": {"ids": [1], "dir": "/home/ubuntu/workspace/projects/shoot/exports/web", "format": "jpeg", "longEdge": 2048, "colorSpace": "srgb"}}}
 EOF
 ```
 
@@ -453,6 +499,60 @@ most, 4 GiB), on a three-artboard identity document of 99 objects:
 | The canvas redrawn while an object is dragged (62 pointer events) | 2.6 ms a frame |
 | The whole document at 2880x1800 (`vectorcraft-cli bench`) | 14 ms a frame |
 | Export: SVG, a three-page PDF, a 2000 px PNG, seven icon files | 0.3 s, 0.3 s, 0.5 s, 0.5 s |
+{"id":null,"ok":true,"result":{"duplicates":[],"failed":[],"imported":[1,2,3,4,5,6,7,8,9],"scanned":9,"sidecars":5}}
+{"id":null,"ok":true,"result":null}
+{"id":null,"ok":true,"result":{"files":[{"bytes":1455492,"height":1363,"path":"...","sidecars":[],"width":2048}]}}
+```
+
+A refused request comes back as `{"ok": false, "error": "..."}` with
+LightCraft's reason, and the status is then 1. From Python,
+`lightcraft_call(sandbox, method, params, timeout)` sends one request and
+returns its result, raising `RuntimeError` with LightCraft's message.
+`engine.commands` lists every command with its parameters. LightCraft answers
+a request within 60 s or gives up on it, so a long export is started with
+`background: true` and followed in `ui.inspect`'s `export`.
+
+LightCraft's channel takes no token, unlike FilmCraft's and PhotoCraft's: it
+listens on the Sandbox's loopback (port 7980), which nothing outside the
+Sandbox reaches, and any process inside it can send it commands. LightCraft
+listens a few seconds before its window draws its first frame and refuses what
+arrives in between; the client sends such a request again until `--wait` is
+over (60 s unless given).
+
+The control channel has no command that returns a histogram, so the image
+carries a reader for rendered files: `selkies-modal-histogram <picture>
+[--region x0,y0,x1,y1]` prints a JPEG's, PNG's, or TIFF's size, pixel format,
+embedded color profile, tonal percentiles, clipping, and channel means as
+JSON, which is how an agent measures an edit (`ui.render` writes the picture)
+and checks an export.
+
+### Graphics and speed
+
+A Sandbox has no `/dev/dri`, so LightCraft's window draws through Mesa's Vulkan
+in software on every machine (`WGPU_BACKEND=vulkan`, as FilmCraft's does).
+Without a GPU LightCraft finds only that software adapter and develops on the
+CPU, which is its own choice ("the CPU pipeline is faster"); with one, its
+develop pipeline runs on the GPU through Vulkan and the pictures come back to
+the software window as pixels. OpenGL was tried for the window
+(`LIGHTCRAFT_GPU_BACKEND=gl`): on the machine without a GPU its frames were no
+quicker than the spread between runs, and on a T4 LightCraft's kernels fail to
+build on NVIDIA's OpenGL. Measured from inside the Sandbox, on machines shaped
+as a service starts them (the CPU request and twice it as the limit), with
+raws of 24 to 33 megapixels:
+
+| | 2 CPU, 4 GiB, no GPU | 4 CPU, 16 GiB, T4 |
+| --- | --- | --- |
+| `up` until the first request is answered | 6 s | not measured |
+| A request that needs a frame (`ui.inspect`), median | 38 to 43 ms | 31 ms |
+| A slider change until the finished picture in the window, median | 330 to 380 ms | 170 to 190 ms |
+| Stepping to another photo until its finished picture, median | 1.3 to 1.4 s | 0.6 to 0.7 s |
+| Export of one 33-megapixel raw: JPEG at 2048 px, JPEG at full size, 16-bit TIFF at full size | 2.3 to 2.6 s, 5.0 to 5.2 s, 7.0 to 7.3 s | 2.4 s, 3.0 s, 7.5 s |
+| Export of 9 photos to JPEG at 2048 px | 11.6 to 12.9 s | 11.2 to 11.5 s |
+
+The machine without a GPU serves developing and exporting; a T4 with its four
+cores makes the sliders about twice as quick and all but the full-size JPEG
+export no faster. The same four cores on a machine without a GPU were quicker
+than either (a slider in 115 ms, the batch in 4.8 s).
 
 ## Unreal
 
