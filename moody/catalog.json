@@ -2,6 +2,48 @@
   "brand": "Moody",
   "credit_usd": 0.01,
   "signup_credits": 60,
+  "activities": [
+    {
+      "id": "thinking",
+      "label": "Thinking"
+    },
+    {
+      "id": "searching",
+      "label": "Searching"
+    },
+    {
+      "id": "processing",
+      "label": "Processing"
+    },
+    {
+      "id": "analyzing",
+      "label": "Analyzing"
+    },
+    {
+      "id": "creating",
+      "label": "Creating"
+    },
+    {
+      "id": "curious",
+      "label": "Exploring"
+    },
+    {
+      "id": "confused",
+      "label": "Resolving"
+    },
+    {
+      "id": "focused",
+      "label": "Reasoning"
+    },
+    {
+      "id": "surprised",
+      "label": "Discovering"
+    },
+    {
+      "id": "satisfied",
+      "label": "Satisfied"
+    }
+  ],
   "disciplines": [
     {
       "id": "media",

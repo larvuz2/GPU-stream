@@ -263,6 +263,116 @@ is the most capable Claude model by default (`MOODY_AGENT_MODEL`); it needs
 `moody`. Library media is stored in Supabase Storage (bucket `library`,
 private); `url` fields are signed and expire.
 
+## Contract: the agent on Anthropic's loop
+
+The agent's loop is the Claude Agent SDK (`claude-agent-sdk`), the loop of
+Claude Code as a library: it decides the next step, runs it, checks the
+result, and goes on, with subagents, skills loaded when they are needed, the
+conversation summarized as it grows, hooks, and approvals. Moody is everything
+around it and stays Moody's own: the tools, the engines, the skills and
+subagent definitions, the event log, storage, and the page. Other models reach
+a project as tools (fal's image and video models are the first), so a better
+model for one job is a tool added, never a loop replaced.
+
+- **Tools.** Moody's tools (`TOOLS` and `Agent.tool_<name>` in
+  `moody/control/agent.py`) are served to the loop in process, and the loop's
+  own file and shell tools are off: the agent reaches nothing of the machine
+  its turn runs on. Web search and web fetch are on. A tool's definition says
+  what it looks like while it runs (`activity`, one of `catalog.json`'s
+  `activities`), whether it only reads (so the loop may run several at once),
+  and whether the person approves it first (`approval`).
+- **Skills** are `moody/skills/<name>/SKILL.md`, as before, loaded by the loop
+  on demand: a skill's description is always in context, its body when the
+  work calls for it, a reference file when the body sends the agent to it.
+  Which skills a project offers is still the discipline's (`skills_for`).
+- **Subagents** are `moody/agents/<name>.md`: front matter and a system
+  prompt. The agent hands a subagent one job; it works in a context of its
+  own with the tools its definition lists, several at once where the jobs are
+  independent, and only its final report returns to the agent. The page shows
+  each one working.
+
+  ```text
+  ---
+  name: research                 the id, the same as the file's stem
+  title: Research agent          what the page calls it
+  description: When the agent should hand work to it, in a sentence or two.
+  disciplines: all               or a list of discipline ids, as for a skill
+  tools: web_search, web_fetch, library_list, library_upsert
+                                 Moody tool names; `engine_*` style prefixes allowed
+  skills: movie                  optional: skills it reads
+  model: inherit                 inherit (default), balanced, or light: tiers the deployment
+                                 maps to models (`MOODY_AGENT_MODEL`, `..._BALANCED`, `..._LIGHT`)
+  ---
+  The subagent's system prompt.
+  ```
+- **Approvals.** A tool whose definition says `approval: ask` (starting an
+  engine, generating video) waits for the person: the agent's turn writes an
+  `approval` event and goes on once the person answers, with "always" kept
+  for that tool in that project (`Project.permissions`) and revocable in the
+  Environment panel. Engines cost credits every minute, so none starts unless
+  the work needs it or the person asked: planning, writing, and generating
+  need no engine.
+- **Questions and interactive cards end the turn.** `ask_user` and a
+  `show_ui` that waits write their event and end the turn; the person's
+  answer or locked-in values start the next one, which resumes the same
+  session.
+- **Sessions.** A project's conversation is one SDK session
+  (`projects.agent_session`), its transcript stored in the database through
+  the SDK's session store, so a turn resumes on any machine, days later.
+- **Spending.** A turn has a budget (`MOODY_TURN_BUDGET_USD`) the loop
+  enforces, and ends with a `usage` event.
+
+Additions to the API:
+
+```text
+POST   /v1/projects/{pid}/messages         {text, ui?: {ui_id, value}} -> 202 {turn_id}: `ui` locks in an
+                                           interactive card; `value` is the card's state, JSON
+POST   /v1/projects/{pid}/approvals/{aid}  {decision: "once" | "always" | "deny"} -> {recorded}
+GET    /v1/projects/{pid}/environment      {connectors: [Connector], agents: [AgentInfo], skills: [SkillInfo]}
+PATCH  /v1/projects/{pid}                  also {permissions?: {tool: "always"}}: what the person no longer
+                                           wants to be asked about; a tool left out is asked again
+```
+
+```text
+Project      also {permissions: {tool: "always"}}
+Connector    {id, name, kind: "generation" | "repository" | "search" | "license" | "mcp",
+              state: "connected" | "available" | "off", detail}: a service the project's agent can
+              use, or could once the person connects it
+AgentInfo    {name, title, description}: a subagent this project's agent can hand work to
+SkillInfo    {name, description}
+Activity     one of catalog.json's `activities` ids: thinking, searching, processing, analyzing,
+              creating, curious, confused, focused, surprised, satisfied (the pixel eyes' expressions)
+```
+
+Additions to the events. Any event may carry `agent_id`: the subagent it
+belongs to, absent for the agent itself.
+
+```text
+user_message     {text, ui?: {ui_id, value}}
+text             {text, block?, partial?}   `block` names the block of the answer this is; a later
+                                            event with the same `block` replaces it, which is how an
+                                            answer appears while it is written (`partial: true`)
+thinking         {text, block?, partial?}   the model's reasoning, summarized; folded the same way
+tool_start       {call_id, tool, title, activity}
+agent            {agent_id, group, name, title, task, state: "working" | "completed" | "failed" |
+                 "stopped", activity, detail, seconds?, tokens?}
+                                            a subagent's card. Every `agent` event carries the whole
+                                            card; the latest for an `agent_id` is its state. `group`
+                                            is shared by the subagents one step started together,
+                                            `task` is the job in a line, `detail` what it is doing now
+approval         {approval_id, tool, title, detail}   the agent waits for the person
+approval_result  {approval_id, decision: "once" | "always" | "deny" | "expired"}
+ui               {ui_id, title, kind: "components" | "html", spec?, html?, height?, submit: string | null,
+                 waits, media: [{name, kind, url}]}
+                                            an interactive card. `spec` is a tree of the components
+                                            `moody/ui.json` defines; `html` is a document the page
+                                            runs in a sandboxed frame. `submit` is the lock-in
+                                            button's label, null for a card with nothing to send
+                                            back. `media` are the files the card shows, signed for
+                                            each reading of the log
+usage            {input_tokens, output_tokens, cost_usd, seconds, agents}   once per turn, before turn_end
+```
+
 ## What is done when
 
 1. FilmCraft engine on Modal, verified streaming and driven through its command
