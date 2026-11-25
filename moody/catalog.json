@@ -562,8 +562,8 @@
     {
       "id": "vectorcraft",
       "name": "VectorCraft",
-      "version": "",
-      "status": "soon",
+      "version": "0.24",
+      "status": "available",
       "tagline": "Vector art for logos, identities, and patterns.",
       "accent": "#ff7aa8",
       "disciplines": [

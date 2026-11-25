@@ -1,0 +1,41 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Run by the Selkies window manager once it is up, as the session's
+# application, installed as /etc/xdg/openbox/autostart, which both backends
+# read: VectorCraft, in the session's project folder (`craft/project.sh`), the
+# one every other engine of the same project opens in.
+#
+# VectorCraft starts in that folder, so the relative paths its commands take
+# (`file.saveAs {path: "logo.vectorcraft"}`, an export to `handoff/...`) land in
+# the project. Its data folder (VECTORCRAFT_CONFIG_DIR), which holds its
+# preferences, its logs, and the recovery copies of unsaved documents, is
+# `.vectorcraft` in the project folder rather than one for the whole workspace:
+# the recovery copies a start finds are all restored, and a folder shared by
+# every project would hand one project's documents to another. What the last
+# session left is brought back by `resume.sh`, which also keeps the recovery
+# copies current while the session runs; a folder with no document yet starts
+# on VectorCraft's welcome screen, since a document's size and color mode are
+# the first design decision, not a default to guess.
+#
+# The control channel listens on the Sandbox's loopback only, on
+# VECTORCRAFT_CONTROL_PORT, and may read and write the project folder alone
+# (the automation roots). VECTORCRAFT_CONTROL_TOKEN, which the launcher makes
+# for each session (sandbox.py), is in the environment for the release that
+# reads it; `control.sh` says what guards the channel until then.
+#
+# No graphics variable is set: VectorCraft rasterizes its canvas on the CPU and
+# composites the window with wgpu, and lists the adapters that can present into
+# the display itself, which in a Sandbox (no render node, with or without a
+# GPU) is Mesa's software Vulkan.
+folder="$(selkies-modal-project)" || exit 1
+mkdir -p "${folder}/.vectorcraft"
+cd "${folder}" || exit 1
+export VECTORCRAFT_CONFIG_DIR="${folder}/.vectorcraft"
+
+# Not ready until the helper has brought this VectorCraft's documents back
+rm -f "${SELKIES_MODAL_VECTORCRAFT_READY}"
+selkies-modal-vectorcraft-resume "$$" "${folder}" > /dev/null 2>&1 &
+exec vectorcraft --control "${VECTORCRAFT_CONTROL_PORT}" --automation-read-root "${folder}" --automation-write-root "${folder}"

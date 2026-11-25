@@ -87,11 +87,14 @@ SOUNDCRAFT_SHA256 = "a217c7f65bb55ef4d7417f1c204244d974f25d6b779477727c440800d82
 # CADCraft's Debian package, by the same rule
 CADCRAFT_VERSION = "0.20.1"
 CADCRAFT_SHA256 = "8e6ad1f487d6cd44dbcb73cd88ef1efb52252a2071094f2c23a468a641a06faa"
+VECTORCRAFT_VERSION = "0.24.1"
+VECTORCRAFT_SHA256 = "ae6733083d2819efe980d76d41d1908d40fe487bb9a5e7679292b53fd8dc49d7"
 CRAFT_RELEASES = {
     "filmcraft": (FILMCRAFT_VERSION, FILMCRAFT_SHA256),
     "photocraft": (PHOTOCRAFT_VERSION, PHOTOCRAFT_SHA256),
     "soundcraft": (SOUNDCRAFT_VERSION, SOUNDCRAFT_SHA256),
     "cadcraft": (CADCRAFT_VERSION, CADCRAFT_SHA256),
+    "vectorcraft": (VECTORCRAFT_VERSION, VECTORCRAFT_SHA256),
 }
 # The Unreal session's GitHub client: Desktop Plus, a fork of GitHub Desktop kept current with it
 # that publishes Linux packages; its Debian package and the SHA-256 its GitHub release lists for it
@@ -123,6 +126,11 @@ UNREAL_CLONE_STATUS = "/tmp/selkies-modal/unreal-clone.json"
 
 # CADCraft's, on loopback as well
 CADCRAFT_CONTROL_PORT = 9878
+
+# VectorCraft's control channel, on the Sandbox's loopback only as well, and the file that says the
+# session has brought the project's documents back (vectorcraft/resume.sh)
+VECTORCRAFT_CONTROL_PORT = 7979
+VECTORCRAFT_READY_FILE = "/tmp/selkies-modal/vectorcraft-ready"
 
 # What the session is, whoever starts it. Modal terminates TLS and its connect
 # token guards the address, so Selkies serves plain HTTP with no login of its
@@ -209,6 +217,12 @@ APP_ENV = {
         # with or without a GPU, and a drawing is 2D lines the CPU rasterizes at the display's rate
         "WGPU_BACKEND": "vulkan",
     },
+    "vectorcraft": {
+        "SELKIES_MODAL_APP": "vectorcraft",
+        # The control channel; the token a release with a sign-in takes is the session's own (start_session)
+        "VECTORCRAFT_CONTROL_PORT": str(VECTORCRAFT_CONTROL_PORT),
+        "SELKIES_MODAL_VECTORCRAFT_READY": VECTORCRAFT_READY_FILE,
+    },
 }
 APPS = tuple(APP_ENV)
 
@@ -276,6 +290,11 @@ def session_image(app: str = "blender") -> modal.Image:
         if app == "cadcraft":
             image = image.add_local_file(HERE / "cadcraft" / "control.sh", "/usr/local/bin/selkies-modal-cadcraft", copy=True)
             image = image.add_local_file(HERE / "cadcraft" / "keep.sh", "/usr/local/bin/selkies-modal-cadcraft-keep", copy=True)
+        if app == "vectorcraft":
+            # The client of its control channel, and what brings a project's documents back at start
+            image = image.add_local_file(
+                HERE / "vectorcraft" / "control.sh", "/usr/local/bin/selkies-modal-vectorcraft", copy=True
+            ).add_local_file(HERE / "vectorcraft" / "resume.sh", "/usr/local/bin/selkies-modal-vectorcraft-resume", copy=True)
         if app == "soundcraft":
             image = image.add_local_file(HERE / "soundcraft" / "control.sh", "/usr/local/bin/selkies-modal-soundcraft", copy=True)
     elif app == "nuke":
@@ -588,6 +607,7 @@ def start_session(
             "SELKIES_MODAL_SESSION_TOKEN": token_urlsafe(32),
             "FILMCRAFT_CONTROL_TOKEN": token_hex(32),
             "PHOTOCRAFT_CONTROL_TOKEN": token_hex(32),
+            "VECTORCRAFT_CONTROL_TOKEN": token_hex(32),
             "SELKIES_MODAL_TURN_SECRET": token_urlsafe(32),
         }
     )
@@ -873,6 +893,59 @@ def cadcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] | 
     return result if isinstance(result, dict) else {"result": result}
 
 
+def vectorcraft_requests(sandbox: modal.Sandbox, requests: str, wait_seconds: int) -> modal.container_process.ContainerProcess:
+    """Hand JSON requests, one per line, to the session's VectorCraft and return the process printing its replies.
+
+    The requests go from inside the Sandbox, the only place the control
+    channel listens and the session's token is: `vectorcraft/control.sh` signs
+    in on a connection of its own for each, where the release takes a sign-in,
+    and prints each reply on a line of its own. It runs as a command of the
+    session, so it counts as use while it waits.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-vectorcraft", str(wait_seconds), bufsize=1)
+    try:
+        process.stdin.write(requests)
+        process.stdin.write_eof()
+        process.stdin.drain()
+    except modal.exception.Error:
+        # The command ended before it read anything; its status and output say why
+        pass
+    return process
+
+
+def vectorcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
+    """Send one request on the session's VectorCraft control channel and return its result.
+
+    `method` and `params` are those of VectorCraft's control protocol:
+    `engine.execute` with `{"command", "params"}` runs any of its commands,
+    `document.inspect` reads the document, `app.open` opens a file, and the
+    `ui.*` methods read and drive its window. `timeout` is how many seconds to
+    wait for VectorCraft to listen, which it does a few seconds after its
+    window opens, and then for the reply. VectorCraft gives up on a reply
+    itself after 60 s. The paths a request names are read against the
+    session's project folder, the only folder the channel may read and write
+    (`vectorcraft/autostart`).
+
+    The result is the reply's `result`, an object for most methods; a result
+    that is not one, such as the null a command that returns nothing answers
+    with, comes back as `{"result": ...}`.
+
+    Raises:
+        RuntimeError: VectorCraft refused the request, with its message, or did not answer within `timeout`.
+    """
+    request = json.dumps({"id": 1, "method": method, "params": params or {}})
+    process = vectorcraft_requests(sandbox, request + "\n", timeout)
+    output = process.stdout.read()
+    status = process.wait()
+    if not output.strip():
+        raise RuntimeError(f"VectorCraft did not answer: {process.stderr.read().strip() or f'status {status}'}")
+    reply = json.loads(output.splitlines()[-1])
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("error") or output.strip())
+    result = reply.get("result")
+    return result if isinstance(result, dict) else {"result": result}
+
+
 def screenshot(sandbox: modal.Sandbox) -> bytes:
     """The session's screen as a JPEG no wider than 1280 pixels, small enough to hand to a model.
 
@@ -1089,6 +1162,20 @@ def cadcraft(args: argparse.Namespace) -> int:
     return status
 
 
+def vectorcraft(args: argparse.Namespace) -> int:
+    """Send the JSON requests on standard input, one per line, to the session's VectorCraft and print each reply."""
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    process = vectorcraft_requests(sandbox, sys.stdin.read(), args.wait)
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    status = process.wait()
+    sys.stderr.write(process.stderr.read())
+    return status
+
+
 def down(args: argparse.Namespace) -> int:
     """Stop a session, which ends its billing; its workspace stays."""
     sandbox = find_session(args.name)
@@ -1255,6 +1342,10 @@ def parser() -> argparse.ArgumentParser:
     drafting.add_argument(
         "--wait", type=int, default=60, help="seconds to wait for CADCraft to be ready and for each reply (default: %(default)s)"
     )
+    vector = named(
+        command("vectorcraft", vectorcraft, "Send the JSON requests on standard input to a session's VectorCraft control channel.")
+    )
+    vector.add_argument("--wait", type=int, default=60, help="seconds to wait for VectorCraft to answer (default: %(default)s)")
     named(command("down", down, "Stop a session."))
     drive = named(
         command("drive-login", drive_login, "Connect Google Drive by a sign-in in a session's Firefox, kept as a Modal Secret.")
