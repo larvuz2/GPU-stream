@@ -9,7 +9,8 @@
  *
  * Every piece becomes a React element whose text React escapes, so nothing the agent writes is
  * ever markup. A library tag the project has (`@mara`) is a button that opens its asset; one it
- * does not have yet reads as the tag, styled the same but inert.
+ * does not have yet reads as the tag, styled the same but inert. Text that is still being written
+ * ends in a caret (`.prose-studio[data-streaming]`), which goes once the text is whole.
  * @module
  */
 import { Fragment, useMemo, type ReactNode } from 'react';
@@ -23,6 +24,8 @@ interface ProseProps {
   tags?: ReadonlySet<string>;
   /** Opens the asset a tag names. */
   onTag?: (tag: string) => void;
+  /** Whether the text is still being written. */
+  streaming?: boolean;
 }
 
 /**
@@ -31,11 +34,11 @@ interface ProseProps {
  * @param props The component's props.
  * @returns The text's blocks.
  */
-export function Prose({ text, tags, onTag }: ProseProps) {
+export function Prose({ text, tags, onTag, streaming = false }: ProseProps) {
   const blocks = useMemo(() => parseMarkdown(text), [text]);
   const inline = (runs: Inline[]): ReactNode => <InlineRuns runs={runs} tags={tags} onTag={onTag} />;
   return (
-    <div className="prose-studio">
+    <div className="prose-studio" data-streaming={streaming ? true : undefined}>
       {blocks.map((block, index) => {
         // A block's position is its identity: the text only grows at its end as pieces arrive.
         const key = index;

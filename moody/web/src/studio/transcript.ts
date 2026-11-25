@@ -57,7 +57,6 @@ import type {
   TurnId,
   UiData,
 } from '../lib/api';
-import { expressionOf, type Expression } from '../lib/moodyEyes';
 
 /** A tool call's state. */
 export type ToolState = 'running' | 'ok' | 'failed' | 'stopped';
@@ -84,8 +83,8 @@ export type TranscriptItem =
       key: string;
       tool: string;
       title: string;
-      /** What the tool looks like while it runs. */
-      activity: Expression;
+      /** What the tool looks like while it runs, as one of the catalog's `activities`. */
+      activity: string;
       state: ToolState;
       summary: string | null;
       media: Media[];
@@ -161,8 +160,8 @@ export interface Subagent {
   task: string;
   /** Where it stands; one still working when its turn ended was stopped. */
   state: AgentState;
-  /** What it is doing, as the eyes show it. */
-  activity: Expression;
+  /** What it is doing, as one of the catalog's `activities`. */
+  activity: string;
   /** What it is doing now, in a line. */
   detail: string;
   /** How long it has worked, in seconds, or `null` where the log does not say. */
@@ -188,8 +187,11 @@ const AGENT_TYPES: ReadonlySet<TranscriptItem['type']> = new Set([
 /** The kinds of a subagent's events that go in its card. */
 const CARD_KINDS: ReadonlySet<StudioEvent['kind']> = new Set(['tool_start', 'tool_end', 'text', 'thinking']);
 
-/** What a tool with no activity of its own looks like while it runs. */
-const TOOL_ACTIVITY: Expression = 'processing';
+/** The catalog activity of a tool whose event names none: it is running something. */
+const TOOL_ACTIVITY = 'processing';
+
+/** The catalog activity of the agent between two steps, and while it reasons. */
+const THINKING_ACTIVITY = 'thinking';
 
 /** One block of a piece of prose: an event's text, and the block it names. */
 interface Part {
@@ -372,7 +374,7 @@ function fold(events: readonly StudioEvent[], entriesOf: (agentId: string) => Su
           key,
           tool: event.data.tool,
           title: event.data.title,
-          activity: event.data.activity === undefined ? TOOL_ACTIVITY : expressionOf(event.data.activity),
+          activity: event.data.activity ?? TOOL_ACTIVITY,
           state: 'running',
           summary: null,
           media: [],
@@ -419,7 +421,7 @@ function fold(events: readonly StudioEvent[], entriesOf: (agentId: string) => Su
             title: data.title,
             task: data.task,
             state: data.state,
-            activity: expressionOf(data.activity),
+            activity: data.activity,
             detail: data.detail,
             seconds: data.seconds ?? null,
             tokens: data.tokens ?? null,
@@ -643,10 +645,10 @@ export function openQuestion(items: readonly TranscriptItem[]): Extract<Transcri
   return undefined;
 }
 
-/** What the agent is doing right now: the expression its eyes play, and what it is, where known. */
+/** What the agent is doing right now. */
 export interface Activity {
-  /** The expression. */
-  expression: Expression;
+  /** What it looks like, as one of the catalog's `activities`. */
+  activity: string;
   /** What it is doing, in the words of the tool it is running, or `null` while it is thinking. */
   detail: string | null;
 }
@@ -670,7 +672,7 @@ export function agentActivity(items: readonly TranscriptItem[]): Activity | null
   }
   const running = since.findLast((item) => item.type === 'tool' && item.state === 'running');
   if (running?.type === 'tool') {
-    return { expression: running.activity, detail: running.title };
+    return { activity: running.activity, detail: running.title };
   }
   const last = since.at(-1);
   if (last?.type === 'agent' && last.streaming) {
@@ -679,7 +681,7 @@ export function agentActivity(items: readonly TranscriptItem[]): Activity | null
   if (since.some((item) => item.type === 'agents' && item.agents.some((agent) => agent.state === 'working'))) {
     return null;
   }
-  return { expression: 'thinking', detail: null };
+  return { activity: THINKING_ACTIVITY, detail: null };
 }
 
 /** A picture, video, or sound the session showed, and where in the conversation it appeared. */

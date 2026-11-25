@@ -409,6 +409,11 @@
     --dot: var(--color-bad);
   }
 
+  /* Something finished as it should: the LED is the success green, and does not breathe. */
+  .dot-done {
+    --dot: var(--color-ok);
+  }
+
   /* Art: the frame is a finished-looking panel by itself, and the image fades in over it once it
      has loaded. An image rests in grayscale behind a pixel screen. */
   .art {
