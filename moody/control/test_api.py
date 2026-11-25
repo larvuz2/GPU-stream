@@ -3592,8 +3592,12 @@ def test_the_system_prompt_carries_no_skill_and_says_how_the_agent_works_with_en
     assert len(prompt) < 12000 < sum(len(skill.body) for skill in offered), "the prompt is a fraction of what the skills' texts were in it"
     flat = " ".join(prompt.split())
     for said_once in ("none starts unless the work needs it or the person asked", "The person approves some steps", "Agent tool",
-                      "Skill tool", "<project_state>", "mcp__moody__<name>", "the Moody agent"):
-        assert said_once in flat, said_once
+                      "Skill tool", "<project_state>", "mcp__moody__<name>", "the Moody agent",
+                      "Every decision you put to the person carries your own recommendation", "`ask_user`'s `recommended`",
+                      "A long job (many steps, subagents, or minutes of work) ends with a report",
+                      "A short exchange gets a short answer in plain sentences, with no headings"):
+        assert flat.count(said_once) == 1, said_once
+    assert "recap" not in flat and "Keep messages short" not in flat, "how to close is said once, by the kind of work it closes"
 
 
 def test_subagents_are_read_from_files_offered_by_discipline_and_given_their_tools_skills_and_model(studio, tmp_path):
