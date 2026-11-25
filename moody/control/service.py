@@ -449,6 +449,21 @@ class Store:
         )
         response.raise_for_status()
 
+    def download(self, bucket: str, path: str, limit: int) -> bytes:
+        """A file of a bucket, whole.
+
+        Raises:
+            ValueError: The file is larger than `limit` bytes; no more than that is read of it.
+        """
+        with self.http.stream("GET", f"/storage/v1/object/{bucket}/{quote(path)}", timeout=300) as response:
+            response.raise_for_status()
+            data = bytearray()
+            for chunk in response.iter_bytes():
+                data += chunk
+                if len(data) > limit:
+                    raise ValueError(f"{path} is larger than {limit} bytes")
+        return bytes(data)
+
     def sign(self, bucket: str, paths: list[str], seconds: int) -> dict[str, str]:
         """Links that read each path for `seconds`, by path; a path with no file has none."""
         response = self.http.post(f"/storage/v1/object/sign/{bucket}", json={"expiresIn": seconds, "paths": paths})

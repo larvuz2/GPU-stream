@@ -102,6 +102,13 @@ request of the conversation; `look` adds one small picture of each file when
 it has to judge the result. `engine_screenshot` shows its picture as the same
 card.
 
+The same holds for what the agent generates and for the library: a
+generation's result is its facts, and `look` on `generate_image` and
+`generate_video`, or `library_look` for entries already in the library, hands
+the model the same small picture of each file (`Agent.pictured`). No engine
+holds those files, so the turn's own worker makes the pictures
+(`looking.py`).
+
 A project's repository may be a whole team's, shared by everyone who works on
 the game, so the agent reads it freely and writes only to a branch of its own
 (`tool_github_save`): `moody/`, the project's name as a slug, and the first
@@ -168,6 +175,7 @@ from generation import (
     video_arguments,
 )
 from github_client import GitHubError
+from looking import LOOK_BYTES, NoPicture, look_arguments, picture_of
 from loop import BUILT_INS, PREFIX, Brief, Loop, Settings, Subagent, ToolSpec, TurnLoop, Workspace, sdk_loop
 from service import (
     DESKTOP,
@@ -261,8 +269,10 @@ PREVIEW_ENCODINGS: dict[str, tuple[str, str, str, list[str]]] = {
          "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart"],
     ),
 }
-# The largest picture `look` hands the model, which ffmpeg makes far smaller than this
-LOOK_BYTES = 4 * 1024 * 1024
+# The pictures one call of `library_look` hands the model at most
+LOOK_PICTURES = 8
+# The largest file of the library the turn's worker reads to make a picture of
+LOOK_SOURCE_BYTES = 256 * MEGABYTE
 
 
 class TurnStopped(Exception):
@@ -343,6 +353,9 @@ The machines an engine runs on (`tier`):
 - `generate_image` and `generate_video` take library tags as references, so the same character looks the same
   in every shot; mention each reference's tag in the prompt where it appears. Save what you generate to the entry
   it belongs to (`save_to`). The person sees each result in the conversation; ask before you build on one.
+- You are told what a generation made, not shown it. Where you have to judge a result yourself (before you
+  describe it, choose between candidates, build on it, or call it done), generate with `look: true`, or look at
+  entries of the library with `library_look`. Do not look at what you only pass on to the person.
 - An engine is a cloud machine that costs the person credits every minute it runs, so none starts unless the work
   needs it or the person asked. Planning, writing, the library, and generating images and video need no engine:
   do them first, with your own tools. Start an engine at the step that cannot be done without it (cutting the
@@ -447,6 +460,14 @@ SAVE_TO = {
     ),
     "properties": {"tag": STRING, "section": STRING, "name": STRING, "description": STRING},
 }
+LOOK = {
+    "type": "boolean",
+    "description": (
+        "true to be handed one small picture of each result (an image itself, four frames of a video on one sheet), "
+        "when you have to judge it yourself. Without it you get the result's facts only; library_look shows a "
+        "result you saved to the library later."
+    ),
+}
 TOOLS = [
     tool(
         "ask_user",
@@ -497,6 +518,24 @@ TOOLS = [
         activity="searching", reads=True,
     ),
     tool(
+        "library_look",
+        "Look at library entries yourself: you are handed one small picture of each entry's newest media (an image "
+        "itself, four frames of a video on one sheet, a sound's waveform). Use it to judge what was generated or "
+        "uploaded before you describe it, choose between candidates, or review it. The person is shown nothing new.",
+        {
+            "tags": {**STRINGS, "description": "The entries' tags."},
+            "each": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": LOOK_PICTURES,
+                "description": f"How many of each entry's media to look at, newest first; 1 unless given. One call "
+                f"hands you at most {LOOK_PICTURES} pictures.",
+            },
+        },
+        ["tags"],
+        activity="analyzing", reads=True,
+    ),
+    tool(
         "library_upsert",
         "Add an entry to the library, or change the one with this tag (an untagged entry is found by section and "
         "name). Metadata is merged into what the entry has.",
@@ -530,6 +569,7 @@ TOOLS = [
                 "description": "best: Nano Banana Pro, the default. cheap: Seedream 5.5, for drafts and many variations.",
             },
             "save_to": SAVE_TO,
+            "look": LOOK,
         },
         ["prompt"],
         activity="creating",
@@ -553,6 +593,7 @@ TOOLS = [
                 "480p or 720p. draft: a 480p preview from Seedance 2.5.",
             },
             "save_to": SAVE_TO,
+            "look": LOOK,
         },
         ["prompt"],
         activity="creating", approval="ask",
@@ -969,22 +1010,6 @@ def plays_in_browser(kind: str, name: str, probe: dict[str, Any] | None) -> bool
         return True
     picture = media_stream(probe, "video")
     return picture.get("codec_name") in WEB_VIDEO_CODECS and picture.get("pix_fmt") in WEB_PIXEL_FORMATS
-
-
-def look_arguments(kind: str, seconds: float) -> list[str]:
-    """ffmpeg's arguments, between input and output, for the one small JPEG `look` hands the model of a file.
-
-    A picture is itself, no wider than 1280 pixels. A video is four frames
-    spread over its length on one sheet, since one frame says nothing of
-    motion or of a cut; its first frame where its length is not known. Sound is
-    its waveform over its whole length, which shows level, dynamics, silence,
-    and clipping at a glance.
-    """
-    if kind == "audio":
-        return ["-filter_complex", "showwavespic=s=1280x320:colors=white", "-frames:v", "1"]
-    if kind == "video" and seconds > 0:
-        return ["-vf", f"fps=4/{seconds:.3f},scale=640:-2,tile=2x2", "-frames:v", "1", "-q:v", "4"]
-    return ["-frames:v", "1", "-vf", "scale=min(1280\\,iw):-2", "-q:v", "4"]
 
 
 def loudness(output: str) -> dict[str, float]:
@@ -1550,6 +1575,7 @@ class Agent:
             "update_plan": "Updating the plan",
             "set_library_sections": "Arranging the library",
             "library_list": "Reading the library",
+            "library_look": f"Looking at {', '.join(arguments.get('tags', []))}",
             "library_upsert": f"Saving {arguments.get('tag') or arguments.get('name', '')} to the library",
             "generate_image": f"Generating {count} image{'s' if count != 1 else ''}",
             "generate_video": "Generating a video",
@@ -1625,6 +1651,69 @@ class Agent:
         listing = {"sections": turn.project["library_sections"], "entries": entries}
         return Result(json.dumps(listing), f"{len(entries)} entr{'y' if len(entries) == 1 else 'ies'}")
 
+    def tool_library_look(self, turn: Turn, tags: list[str], each: int = 1) -> Result:
+        """Hand the model a picture of the newest media of each entry named, `each` of them per entry.
+
+        Raises:
+            Refused: 400 for no tag or more pictures than one call hands over, 404 for a tag no entry has.
+        """
+        rows = self.sessions.assets_by_tags(turn.project, tags)
+        chosen = [
+            (f"{row['tag']}, {item['kind']} {place} of {len(row['media'])}: {item['name']}", item)
+            for row in rows
+            for place, item in enumerate(row["media"][:each], start=1)
+        ]
+        if not rows:
+            raise Refused(400, "Name the entries to look at by their tags.")
+        if len(chosen) > LOOK_PICTURES:
+            raise Refused(400, f"That is {len(chosen)} pictures; one call hands you at most {LOOK_PICTURES}. Look at fewer entries, or fewer of each.")
+        files = []
+        unread = {}
+        for label, item in chosen:
+            try:
+                files.append((label, item["kind"], self.store.download(LIBRARY_BUCKET, item["path"], LOOK_SOURCE_BYTES)))
+            except ValueError:
+                unread[label] = (
+                    f"It is larger than the {readable_size(LOOK_SOURCE_BYTES)} that can be looked at here; import it "
+                    "into a running engine and preview it with look."
+                )
+        pictures, missing = self.pictured(files)
+        empty = [row["tag"] for row in rows if not row["media"]]
+        answer = {
+            "looked_at": [label for label, _, _ in files if label not in missing],
+            "no_picture": {**unread, **missing},
+            "no_media": empty,
+            "note": "The pictures above are yours to judge by, each after the line that names it. The person was shown nothing.",
+        }
+        seen = len(files) - len(missing)
+        return Result(
+            [*pictures, {"type": "text", "text": json.dumps(answer)}],
+            f"Looked at {seen} file{'s' if seen != 1 else ''}" if seen else "Nothing could be looked at",
+            ok=bool(seen),
+        )
+
+    def pictured(self, files: list[tuple[str, str, bytes]]) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        """The pictures `look` hands the model of files this worker holds, and why any could not be made.
+
+        Each file is its label, its kind, and its bytes. A picture follows a
+        line of text that is its label, so the model knows which is which; a
+        file of a kind there is no picture of, or one the worker could make
+        none of (`picture_of`), is named with the reason instead.
+        """
+        blocks: list[dict[str, Any]] = []
+        missing = {}
+        for label, kind, data in files:
+            if kind not in MEDIA_KINDS:
+                missing[label] = "It is not an image, a video, or a sound."
+                continue
+            try:
+                picture = picture_of(data, kind)
+            except NoPicture as reason:
+                missing[label] = f"No picture could be made of it: {reason}"
+                continue
+            blocks += [{"type": "text", "text": label}, self.picture_block(picture)]
+        return blocks, missing
+
     def tool_library_upsert(
         self,
         turn: Turn,
@@ -1691,18 +1780,21 @@ class Agent:
 
     def keep(
         self, turn: Turn, urls: list[str], target: dict[str, Any] | None, stem: str
-    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], list[tuple[str, str, bytes]]]:
         """Store generated files in the library bucket: in the target entry where there is one, else beside the project.
 
-        Returns the entry as changed and the files as the log keeps them under
-        the call: each by its path, which is signed when the log is read
-        (`Sessions.shown_events`).
+        Returns the entry as changed, the files as the log keeps them under
+        the call (each by its path, which is signed when the log is read,
+        `Sessions.shown_events`), and the files themselves, each with a label
+        and its kind, for `look` (`pictured`).
         """
         generator = self.require_generator()
         project = turn.project
         paths = []
-        for url in urls:
+        files = []
+        for place, url in enumerate(urls, start=1):
             data, content_type = generator.download(url)
+            files.append((f"{content_type.split('/')[0]} {place} of {len(urls)}", content_type.split("/")[0], data))
             extension = PurePosixPath(url.split("?")[0]).suffix[:6] or ".bin"
             name = f"{stem}-{uuid.uuid4().hex[:6]}{extension}"
             if target is not None:
@@ -1714,7 +1806,7 @@ class Agent:
                 paths.append((path, content_type.split("/")[0]))
         if target is not None:
             turn.event("library", {"asset": self.sessions.kept_asset(target)})
-        return target, [{"kind": kind, "path": path} for path, kind in paths]
+        return target, [{"kind": kind, "path": path} for path, kind in paths], files
 
     @staticmethod
     def labeled(prompt: str, chosen: list[tuple[dict[str, Any], dict[str, Any], str]]) -> tuple[str, dict[str, list[str]]]:
@@ -1741,8 +1833,13 @@ class Agent:
         target: dict[str, Any] | None,
         seed: Any,
         cost: float | None,
+        looked: tuple[list[dict[str, Any]], dict[str, str]] | None,
     ) -> Result:
-        """What a generation tool gives back: where the results went, for the model, and a line for the page."""
+        """What a generation tool gives back: where the results went, for the model, and a line for the page.
+
+        `looked` is what `pictured` made of the results where the model asked
+        to look: the pictures, which lead the result, and why any is missing.
+        """
         made = f"{len(media)} {noun}{'s' if len(media) != 1 else ''}"
         if target is None:
             kept = "Not saved to the library; generate again with save_to to keep a result."
@@ -1750,8 +1847,14 @@ class Agent:
             kept = f"Saved to {target['tag'] or target['name']} ({target['section']}) as its newest media."
         facts = {"model": endpoint, "saved_to": target and (target["tag"] or target["name"]), "seed": seed, "cost_usd": cost}
         summary = made + (f" saved to {target['tag'] or target['name']}" if target else "")
+        pictures, missing = looked or ([], {})
+        if looked is not None:
+            facts["look"] = "The pictures above are yours to judge by, each after the line that names it."
+            if missing:
+                facts["no_picture"] = missing
+        text = f"Generated {made}. {kept} The person sees the results in the conversation.\n{json.dumps(facts)}"
         return Result(
-            f"Generated {made}. {kept} The person sees the results in the conversation.\n{json.dumps(facts)}",
+            [*pictures, {"type": "text", "text": text}] if pictures else text,
             summary + (f", about ${cost:.2f}" if cost is not None else ""),
             media=media,
         )
@@ -1765,6 +1868,7 @@ class Agent:
         count: int = 1,
         model: str = "best",
         save_to: dict[str, Any] | None = None,
+        look: bool = False,
     ) -> Result:
         generator = self.require_generator()
         if len(references or []) > IMAGE_REFERENCES[model]:
@@ -1775,9 +1879,9 @@ class Agent:
         endpoint, arguments = image_arguments(model, text, urls["image"], aspect_ratio, count)
         output = generator.run(endpoint, arguments, turn.alive, IMAGE_SECONDS)
         stem = ((target or {}).get("tag") or "image").lstrip("@")
-        target, media = self.keep(turn, [image["url"] for image in output["images"]], target, stem)
+        target, media, files = self.keep(turn, [image["url"] for image in output["images"]], target, stem)
         cost = generator.cost(endpoint, {"image": len(media), "unit": len(media)})
-        return self.generated("image", endpoint, media, target, output.get("seed"), cost)
+        return self.generated("image", endpoint, media, target, output.get("seed"), cost, self.pictured(files) if look else None)
 
     def tool_generate_video(
         self,
@@ -1789,6 +1893,7 @@ class Agent:
         resolution: str = "720p",
         model: str = "standard",
         save_to: dict[str, Any] | None = None,
+        look: bool = False,
     ) -> Result:
         generator = self.require_generator()
         if len(references or []) > VIDEO_REFERENCES:
@@ -1805,12 +1910,13 @@ class Agent:
         endpoint, arguments = video_arguments(model, text, urls, duration_seconds, aspect_ratio, resolution)
         output = generator.run(endpoint, arguments, turn.alive, VIDEO_SECONDS)
         stem = ((target or {}).get("tag") or "video").lstrip("@")
-        target, media = self.keep(turn, [output["video"]["url"]], target, stem)
+        target, media, files = self.keep(turn, [output["video"]["url"]], target, stem)
         units = {"video": 1.0}
         if duration_seconds:
             units["second"] = float(duration_seconds)
             units["1000 token"] = video_kilotokens(resolution, aspect_ratio, duration_seconds)
-        return self.generated("video", endpoint, media, target, output.get("seed"), generator.cost(endpoint, units))
+        cost = generator.cost(endpoint, units)
+        return self.generated("video", endpoint, media, target, output.get("seed"), cost, self.pictured(files) if look else None)
 
     # Engines
 

@@ -38,9 +38,11 @@ agent's skills (`moody/skills`) and its subagents' definitions
 lists what a project is offered.
 
 The image is made in two steps so that another app can stand on it:
-`packages` is the Python the requirements install, and `carried` puts the
-control plane's code and data on an image. `trial.py` builds its own from the
-two, with the test modules beside the code.
+`packages` is what is installed (ffmpeg, with which a turn's worker makes the
+pictures the agent looks at a file by, `looking.py`, and the Python the
+requirements name), and `carried` puts the control plane's code and data on
+an image. `trial.py` builds its own from the two, with the test modules
+beside the code.
 """
 
 from __future__ import annotations
@@ -62,6 +64,7 @@ MODULES = (
     "loop.py",
     "transcript.py",
     "definitions.py",
+    "looking.py",
     "launcher.py",
     "generation.py",
     "github_client.py",
@@ -77,7 +80,11 @@ T = TypeVar("T")
 
 app = modal.App("moody-control")
 secret = modal.Secret.from_name("moody")
-packages = modal.Image.debian_slim(python_version="3.12").pip_install_from_requirements(str(HERE / "requirements.txt"))
+packages = (
+    modal.Image.debian_slim(python_version="3.12")
+    .apt_install("ffmpeg")
+    .pip_install_from_requirements(str(HERE / "requirements.txt"))
+)
 
 
 def carried(base: modal.Image) -> modal.Image:

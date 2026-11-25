@@ -27,6 +27,7 @@ agent counts on.
   else of the machine can be read.
 - A deploy that changes the prompt or a tool reaches the next turn of a
   session that began before it.
+- The pictures a tool hands over reach the model as pictures.
 
 The tests are skipped, with the reason, where the bundled program is not
 there or does not start (an install of the SDK for another platform). Run as
@@ -36,6 +37,7 @@ fresh process.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import pickle
@@ -70,7 +72,9 @@ from test_api import (
     auth,
     config,
     events,
+    jpeg_size,
     kinds,
+    looks,
     message,
     new_project,
     reply,
@@ -644,6 +648,45 @@ def test_a_deploy_that_changes_the_prompt_or_a_tool_reaches_the_next_turn_of_a_s
         "DEPLOYED-DESCRIPTION"
         not in {tool["name"]: tool for tool in before["tools"]}[plan]["description"]
     )
+
+
+@looks
+def test_the_pictures_the_agent_asks_to_look_at_reach_the_model_as_pictures(
+    studio, media
+):
+    client, model = studio.client, studio.model
+    studio.fal.files = media
+    film = new_project(client)
+    call = use("generate_image", prompt="A lamp, two ways", count=2, look=True)
+    model.script(AGENT, reply(call), reply(say("Seen.")))
+    message(client, film["id"], "A lamp")
+    content = results(model.asked(AGENT)[1])[call["id"]]["content"]
+    # The program keeps each picture as a file of its own, in the turn's private directory, and says where
+    kept = [
+        part
+        for part in content
+        if part["type"] == "text" and part["text"].startswith("[Image: source: ")
+    ]
+    assert len(kept) == 2 and all("/config/projects/" in part["text"] for part in kept)
+    content = [part for part in content if part not in kept]
+    assert [part["type"] for part in content] == [
+        "text",
+        "image",
+        "text",
+        "image",
+        "text",
+    ]
+    assert [part["text"] for part in content if part["type"] == "text"][:2] == [
+        "image 1 of 2",
+        "image 2 of 2",
+    ]
+    pictures = [part["source"] for part in content if part["type"] == "image"]
+    assert {(source["type"], source["media_type"]) for source in pictures} == {
+        ("base64", "image/jpeg")
+    }
+    assert [jpeg_size(base64.b64decode(source["data"])) for source in pictures] == [
+        (1280, 720)
+    ] * 2
 
 
 def test_a_session_resumes_in_a_fresh_process_that_has_nothing_of_the_first_but_the_database(

@@ -53,7 +53,13 @@ import app as control
 HERE = Path(__file__).resolve().parent
 # Where the test modules stand in the image: beside a copy of the catalog, as they stand to it in the repository
 SUITE = Path("/root/suite")
-TESTS = ("test_api.py", "test_loop.py", "scripted_api.py", "scripted_loop.py")
+TESTS = (
+    "conftest.py",
+    "test_api.py",
+    "test_loop.py",
+    "scripted_api.py",
+    "scripted_loop.py",
+)
 PYTEST = "pytest==9.1.1"
 # Where a turn's working directory is made, on both machines: the loop keys a session by that path
 LOOP_ROOT = "/tmp/moody-trial-loop"

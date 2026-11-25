@@ -247,6 +247,11 @@ addons/modal/selkies-modal modal deploy moody/control/app.py
 The deploy prints the API's address. A change to the Secret reaches new
 containers; deploy again to have it take effect at once.
 
+The control plane's image installs ffmpeg beside its Python packages: a turn's
+worker makes with it the small pictures the agent looks at what it generated
+or at the library by (`control/looking.py`). A worker without ffmpeg still
+runs; a look then says no picture could be made.
+
 **Netlify.** Connect the repository; `netlify.toml` holds the build. Set
 `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` (the project's
 publishable key, `sb_publishable_...`; a legacy `anon` key works too),
@@ -272,7 +277,10 @@ Modal, Anthropic, fal, and GitHub: who a credential names, what each route and
 tool returns and refuses, that one user's sessions, projects, and connections do not exist
 for another, the agent driven by a scripted model through every tool, its
 subagents, approvals, and skills, that `ask_user` ends a turn and a second
-message waits for the first, Nuke's gate and seats, Unreal Engine's gate on an
+message waits for the first, the pictures the agent looks at its generations
+and the library by (made by a real ffmpeg, so those tests skip where there is
+none) and that the ffmpeg which makes them gets nothing of the worker's
+environment, Nuke's gate and seats, Unreal Engine's gate on an
 Epic connection the registry lets pull it and the user's own credential it is
 pulled with, the GitHub App's token refreshed before it expires and its
 repositories read from its installations, the clone an Unreal engine of a
@@ -333,7 +341,8 @@ real model, so how the model uses its subagents, skills, and approvals, what a
 turn costs, and how the loop summarizes a conversation that outgrows the
 model's context window are unmeasured (`trial.py::real` is the first step).
 The transcript's store has run against the tests' database and the SDK's
-conformance suite, not against Supabase. The agent's model and generation are
+conformance suite, not against Supabase, and neither has the read of a library
+file the agent looks at (`Store.download`). The agent's model and generation are
 not billed in credits yet, and only an Unreal engine clones the project's
 repository as it starts. The MCP endpoint has no project tools.
 

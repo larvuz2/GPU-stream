@@ -42,7 +42,9 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
+import tempfile
 import sys
 import threading
 import time
@@ -62,6 +64,7 @@ from fastapi.testclient import TestClient
 from agent import SPECS, TOOL_NAMES, TOOLS, Agent, Result, check_activities, recap, replace_tags, reported_unreal, system_prompt
 from api import create_app
 from definitions import AgentSpec, agents_for, matching, operators, read_agents, read_skills, skills_directory, skills_for
+from looking import NoPicture, picture_of
 from loop import BUILT_INS, PREFIX, SDK_VARIABLES, Blocks, Settings, Workspace, child_environment, fetchable, inside, loop_name
 from scripted_loop import Reply, ScriptedLoop
 from transcript import Transcript
@@ -387,6 +390,12 @@ class FakeStore:
     def upload(self, bucket: str, path: str, data: bytes, content_type: str) -> None:
         assert bucket == "library"
         self.files[path] = (data, content_type)
+
+    def download(self, bucket: str, path: str, limit: int) -> bytes:
+        data = self.files[path][0]
+        if len(data) > limit:
+            raise ValueError(f"{path} is larger than {limit} bytes")
+        return data
 
     def sign(self, bucket: str, paths: list[str], seconds: int) -> dict[str, str]:
         return {path: f"https://storage.example.test/{path}?token=signed" for path in paths if path in self.files}
@@ -769,6 +778,8 @@ class FakeFal:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        # What a result's file holds, by its suffix; a file of a suffix not here holds its own address
+        self.files: dict[str, bytes] = {}
 
     def run(self, model: str, arguments: dict[str, Any], alive: Callable[[], bool], limit_seconds: float) -> dict[str, Any]:
         self.calls.append((model, arguments))
@@ -777,7 +788,7 @@ class FakeFal:
         return {"images": [{"url": f"https://fal.example.test/files/image-{n}.png"} for n in range(arguments["num_images"])]}
 
     def download(self, url: str) -> tuple[bytes, str]:
-        return url.encode(), "video/mp4" if url.endswith(".mp4") else "image/png"
+        return self.files.get(PurePosixPath(url).suffix, url.encode()), "video/mp4" if url.endswith(".mp4") else "image/png"
 
     def cost(self, model: str, units: dict[str, float]) -> float | None:
         if model in VIDEO_MODELS.values():
@@ -3138,7 +3149,7 @@ def test_every_tool_says_how_it_looks_whether_it_only_reads_and_whether_the_pers
     assert all(definition["activity"] in known for definition in TOOLS) and all(built_in.activity in known for built_in in BUILT_INS.values())
     assert {name for name, definition in SPECS.items() if definition["approval"] == "ask"} == {"engine_start", "generate_video"}
     assert {name for name, definition in SPECS.items() if definition["read_only"]} == {
-        "library_list", "engine_list", "engine_files", "github_read", "unreal_assets", "unreal_projects"}
+        "library_list", "library_look", "engine_list", "engine_files", "github_read", "unreal_assets", "unreal_projects"}
     assert [name for name, definition in SPECS.items() if definition["main_only"]] == ["ask_user"]
     fewer = tmp_path / "catalog.json"
     fewer.write_text(json.dumps({**CATALOG.data, "activities": [a for a in CATALOG.data["activities"] if a["id"] != "creating"]}))
@@ -3342,6 +3353,130 @@ def test_a_projects_skills_are_offered_by_name_and_read_with_their_reference_fil
                                     "http://169.254.169.254/", "https://metadata.internal/", "ftp://example.com/", "http://intranet/", "")))
 
 
+# A test that takes real media (`media` in `conftest.py`) and has the worker make pictures of it
+looks = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg, which makes the pictures the agent looks at, is not installed here")
+
+
+def jpeg_size(data: bytes) -> tuple[int, int]:
+    """A JPEG's width and height, from its frame header."""
+    assert data[:2] == b"\xff\xd8", "not a JPEG"
+    at = 2
+    while at < len(data):
+        marker, length = data[at + 1], int.from_bytes(data[at + 2 : at + 4], "big")
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            return int.from_bytes(data[at + 7 : at + 9], "big"), int.from_bytes(data[at + 5 : at + 7], "big")
+        at += 2 + length
+    raise AssertionError("no frame header")
+
+
+def handed(content: Any) -> list[tuple[str, Any]]:
+    """A result's blocks as what the model is handed: each line of text, and each picture as its width and height."""
+    if isinstance(content, str):
+        return [("text", content)]
+    return [
+        ("picture", jpeg_size(base64.b64decode(block["source"]["data"]))) if block["type"] == "image" else ("text", block["text"])
+        for block in content
+    ]
+
+
+@looks
+def test_the_agent_is_handed_pictures_of_what_it_generates_and_of_the_library_when_it_asks_to_look(studio, media):
+    client, fal, model, store = studio.client, studio.fal, studio.model, studio.store
+    fal.files = media
+    film = new_project(client)
+    sheet = use("generate_image", prompt="Mara, two ways", count=2, look=True, save_to={"section": "Characters", "name": "Mara", "tag": "@mara"})
+    shot = use("generate_video", prompt="Mara climbs", duration_seconds=6, look=True, save_to={"section": "Shots", "name": "Climb", "tag": "@climb"})
+    plain = use("generate_image", prompt="A lamp")
+    again = use("library_look", tags=["@mara", "@climb"], each=2)
+    model.script(reply(sheet), reply(shot), reply(plain), reply(again), reply(say("Seen.")))
+    message(client, film["id"], "Design Mara")
+    results = [tool_results(model.requests[index])[call["id"]] for index, call in enumerate((sheet, shot, plain, again), start=1)]
+    assert not any(result.get("is_error") for result in results)
+
+    made = handed(results[0]["content"])
+    assert [kind for kind, _ in made] == ["text", "picture", "text", "picture", "text"]
+    assert (made[0][1], made[2][1]) == ("image 1 of 2", "image 2 of 2") and made[1][1] == made[3][1] == (1280, 720), (
+        "each image itself, no wider than 1280 pixels, after the line that names it"
+    )
+    assert "The pictures above are yours to judge by" in made[4][1] and "no_picture" not in made[4][1]
+    moving = handed(results[1]["content"])
+    assert moving[:2] == [("text", "video 1 of 1"), ("picture", (1280, 720))], "four frames of the video on one sheet"
+    assert handed(results[2]["content"])[0][0] == "text" and len(handed(results[2]["content"])) == 1, "without look, the facts alone"
+    kept = handed(results[3]["content"])
+    assert [value for kind, value in kept if kind == "picture"] == [(1280, 720)] * 3
+    assert [value.split(":")[0] for kind, value in kept[:-1] if kind == "text"] == ["@mara, image 1 of 2", "@mara, image 2 of 2", "@climb, video 1 of 1"]
+    assert json.loads(kept[-1][1])["no_picture"] == {} and json.loads(kept[-1][1])["no_media"] == []
+
+    log = events(client, film["id"])["events"]
+    looked = next(e["data"] for e in log if e["kind"] == "tool_start" and e["data"]["tool"] == "library_look")
+    assert (looked["title"], looked["activity"]) == ("Looking at @mara, @climb", "analyzing")
+    after = [e["kind"] for e in log[next(i for i, e in enumerate(log) if e["data"].get("call_id") == looked["call_id"]) :]]
+    assert after == ["tool_start", "tool_end", "text", "usage", "turn_end"], "looking shows the person nothing new"
+    assert next(e["data"] for e in log if e["kind"] == "tool_end" and e["data"]["call_id"] == looked["call_id"])["summary"] == "Looked at 3 files"
+
+    # What cannot be looked at is said, with why, and the rest still is
+    store.files[next(path for path in store.files if "climb" in path)] = (b"not a video at all", "video/mp4")
+    client.post(f"/v1/projects/{film['id']}/library", headers=auth("alice-token"), json={"section": "Props", "name": "Lamp", "tag": "@lamp"})
+    some, none, many, lost = (
+        use("library_look", tags=["@climb", "@mara", "@lamp"]),
+        use("library_look", tags=["@lamp"]),
+        use("library_look", tags=["@mara"] * 5, each=2),
+        use("library_look", tags=["@nobody"]),
+    )
+    model.script(reply(some, none, many, lost), reply(say("Seen.")))
+    message(client, film["id"], "Look again")
+    told = tool_results(model.requests[-1])
+    partly = handed(told[some["id"]]["content"])
+    answer = json.loads(partly[-1][1])
+    assert [kind for kind, _ in partly] == ["text", "picture", "text"] and answer["no_media"] == ["@lamp"]
+    ((unmade, why),) = answer["no_picture"].items()
+    assert unmade.startswith("@climb, video 1 of 1: ") and why.startswith("No picture could be made of it: ") and len(why) > 40, (
+        "with what ffmpeg said of the file"
+    )
+    assert [label.split(":")[0] for label in answer["looked_at"]] == ["@mara, image 1 of 2"]
+    assert told[none["id"]]["is_error"] and told[many["id"]]["is_error"] and "at most 8" in told[many["id"]]["content"]
+    assert told[lost["id"]]["is_error"] and "No library entry is tagged @nobody" in told[lost["id"]]["content"]
+
+
+def test_a_look_where_no_picture_can_be_made_says_why_and_the_generation_stands(studio, monkeypatch):
+    client, model = studio.client, studio.model
+    film = new_project(client)
+    monkeypatch.setattr("looking.shutil.which", lambda name: None)
+    call = use("generate_image", prompt="A lamp", look=True)
+    model.script(reply(call), reply(say("Made.")))
+    message(client, film["id"], "A lamp")
+    result = tool_results(model.requests[1])[call["id"]]
+    assert not result.get("is_error") and isinstance(result["content"], str), "the image was generated and is shown to the person"
+    facts = json.loads(result["content"].split("\n", 1)[1])
+    assert facts["no_picture"] == {"image 1 of 1": "No picture could be made of it: the machine this turn runs on has no ffmpeg"}
+    assert [e["data"]["ok"] for e in events(client, film["id"])["events"] if e["kind"] == "tool_end"] == [True]
+
+
+def test_the_program_that_reads_a_file_for_a_look_gets_nothing_of_the_worker(monkeypatch):
+    # In place of ffmpeg, a program that writes who it runs as and what it was handed where the picture goes
+    folder = Path(tempfile.mkdtemp(prefix="moody-test-look-"))
+    folder.chmod(0o755)
+    program = folder / "ffmpeg"
+    program.write_text('#!/bin/sh\nfor last; do :; done\n{ id -u; pwd; env; echo "ARGUMENTS $*"; cat source; } > "$last"\n')
+    program.chmod(0o755)
+    monkeypatch.setattr("looking.shutil.which", lambda name: str(program) if name == "ffmpeg" else None)
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "service-key-of-the-deployment")
+    try:
+        user, where, *rest = picture_of(b"THE-FILE", "image").decode().splitlines()
+    finally:
+        shutil.rmtree(folder)
+    handed_over = [line for line in rest if "=" in line and not line.startswith("ARGUMENTS")]
+    assert {line.split("=")[0] for line in handed_over} <= {"PATH", "PWD", "OLDPWD", "SHLVL", "_"}, "its environment is empty but for a PATH"
+    assert "service-key-of-the-deployment" not in "\n".join(rest) and rest[-1] == "THE-FILE"
+    assert "-protocol_whitelist file" in next(line for line in rest if line.startswith("ARGUMENTS")), "it reads files and nothing over the network"
+    assert where.startswith(tempfile.gettempdir()) and not Path(where).exists(), "in a directory made for the one file, gone afterwards"
+    if os.geteuid() == 0:
+        assert user != "0", "a worker that is root runs it as another user"
+    monkeypatch.setattr("looking.shutil.which", lambda name: "/bin/false")
+    with pytest.raises(NoPicture, match="made nothing of it"):
+        picture_of(b"THE-FILE", "image")
+
+
 def test_the_system_prompt_carries_no_skill_and_says_how_the_agent_works_with_engines_approvals_and_subagents():
     skills = read_skills(skills_directory())
     project = {"id": "p", "discipline": "media", "format": "Movie"}
@@ -3385,7 +3520,7 @@ def test_subagents_are_read_from_files_offered_by_discipline_and_given_their_too
     assert list(offered) == ["lyricist", "research", "soundcraft"] and offered["research"].model == "claude-opus-5-5"
     lyricist = offered["lyricist"]
     assert lyricist.model == "claude-haiku-5-5" and lyricist.skills == ["songwriting"]
-    assert lyricist.tools == [f"{PREFIX}library_list", f"{PREFIX}library_upsert", "Read"]
+    assert lyricist.tools == [f"{PREFIX}library_list", f"{PREFIX}library_look", f"{PREFIX}library_upsert", "Read"]
 
     # A project with no subagent to offer is offered none, and the definitions say so themselves where they are wrong
     bare = Agent(studio.sessions, model, None, studio.agent.skills)

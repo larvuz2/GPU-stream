@@ -298,6 +298,17 @@ a process the model steers.
   (`activity`, one of `catalog.json`'s `activities`), whether it only reads
   (so the loop may run several at once), and whether the person approves it
   first (`approval`).
+- **Looking.** The agent is told what a tool made, not shown it: a file's
+  facts cost nothing on the turns that follow, and its pixels would. Where it
+  has to judge a result itself it asks to look, and is handed one small
+  picture of each file: an image itself, four frames of a video on one sheet,
+  a sound's waveform. `preview` and `engine_screenshot` do that for a file in
+  an engine, where the engine makes the picture. `look` on `generate_image`
+  and `generate_video`, and `library_look` for entries of the library, do it
+  for files no engine holds: the turn's own worker makes the picture, with
+  ffmpeg run as another user, with an empty environment and no network, so
+  the program that parses a generated or uploaded file reaches no secret of
+  the deployment. Looking shows the person nothing.
 - **Skills** are `moody/skills/<name>/SKILL.md`, loaded by the loop on
   demand: the description of each skill the project is offered is always in
   context, its body when the agent opens it with `skill`, a reference file
