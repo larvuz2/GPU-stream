@@ -170,7 +170,7 @@ What the steps teach:
 | `layer.translate` | `{layer?, dx, dy}` | Whole pixels |
 | `layer.align.horizontalCenters` (and `.verticalCenters`, `.leftEdges`, …) | `{to: "canvas"}` -> `{moved}` | Acts on the selected layers: `layer.select` first |
 | `layer.createClippingMask` / `layer.releaseClippingMask` | `{layer?}` -> `{layers}` | Clips the layer to the one below it |
-| `layer.delete` / `layer.lockLayers` / `layer.hideLayers` | `{layer?}` | `hideLayers` shows them again if all were hidden |
+| `layer.delete` / `layer.lockLayers` / `layer.hideLayers` | `{layer?}` | To show a layer again, `layer.setProps {visible: true}` |
 | `layer.setLabelColor` | `{layer?, color: "red"\|"orange"\|…\|"none"}` | |
 | `layer.stampVisible` | `{}` -> `{layer}` | Everything visible, merged into a new layer on top: the base for sharpening |
 | `layer.smartObjects.convertToSmartObject` | `{layer?}` -> `{layer}` | New id. Selected layers combine into one |
@@ -292,14 +292,14 @@ A vignette is a radial gradient fill from transparent to black, in Multiply:
 ## Retouching and filters
 
 Brush tools take `points` as `[[x, y], …]` in document pixels and `size` in pixels, and answer
-`{damage: [x, y, w, h]}`, the area they changed. They act on the active layer: select the
-retouch layer first.
+`{damage: [x, y, w, h]}`, the area they changed. They act on the active layer, which must be a pixel layer (a smart
+object, type, or shape layer is refused): select the retouch layer first.
 
 | Command | Parameters | Use |
 |---|---|---|
 | `image.detectFaces` | `{}` -> `{faces: [{rect: [x, y, w, h], score, landmarks: {leftEye, rightEye, nose, mouthLeft, mouthRight}}]}` | Where the face is, so strokes land on it |
-| `paint.spotHealing` | `{points, size}` | A blemish, a dust spot: dab on it |
-| `paint.healingBrush` / `paint.cloneStamp` | `{points, source: [x, y], size, hardness: 0..100}` | Heal blends texture into the tone under it; clone copies exactly |
+| `paint.spotHealing` | `{points, size, sampleAllLayers=false}` | A blemish, a dust spot: dab on it. `sampleAllLayers: true` on an empty layer leaves the photograph untouched |
+| `paint.healingBrush` / `paint.cloneStamp` | `{points, source: [x, y], size, hardness: 0..100, sampleLayer: "current"\|"currentAndBelow"\|"all"}` | Heal blends texture into the tone under it; clone copies exactly. `currentAndBelow` on an empty layer, likewise |
 | `edit.contentAwareFill` | `{output: "new"}` on a selection -> `{layer, filled}` | Removes an object onto a new layer |
 | `paint.dodge` / `paint.burn` | `{points, size, range: "shadows"\|"midtones"\|"highlights", exposure: 1..100}` | Permanent: only on a copy |
 | `filter.liquify` | `{strokes: [{tool: "forwardWarp", size, pressure, points}]}` -> `{maxDisplacement}` | Shape, in small pushes |
@@ -325,7 +325,7 @@ retouch layer first.
 ## Undo, snapshots, long jobs
 
 - `edit.undo {}` and `edit.redo {}` step once. `history.selectState {"state": 0}` returns to the
-  document as it was opened, with every later state still there to redo.
+  document as it was opened.
 - `history.newSnapshot {name}` -> `{snapshot}` keeps the document as it is now, for the
   session; `history.selectSnapshot {snapshot}` returns to it. Returning also undoes layer comps
   made after it.
