@@ -176,9 +176,11 @@ finds everything the project made. library.md has the recipes; these rules hold 
 
 - **Sections.** `set_library_sections(sections)` as soon as the brief is settled. A film starts
   with Characters, Environments, Props, Logos, Look (style frames and the style line), Tests
-  (animation tests), Shots (takes), and Process (the candidates and the looks that were
+  (animation tests), Shots (takes), and Archive (the candidates and the looks that were
   replaced, kept so the person can find them again). A commercial puts Products and Brand first.
-  Add a section when the work needs one (Wardrobe, Music, References).
+  Add a section when the work needs one (Wardrobe, Music, References). The Library panel has a
+  Process tab of its own, which gathers every picture, video, and sound the conversation showed;
+  it is not a section, so never make one of that name.
 - **Tags.** `@` and a short lowercase name of letters, digits, and dashes: `@mara`,
   `@kitchen-night`, `@locket`, `@logo-title`, `@look`, `@test-mara-kitchen`, `@s01-sh20-t2`.
   A tag is unique in the project, is never reused for something else, and cannot be changed once
@@ -317,7 +319,7 @@ Never call a picture good that you were not shown.
   (faces, hands, text, screen direction) and ask what they see. Do not start an engine to look.
 - **No tool deletes or retags a library entry, removes one of its files, or picks which image is
   its reference.** The newest image is the reference. Mark what is superseded
-  `metadata.status: "rejected"` and move it to Process; the person deletes in the Library panel.
+  `metadata.status: "rejected"` and move it to Archive; the person deletes in the Library panel.
 - **Previews and screenshots are not library entries**, and no tool of yours puts a file from an
   engine into the library. The person can add a file to an entry in the Library panel, which is
   also how their own photographs, a real product, or a logo file become references.

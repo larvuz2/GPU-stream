@@ -17,7 +17,7 @@ written; the wording of prompts is in prompting.md.
 Set them once the brief is settled, in the order the person should see them:
 
 ```text
-set_library_sections(sections=["Characters", "Environments", "Props", "Logos", "Look", "Tests", "Shots", "Process"])
+set_library_sections(sections=["Characters", "Environments", "Props", "Logos", "Look", "Tests", "Shots", "Archive"])
 ```
 
 | Section | Holds |
@@ -29,7 +29,7 @@ set_library_sections(sections=["Characters", "Environments", "Props", "Logos", "
 | Look | The style frames and the approved style line (`@look`) |
 | Tests | Stills and clips that test entries together and in motion |
 | Shots | Every kept take |
-| Process | Candidates that were not chosen and looks that were replaced, so the person can find them again |
+| Archive | Candidates that were not chosen and looks that were replaced, so the person can find them again |
 
 Add a section when the work needs one: Wardrobe when costumes change, Music for tracks the
 person supplies, References for what research found. A section that still has entries stays in
@@ -137,9 +137,9 @@ views above.
 
    ```text
    generate_image(prompt="<portrait prompt>", aspect_ratio="3:4",
-     save_to={"section": "Process", "name": "Mara, look A", "tag": "@mara-look-a"})
+     save_to={"section": "Archive", "name": "Mara, look A", "tag": "@mara-look-a"})
    generate_image(prompt="<portrait prompt>", aspect_ratio="3:4",
-     save_to={"section": "Process", "name": "Mara, look B", "tag": "@mara-look-b"})
+     save_to={"section": "Archive", "name": "Mara, look B", "tag": "@mara-look-b"})
    ```
 
 3. **The pick.** Show the candidates as a gallery card the person picks from (`show_ui` with
@@ -167,7 +167,7 @@ views above.
      metadata={"approved": true, "picked_from": "@mara-look-b"})
    library_upsert(section="Characters", name="Mara, face", tag="@mara-face",
      metadata={"variant_of": "@mara", "approved": true})
-   library_upsert(section="Process", name="Mara, look A", tag="@mara-look-a", metadata={"status": "rejected"})
+   library_upsert(section="Archive", name="Mara, look A", tag="@mara-look-a", metadata={"status": "rejected"})
    ```
 
    On no: say what you will change, generate the sheet again into the same entry (the new one
@@ -282,7 +282,7 @@ and what changed. It moves entries to their sections, fills metadata that follow
 hand, and reports what only you or the person can settle: two entries for one thing, an entry
 without a picture, an unapproved entry a scene uses. No tool deletes an entry, changes a tag, or
 removes a picture: the person does that in the Library panel, and what is superseded is marked
-`status: "rejected"` and moved to Process.
+`status: "rejected"` and moved to Archive.
 
 With a repository linked, the bible documents mirror the library after each approval
 (`bible/characters.md`, `bible/environments.md`, `bible/props.md`): one section per entry with

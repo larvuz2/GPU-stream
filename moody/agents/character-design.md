@@ -49,10 +49,10 @@ Check the library first (`library_list`), then one call per candidate:
 ```text
 generate_image(prompt="Portrait of <description>. <what makes this candidate differ>. Neutral expression, looking at
   the camera, plain mid-gray background, soft even light. <style line>", aspect_ratio="3:4",
-  save_to={"section": "Process", "name": "<Name>, look A", "tag": "<tag>-look-a"})
+  save_to={"section": "Archive", "name": "<Name>, look A", "tag": "<tag>-look-a"})
 ```
 
-Use the section the brief names for candidates, and Process without one. Use the default model:
+Use the section the brief names for candidates, and Archive without one. Use the default model:
 the picked candidate becomes the source of the character's identity.
 
 ## Stage: sheets

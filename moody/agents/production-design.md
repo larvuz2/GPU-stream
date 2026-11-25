@@ -62,10 +62,10 @@ then one call per candidate:
 ```text
 generate_image(prompt="<the image for this kind, as above>. <what makes this candidate differ>. <style line>",
   aspect_ratio="<the brief's, for a place; 1:1 or 4:3 for an object or a mark>",
-  save_to={"section": "Process", "name": "<Name>, look A", "tag": "<tag>-look-a"})
+  save_to={"section": "Archive", "name": "<Name>, look A", "tag": "<tag>-look-a"})
 ```
 
-Use the section the brief names for candidates, and Process without one. Use the default model:
+Use the section the brief names for candidates, and Archive without one. Use the default model:
 the picked candidate becomes the source of the entry's look.
 
 ## Stage: reference set
