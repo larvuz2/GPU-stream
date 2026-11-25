@@ -37,7 +37,10 @@ project's one turn in the database before a job runs it (`send_message`,
 (`ui`), whose values go to the agent with it. Where the agent waits for the
 person's approval of a step, their answer is recorded once, in the database
 (`answer_approval`), and `always` is kept among the project's permissions,
-which the person can also set and clear (`update_project`). What a project's
+which the person can also set and clear (`update_project`). What one turn
+may spend on the model and how many steps it may take are settings of the
+person's account (`limits`, `set_limits`): the deployment's default where
+they set none, and never above the deployment's ceiling. What a project's
 agent can use beyond its tools is listed for the page (`connectors`). The
 user's GitHub account is connected through a GitHub App whose
 user token, and the refresh token that renews it, are kept sealed
@@ -156,6 +159,8 @@ PROJECT_FIELDS = (
     "plan",
     "permissions",
 )
+# The limits of one turn an account sets for itself, as `profiles` and `Config` name them
+LIMITS = ("turn_budget_usd", "turn_limit")
 ASSET_FIELDS = ("id", "section", "name", "tag", "description", "metadata", "created_at", "updated_at")
 EVENT_FIELDS = ("id", "turn_id", "kind", "data", "created_at")
 PLAN_STATUSES = ("pending", "active", "done", "blocked")
@@ -282,10 +287,12 @@ class Config:
     # The models a subagent's `balanced` and `light` tiers run on; `inherit` is the agent's own
     agent_model_balanced: str = "claude-sonnet-5-5"
     agent_model_light: str = "claude-haiku-5-5"
-    # What one turn may spend on the model, in dollars as the loop prices it, and the most steps it may take;
-    # zero for no limit
-    turn_budget_usd: float = 10.0
+    # What one turn may spend on the model, in dollars as the loop prices it, and the most steps it may take, for
+    # an account that has set neither; and the most an account may set either to (`Sessions.limits`)
+    turn_budget_usd: float = 15.0
     turn_limit: int = 200
+    turn_budget_max_usd: float = 100.0
+    turn_limit_max: int = 1000
     # How long a step waits for the person's approval before the agent is told to end its turn and ask
     approval_seconds: float = 600
     # Where the loop reaches the Messages API where not Anthropic's own address: a proxy that holds the key
@@ -298,6 +305,13 @@ class Config:
     loop_env: frozenset[str] = frozenset()
     # The `claude` program the loop runs, where not the one the SDK bundles
     loop_cli: str = ""
+
+    def __post_init__(self) -> None:
+        """Refuse limits of a turn that are none: a default or a ceiling of zero would end every turn as it began."""
+        if min(self.turn_budget_usd, self.turn_budget_max_usd) <= 0:
+            raise ValueError("MOODY_TURN_BUDGET_USD and MOODY_TURN_BUDGET_MAX_USD are positive numbers of dollars")
+        if min(self.turn_limit, self.turn_limit_max) <= 0:
+            raise ValueError("MOODY_TURN_LIMIT and MOODY_TURN_LIMIT_MAX are positive numbers of steps")
 
     @property
     def supabase(self) -> bool:
@@ -728,7 +742,56 @@ class Sessions:
             "email": profile["email"],
             "credits": profile["credits"],
             "max_sessions": profile["max_sessions"],
+            "limits": self.limits(profile),
         }
+
+    def limits(self, profile: dict[str, Any]) -> dict[str, Any]:
+        """What one turn of this person's may spend on the model and how many steps it may take, and where that comes from.
+
+        Each limit is the person's own setting where they made one, else the
+        deployment's default, and in either case no more than the deployment's
+        ceiling, which also holds a setting made before the ceiling was
+        lowered. `own`, `default`, and `max` are the three it is made from,
+        for the page that lets the person change it.
+        """
+        config = self.config
+        ceiling = {"turn_budget_usd": config.turn_budget_max_usd, "turn_limit": config.turn_limit_max}
+        default = {"turn_budget_usd": min(config.turn_budget_usd, ceiling["turn_budget_usd"]), "turn_limit": min(config.turn_limit, ceiling["turn_limit"])}
+        own = {name: profile.get(name) for name in LIMITS}
+        applies = {name: min(default[name] if own[name] is None else own[name], ceiling[name]) for name in LIMITS}
+        return {**applies, "own": own, "default": default, "max": ceiling}
+
+    def set_limits(self, user: User, changes: dict[str, Any]) -> dict[str, Any]:
+        """Set what one turn of the user's may spend or how many steps it may take, and return their profile.
+
+        `changes` holds the limits to change, by name; `None` puts one back on
+        the deployment's default.
+
+        Raises:
+            Refused: 400 for a limit that is not a positive number, a number of steps that is not whole, or
+                one over the deployment's ceiling.
+        """
+        config = self.config
+        kept: dict[str, Any] = {}
+        for name, value in changes.items():
+            if name not in LIMITS:
+                continue
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not value > 0):
+                raise Refused(400, "A limit is a positive number, or null for the default.")
+            if name == "turn_budget_usd" and value is not None and value > config.turn_budget_max_usd:
+                raise Refused(400, f"A turn may spend at most ${config.turn_budget_max_usd:g} here.")
+            if name == "turn_limit" and value is not None:
+                if value != int(value):
+                    raise Refused(400, "A turn's steps are a whole number.")
+                if value > config.turn_limit_max:
+                    raise Refused(400, f"A turn may take at most {config.turn_limit_max} steps here.")
+                value = int(value)
+            kept[name] = value
+        profile = self.me(user)
+        if kept:
+            self.store.update("profiles", kept, id=f"eq.{user.id}")
+            profile = self.me(user)
+        return profile
 
     # Sessions
 

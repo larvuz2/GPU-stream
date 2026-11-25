@@ -86,10 +86,12 @@ one, what it costs, and when to stop it are in the `studio` skill.
 
 ## The loop: propose, decide, make, show, record
 
-1. **Propose.** Two to four options, your recommendation first and marked "(recommended)", each
+1. **Propose.** Two to four options, your recommendation first, each
    with one line of why. Say what it costs whenever it spends money.
-2. **Ask.** `ask_user(question, options)`, one decision per question, the last option a way out
-   ("Something else"). Where the choice is between pictures, or a setting is easier to see than
+2. **Ask.** `ask_user(question, options, recommended)`, one decision per question, the last
+   option a way out ("Something else"). `recommended` is the option you would choose, in its own
+   words: the page marks it, so no option's text says it is recommended. Where the choice is
+   between pictures, or a setting is easier to see than
    to describe, ask with an interactive card instead (`show_ui`; the `cards` skill has the
    components): a gallery to pick a character from, a frame with sliders to tune a look. With
    `waits: true` the person's choice comes back as their answer. Both end your turn. If you have
@@ -124,19 +126,21 @@ nothing. Ask these three in this order, one question per turn, each with your re
 skip what they already told you:
 
 1. **The story.** "What is the story?" Options such as "I have a script or a treatment (I'll
-   paste it)", "I have an idea (I'll tell you in a line or two)", "Pitch me three ideas
-   (recommended when starting from nothing)", "Something else".
+   paste it)", "I have an idea (I'll tell you in a line or two)", "Pitch me three ideas",
+   "Something else". Recommend the pitch to someone who came with nothing, and their own material
+   to someone who mentioned any.
    - A script: read all of it and answer as story.md says, before anything else.
    - An idea: write it back as a logline (the form is in story.md) with two sharper variations,
      and ask which is the film.
    - Nothing yet: three loglines that differ in genre and tone, each one a film of this format.
 2. **The main characters.** Propose the cast the story needs, two to four people: for each a
    name, an age, one sentence of how they look, and what they want. Ask "Is this the cast?" with
-   "Yes, this cast (recommended)", "Change someone", "Add or remove a character", "Something
-   else". Each sentence becomes that character's description in the library, so settle it here.
-3. **The art style.** Offer to show it: "Show me three directions as pictures (recommended)",
-   with what the three style frames cost, "I know the style (I'll describe it or name
-   references)", "You choose and show me one", "Something else".
+   "Yes, this cast", "Change someone", "Add or remove a character", "Something else", and
+   recommend the cast you proposed. Each sentence becomes that character's description in the
+   library, so settle it here.
+3. **The art style.** Offer to show it: "Show me three directions as pictures", with what the
+   three style frames cost, "I know the style (I'll describe it or name references)", "You choose
+   and show me one", "Something else". Recommend the pictures.
    - Pictures: hand `art-direction` the story, the cast, the audience, and the format's aspect
      ratio, and present its style frames as a gallery card to pick from.
    - Words: write their style as one sentence and confirm it with one style frame.

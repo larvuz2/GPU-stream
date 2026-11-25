@@ -62,7 +62,7 @@ in the docblocks of [`control/agent.py`](control/agent.py),
 
 **What to configure.** Each part below says how; this is the whole list.
 
-1. A Supabase project with the four migrations run, and its Site URL and
+1. A Supabase project with the five migrations run, and its Site URL and
    redirect URL.
 2. The Modal Secret `moody`: at least `SUPABASE_URL`, `SUPABASE_SECRET_KEY`,
    `MOODY_SITE_URL`, and `MOODY_SECRET_KEY`, then whichever integrations are
@@ -91,7 +91,11 @@ which keeps the GitHub App's expiring tokens and adds the Epic connection, then
 [`20261126000000_agent_loop.sql`](supabase/migrations/20261126000000_agent_loop.sql),
 which adds what the agent's loop keeps: a project's session and its transcript
 (`agent_transcripts`), and what the person no longer wants to be asked about
-(`projects.permissions`). A project that already ran the earlier ones runs
+(`projects.permissions`), then
+[`20261127000000_limits.sql`](supabase/migrations/20261127000000_limits.sql),
+which lets an account set what one turn of the agent may spend and how many
+steps it may take (`profiles.turn_budget_usd`, `profiles.turn_limit`). A
+project that already ran the earlier ones runs
 only those it has not. `github_app` deletes the GitHub connections an OAuth
 App made before, whose users connect again. `agent_loop` drops
 `agent_messages`, the conversation the agent replayed to the model before it
@@ -121,8 +125,9 @@ and set:
 | `MOODY_AGENT_FALLBACK_MODEL` | A model the loop asks instead where the agent's own is overloaded or declines a request; none unless set |
 | `MOODY_AGENT_EFFORT` | How hard the model works on each step: `low`, `medium`, `high`, `xhigh`, or `max`; `high` unless set |
 | `MOODY_AGENT_THINKING` | `false` to run the agent without thinking; unset, it thinks as much as a step needs and the conversation shows a summary |
-| `MOODY_TURN_BUDGET_USD` | What one turn may spend on the model, in dollars as the loop prices it, `10` unless set; `0` for no limit. Generation and engines are not in it |
-| `MOODY_TURN_LIMIT` | The most steps one turn may take, `200` unless set; `0` for no limit |
+| `MOODY_TURN_BUDGET_USD` | What one turn may spend on the model, in dollars as the loop prices it, for an account that has not set its own in the app; `15` unless set. Generation and engines are not in it |
+| `MOODY_TURN_LIMIT` | The most steps one turn may take, for an account that has not set its own; `200` unless set |
+| `MOODY_TURN_BUDGET_MAX_USD`, `MOODY_TURN_LIMIT_MAX` | The most an account may set either limit to, `100` dollars and `1000` steps unless set. A default above its ceiling runs at the ceiling. All four are positive: a deployment that wants turns to run further raises the ceilings |
 | `MOODY_APPROVAL_SECONDS` | How long a step waits for the person's approval before the agent is told to end its turn and ask, `600` unless set. A waiting turn holds its worker |
 | `ANTHROPIC_BASE_URL` | Where the loop reaches the Messages API where not Anthropic's own address: a proxy that holds the key, in which case `ANTHROPIC_API_KEY` is whatever the proxy takes |
 | `MOODY_LOOP_ENV` | Variables of this Secret, comma-separated, the loop's program also gets (a proxy's address, a certificate bundle). It gets `ANTHROPIC_API_KEY` and nothing else of the Secret unless named here |
@@ -277,7 +282,9 @@ Modal, Anthropic, fal, and GitHub: who a credential names, what each route and
 tool returns and refuses, that one user's sessions, projects, and connections do not exist
 for another, the agent driven by a scripted model through every tool, its
 subagents, approvals, and skills, that `ask_user` ends a turn and a second
-message waits for the first, the pictures the agent looks at its generations
+message waits for the first, that a question names the option the agent
+recommends, that a turn runs on its person's own limits and says which one
+stopped it, the pictures the agent looks at its generations
 and the library by (made by a real ffmpeg, so those tests skip where there is
 none) and that the ffmpeg which makes them gets nothing of the worker's
 environment, Nuke's gate and seats, Unreal Engine's gate on an
@@ -324,8 +331,9 @@ calls every function: what is refused and by which name, how a minute is
 charged and that a balance never goes below zero, that a payment delivered
 twice is credited once, that a project runs one agent turn at a time and a dead
 turn does not hold it, that the agent's transcript keeps its order and a batch
-sent twice is kept once, that an approval is answered once, and that the keys
-a browser holds reach no row and no function.
+sent twice is kept once, that an approval is answered once, that an account's
+limits of a turn are unset until it sets them, and that the keys a browser
+holds reach no row and no function.
 
 ## What is not here yet
 
@@ -342,7 +350,8 @@ turn costs, and how the loop summarizes a conversation that outgrows the
 model's context window are unmeasured (`trial.py::real` is the first step).
 The transcript's store has run against the tests' database and the SDK's
 conformance suite, not against Supabase, and neither has the read of a library
-file the agent looks at (`Store.download`). The agent's model and generation are
+file the agent looks at (`Store.download`) or the write of an account's limits
+(`PATCH /v1/me`). The agent's model and generation are
 not billed in credits yet, and only an Unreal engine clones the project's
 repository as it starts. The MCP endpoint has no project tools.
 

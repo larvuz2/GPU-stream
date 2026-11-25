@@ -149,7 +149,7 @@ class FakeStore:
         self.keys: dict[str, dict[str, Any]] = {}
         self.ledger: list[tuple[str, int, str | None]] = []
         self.tables: dict[str, dict[Any, dict[str, Any]]] = {
-            "sessions": self.sessions, "api_keys": self.keys,
+            "sessions": self.sessions, "api_keys": self.keys, "profiles": self.profiles,
             **{
                 table: {}
                 for table in ("projects", "assets", "project_events", "agent_transcripts", "github_connections", "epic_connections")
@@ -173,7 +173,8 @@ class FakeStore:
 
     def moody_ensure_profile(self, p_user: str, p_email: str, p_signup_credits: int) -> dict[str, Any]:
         return self.profiles.setdefault(
-            p_user, {"id": p_user, "email": p_email, "credits": p_signup_credits, "max_sessions": 1}
+            p_user,
+            {"id": p_user, "email": p_email, "credits": p_signup_credits, "max_sessions": 1, "turn_budget_usd": None, "turn_limit": None},
         )
 
     def moody_request_session(
@@ -990,7 +991,81 @@ def test_no_credential_and_a_wrong_one_are_refused(world):
 def test_a_first_visit_makes_a_profile_with_the_sign_up_credits(world):
     client = world[0]
     me = client.get("/v1/me", headers=auth("alice-token")).json()
-    assert me == {"id": ALICE.id, "email": ALICE.email, "credits": CATALOG.signup_credits, "max_sessions": 1}
+    limits = {
+        "turn_budget_usd": 15.0, "turn_limit": 200,
+        "own": {"turn_budget_usd": None, "turn_limit": None},
+        "default": {"turn_budget_usd": 15.0, "turn_limit": 200},
+        "max": {"turn_budget_usd": 100.0, "turn_limit": 1000},
+    }
+    assert me == {"id": ALICE.id, "email": ALICE.email, "credits": CATALOG.signup_credits, "max_sessions": 1, "limits": limits}
+
+
+def test_what_a_turn_may_spend_and_how_many_steps_it_may_take_are_the_persons_own_settings(studio):
+    client, model, store = studio.client, studio.model, studio.store
+    mine = lambda token="alice-token": client.get("/v1/me", headers=auth(token)).json()["limits"]
+    change = lambda **limits: client.patch("/v1/me", headers=auth("alice-token"), json=limits)
+    assert (mine()["turn_budget_usd"], mine()["turn_limit"], mine()["own"]) == (15.0, 200, {"turn_budget_usd": None, "turn_limit": None})
+
+    changed = change(turn_budget_usd=40, turn_limit=350)
+    assert changed.status_code == 200 and changed.json() == client.get("/v1/me", headers=auth("alice-token")).json(), "the answer is the profile"
+    assert (mine()["turn_budget_usd"], mine()["turn_limit"], mine()["own"]) == (40, 350, {"turn_budget_usd": 40, "turn_limit": 350})
+    assert mine()["default"] == {"turn_budget_usd": 15.0, "turn_limit": 200} and mine()["max"] == {"turn_budget_usd": 100.0, "turn_limit": 1000}
+    assert mine("bob-token")["own"] == {"turn_budget_usd": None, "turn_limit": None}, "one person's limits are not another's"
+    assert change(turn_limit=None).status_code == 200
+    assert (mine()["turn_budget_usd"], mine()["turn_limit"], mine()["own"]) == (40, 200, {"turn_budget_usd": 40, "turn_limit": None}), (
+        "null puts a limit back on the default, and a limit left out is left as it is"
+    )
+    assert change().status_code == 200 and mine()["own"]["turn_budget_usd"] == 40
+    assert change(turn_budget_usd=0.5, turn_limit=1000.0).status_code == 200 and mine()["own"] == {"turn_budget_usd": 0.5, "turn_limit": 1000}
+    for refused in ({"turn_budget_usd": 0}, {"turn_budget_usd": -3}, {"turn_budget_usd": "ten"}, {"turn_budget_usd": True}, {"turn_budget_usd": 100.01},
+                    {"turn_limit": 0}, {"turn_limit": 2.5}, {"turn_limit": 1001}, {"turn_limit": [200]}):
+        answer = change(**refused)
+        assert answer.status_code == 400 and answer.json()["detail"], refused
+    assert "at most $100" in change(turn_budget_usd=250).json()["detail"] and "at most 1000 steps" in change(turn_limit=5000).json()["detail"]
+    assert mine()["own"] == {"turn_budget_usd": 0.5, "turn_limit": 1000}, "a refused change changes nothing"
+    assert client.patch("/v1/me", json={"turn_limit": 5}).status_code == 401
+
+    # A turn runs on its person's limits, and on no more than the deployment's ceiling
+    film = new_project(client)
+    change(turn_budget_usd=40, turn_limit=350)
+    model.script(reply(say("Hello.")), reply(say("Hello.")), reply(say("Hello.")))
+    message(client, film["id"], "Hi")
+    assert (model.options[-1].max_budget_usd, model.options[-1].max_turns) == (40.0, 350)
+    with_config(studio, turn_budget_max_usd=20.0, turn_limit_max=100, turn_budget_usd=30.0, turn_limit=500)
+    assert (mine()["turn_budget_usd"], mine()["turn_limit"], mine()["own"]) == (20.0, 100, {"turn_budget_usd": 40, "turn_limit": 350}), (
+        "a setting made before the ceiling came down runs at the ceiling"
+    )
+    assert mine("bob-token")["default"] == {"turn_budget_usd": 20.0, "turn_limit": 100} and mine("bob-token")["turn_limit"] == 100
+    message(client, film["id"], "Hi")
+    assert (model.options[-1].max_budget_usd, model.options[-1].max_turns) == (20.0, 100)
+    store.profiles[ALICE.id].update(turn_budget_usd=None, turn_limit=None)
+    with_config(studio, turn_budget_max_usd=100.0, turn_limit_max=1000, turn_budget_usd=15.0, turn_limit=200)
+    message(client, film["id"], "Hi")
+    assert (model.options[-1].max_budget_usd, model.options[-1].max_turns) == (15.0, 200), "an account that set none runs on the default"
+
+    # A turn that reaches one says which and how much, and that it is the person's to change
+    wrong = lambda: [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "error"]
+    change(turn_limit=2)
+    model.script(reply(use("library_list")), reply(use("library_list")), reply(say("never")))
+    message(client, film["id"], "Loop")
+    assert wrong()[-1] == {
+        "message": "This turn reached your limit of 2 steps and stopped. You can change the limit in your settings. Send a message to go on.",
+        "limit": "steps",
+    }
+    model.steps.clear()
+    change(turn_limit=None, turn_budget_usd=0.0015)
+    model.script(reply(use("library_list")), reply(use("library_list")), reply(say("never")))
+    message(client, film["id"], "Spend")
+    assert wrong()[-1] == {
+        "message": "This turn reached your spending limit of $0.0015 and stopped. You can change the limit in your settings. Send a message to go on.",
+        "limit": "budget",
+    }
+    assert len(wrong()) == 2 and kinds(client, film["id"])[-3:] == ["error", "usage", "turn_end"]
+    model.steps.clear()
+
+    for none in ({"turn_budget_usd": 0}, {"turn_limit_max": 0}):
+        with pytest.raises(ValueError, match="positive"):
+            config(**none)
 
 
 def test_a_session_starts_in_the_users_own_workspace_and_hands_back_a_link(world):
@@ -1554,14 +1629,16 @@ def test_the_agent_works_through_its_tools_and_its_conversation_is_one_session_i
 def test_ask_user_ends_the_turn_and_the_answer_starts_the_next_on_the_same_session(studio):
     client, model = studio.client, studio.model
     film = new_project(client)
-    question = use("ask_user", question="Do you have a script, or shall we write one?", options=["I have one", "Let's write one"])
+    question = use("ask_user", question="Do you have a script, or shall we write one?", options=["I have one", "Let's write one"],
+                   recommended="Let's write one")
     model.script(reply(say("Let's begin."), use("library_list"), question), reply(say("This is never asked for.")))
     message(client, film["id"], "Hi")
     log = events(client, film["id"])
     assert [e["kind"] for e in log["events"]] == [
         "user_message", "text", "tool_start", "tool_end", "tool_start", "ask", "tool_end", "usage", "turn_end"]
     asked = next(e["data"] for e in log["events"] if e["kind"] == "ask")
-    assert asked == {"question": "Do you have a script, or shall we write one?", "options": ["I have one", "Let's write one"]}
+    assert asked == {"question": "Do you have a script, or shall we write one?", "options": ["I have one", "Let's write one"],
+                     "recommended": "Let's write one"}, "the question carries the answer the agent would give"
     assert log["running"] is False and len(model.requests) == 1, "the turn ended at the question: no machine waits for the person"
 
     model.steps.clear()
@@ -1576,7 +1653,8 @@ def test_ask_user_ends_the_turn_and_the_answer_starts_the_next_on_the_same_sessi
 def test_one_question_ends_a_turn_and_a_second_in_it_is_refused(studio):
     client, model = studio.client, studio.model
     film = new_project(client)
-    first, second = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"]), use("ask_user", question="How long?", options=["Short", "Feature"])
+    first = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended="Color")
+    second = use("ask_user", question="How long?", options=["Short", "Feature"], recommended="Short")
     turn = SimpleNamespace(asked=False, event=lambda kind, data: None)
     assert studio.agent.tool_ask_user(turn, **first["input"]).ends_turn
     with pytest.raises(Refused, match="one question at a time"):
@@ -1586,6 +1664,28 @@ def test_one_question_ends_a_turn_and_a_second_in_it_is_refused(studio):
     model.script(reply(first))
     message(client, film["id"], "Hi")
     assert kinds(client, film["id"]).count("ask") == 1
+
+
+def test_a_question_names_the_option_the_agent_would_choose_or_is_sent_back_to(studio):
+    client, model = studio.client, studio.model
+    film = new_project(client)
+    unnamed = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"])
+    other = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended="Sepia")
+    marked = use("ask_user", question="Color or black and white?", options=["Color (Recommended for a comedy)", "Black and white"],
+                 recommended="Color (Recommended for a comedy)")
+    spaced = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended=" Black and white ")
+    model.script(reply(unnamed), reply(other), reply(marked), reply(spaced))
+    message(client, film["id"], "Hi")
+    told = [next(iter(tool_results(request).values())) for request in model.requests[1:]]
+    assert all(result["is_error"] for result in told) and len(model.requests) == 4, "each is answered, and the turn goes on"
+    assert "recommended" in told[0]["content"], "the loop holds the input to the tool's schema, which requires it"
+    assert "recommended has to be one of the options, written exactly as it is there: Color / Black and white" in told[1]["content"]
+    assert "An option's text is only the option" in told[2]["content"] and "name that option in recommended" in told[2]["content"]
+    log = events(client, film["id"])["events"]
+    assert [e["data"] for e in log if e["kind"] == "ask"] == [
+        {"question": "Color or black and white?", "options": ["Color", "Black and white"], "recommended": "Black and white"}
+    ], "one question reached the person, its recommendation as the option is written"
+    assert [e["kind"] for e in log][-3:] == ["tool_end", "usage", "turn_end"]
 
 
 def test_a_tool_input_that_fails_its_schema_is_answered_not_run(studio):
@@ -1622,12 +1722,8 @@ def test_a_turn_the_model_could_not_finish_ends_with_an_error_the_person_can_rea
     message(client, film["id"], "Again")
     assert told()[-1] == "The model could not be reached. Try again."
 
-    # The most steps one turn may take, and a loop that breaks, are told too
-    with_config(studio, turn_limit=2)
-    model.script(reply(use("library_list")), reply(use("library_list")), reply(say("never")))
-    message(client, film["id"], "Loop")
-    assert "limit of steps" in told()[-1] and model.options[-1].max_turns == 2
-    model.steps.clear()
+    # A loop that breaks is told too, and none of these names a limit of the person's
+    assert not any("limit" in e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "error")
     model.may_run_dry = True
     message(client, film["id"], "The script is empty, which breaks the loop")
     assert told()[-1] == "Something went wrong on our side, and this turn stopped."
@@ -3198,10 +3294,10 @@ def test_the_loop_is_configured_by_the_deployment_and_keeps_none_of_its_own_file
     assert options.include_partial_messages and options.forward_subagent_text and options.session_store_flush == "eager"
     assert options.disallowed_tools == ["Agent(fork)"] and options.cwd == str(studio.tmp / "loop" / film["id"])
 
-    with_config(studio, agent_model="", agent_thinking=False, agent_fallback_model="", turn_budget_usd=0, turn_limit=0)
+    with_config(studio, agent_model="", agent_thinking=False, agent_fallback_model="")
     message(client, film["id"], "Hi")
     options = model.options[1]
-    assert (options.model, options.fallback_model, options.max_budget_usd, options.max_turns) == ("claude-fable-5-2", None, None, None)
+    assert (options.model, options.fallback_model) == ("claude-fable-5-2", None)
     assert options.thinking == {"type": "disabled"}
 
     with_config(studio, agent_effort="enormous")
@@ -3496,8 +3592,12 @@ def test_the_system_prompt_carries_no_skill_and_says_how_the_agent_works_with_en
     assert len(prompt) < 12000 < sum(len(skill.body) for skill in offered), "the prompt is a fraction of what the skills' texts were in it"
     flat = " ".join(prompt.split())
     for said_once in ("none starts unless the work needs it or the person asked", "The person approves some steps", "Agent tool",
-                      "Skill tool", "<project_state>", "mcp__moody__<name>", "the Moody agent"):
-        assert said_once in flat, said_once
+                      "Skill tool", "<project_state>", "mcp__moody__<name>", "the Moody agent",
+                      "Every decision you put to the person carries your own recommendation", "`ask_user`'s `recommended`",
+                      "A long job (many steps, subagents, or minutes of work) ends with a report",
+                      "A short exchange gets a short answer in plain sentences, with no headings"):
+        assert flat.count(said_once) == 1, said_once
+    assert "recap" not in flat and "Keep messages short" not in flat, "how to close is said once, by the kind of work it closes"
 
 
 def test_subagents_are_read_from_files_offered_by_discipline_and_given_their_tools_skills_and_model(studio, tmp_path):
@@ -3636,15 +3736,20 @@ def test_a_subagents_steps_show_in_the_conversation_and_its_card_follows_what_it
 
     # A tool kept to the agent itself is refused to a subagent, whatever its definition came to list
     turn = SimpleNamespace(beat=lambda: True, acting=lambda agent_id: nullcontext(), event=lambda kind, data: None)
-    refusal = studio.agent.run_tool(turn, "ask_user", {"question": "Which?", "options": ["A", "B"]}, "call_1", first)
+    refusal = studio.agent.run_tool(turn, "ask_user", {"question": "Which?", "options": ["A", "B"], "recommended": "A"}, "call_1", first)
     assert not refusal.ok and "Only the agent itself can use ask_user" in refusal.content
 
 
 def answering(studio: SimpleNamespace, project_id: str, decision: str) -> threading.Thread:
-    """Answer the next approval the project's agent asks for, as the person would while the turn waits."""
+    """Answer the next approval the project's agent asks for, as the person would while the turn waits.
+
+    It answers as soon as the approval is in the log. The bound is only for
+    a turn that never asks, and is long because a loaded machine starts the
+    loop's program slowly.
+    """
 
     def answer() -> None:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             rows = [e for e in list(studio.store.tables["project_events"].values()) if e["project_id"] == project_id]
             answered = {e["data"]["approval_id"] for e in rows if e["kind"] == "approval_result"}
@@ -3902,7 +4007,7 @@ def test_the_environment_lists_what_a_projects_agent_can_use(studio):
 def test_a_session_that_begins_in_a_project_with_a_past_is_told_what_was_said(studio):
     client, model, store = studio.client, studio.model, studio.store
     film = new_project(client)
-    question = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"])
+    question = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended="Color")
     model.script(reply(say("A film about Mara. One thing first."), question), reply(say("Color it is.")))
     message(client, film["id"], "Make a film about Mara")
     message(client, film["id"], "Color")
@@ -3920,7 +4025,7 @@ def test_a_session_that_begins_in_a_project_with_a_past_is_told_what_was_said(st
     before = state[: state.index("The project's state at the start of this turn:")]
     assert before.splitlines()[1:-1] == [
         "The person: Make a film about Mara", "You: A film about Mara. One thing first.",
-        "You asked: Color or black and white? (Color / Black and white)", "The person: Color", "You: Color it is.",
+        "You asked: Color or black and white? (Color / Black and white; you recommended Color)", "The person: Color", "You: Color it is.",
     ], "the recap is the conversation the page shows, without this turn's own message"
 
     log = [{"kind": "user_message", "data": {"text": "x" * 5000}}] * 5 + [{"kind": "text", "data": {"text": "partial", "partial": True}},

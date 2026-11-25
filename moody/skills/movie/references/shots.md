@@ -60,8 +60,8 @@ question is whether the look holds when it moves; a pretty test is not the goal.
    about the shots; that model's lowest resolution; 4 or 5 seconds; the film's aspect ratio.
 4. **Show them together** and ask one question, with what to look for: the face against the
    sheet, hands, the clothes, the light, whether the motion is the action asked for. Options:
-   "It holds: plan the shots (recommended when nothing drifted)", "Fix a character", "Fix the
-   place", "Change the look".
+   "It holds: plan the shots", "Fix a character", "Fix the place", "Change the look". Recommend
+   the first when nothing drifted, and otherwise the fix for what did.
 5. **A test that fails is fixed at the entry**, not by rewording the shot:
 
    | What drifted | Go back to |

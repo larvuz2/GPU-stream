@@ -60,9 +60,12 @@ end its turn and ask. The answer is recorded in the database once
 (`moody_resolve_approval`), whoever is first.
 
 The model is `MOODY_AGENT_MODEL`, Claude Fable 5.2 by default, with summarized
-thinking, which the page shows; effort, the budget of one turn, and the most
-steps one turn may take are configuration (`loop_settings`). A subagent runs
-on the tier its definition names, which the deployment maps to a model.
+thinking, which the page shows; effort is configuration (`loop_settings`). A
+subagent runs on the tier its definition names, which the deployment maps to
+a model. What one turn may spend on the model and how many steps it may take
+are its person's own settings (`Sessions.limits`), read as the turn begins;
+a turn that reaches one ends with an `error` event that names the limit, so
+the page can offer the setting where it tells the person.
 
 The turn's worker beats every `HEARTBEAT_SECONDS` on a thread of its own
 (`moody_turn_alive`), which both shows the turn is alive, so a turn whose
@@ -347,6 +350,10 @@ The machines an engine runs on (`tier`):
   and two to five short options. Asking ends your turn: the question is shown to the person, and their answer, an
   option or their own words, is the next message you get. Decide the craft questions yourself, as a professional
   would, and say what you chose.
+- Every decision you put to the person carries your own recommendation, chosen for this project's taste and
+  brief, in a question and in an interactive card alike: name the option you would choose in `ask_user`'s
+  `recommended`, and open a card on what you would choose. They work with you for your judgment, and with it in
+  front of them they agree in one click or see what they are deciding against.
 - Keep the plan current with `update_plan`: a few concrete tasks, one of them active at a time.
 - The library holds what the project is made of: characters, environments, props, products, shots, or whatever
   sections it needs (`set_library_sections`). Each entry has a tag such as `@mara`, and the person and the
@@ -400,13 +407,19 @@ The machines an engine runs on (`tier`):
   start of each turn, in a `<project_state>` block that {brand} writes, not the person. Trust it over what you
   remember of earlier turns.
 - Before you start, say in a line what you are about to do; brief updates while you work help the person follow
-  along. Close with a short recap that stands on its own: what you did, what you found, and what is next.
+  along.
 
 # Communicating clearly
 
 Write for an intelligent reader who has not seen your tool calls or your reasoning. Put the key point first, use
-plain words in full sentences, and do not use a term you made up during the work. Keep messages short: the person
-is making something with you, not reading a report."""
+plain words in full sentences, and do not use a term you made up during the work.
+
+A short exchange gets a short answer in plain sentences, with no headings: the person is making something with
+you, and structure on a reply of a few lines reads like paperwork. A long job (many steps, subagents, or minutes
+of work) ends with a report, because the person was not watching and picks the work up from your last message
+alone. Put it under short headings chosen for what there is to say, such as what was done, what there is now,
+the decisions that are theirs, what you need from them, and what you do not know: a few bullets under each, the
+most important first, and only the headings that have content."""
 
 
 # What a subagent is told beside its own prompt
@@ -472,13 +485,23 @@ LOOK = {
 TOOLS = [
     tool(
         "ask_user",
-        "Ask the person a question whose answer is theirs to give, with options they can pick. This ends your turn: "
-        "the question is shown to them, and their answer, an option or their own words, is the next message you get.",
+        "Ask the person a question whose answer is theirs to give, with options they can pick, one of which you "
+        "recommend. This ends your turn: the question is shown to them, and their answer, an option or their own "
+        "words, is the next message you get.",
         {
             "question": {"type": "string", "description": "The question, in a sentence or two."},
-            "options": {**STRINGS, "description": "Two to five short answers to pick from."},
+            "options": {
+                **STRINGS,
+                "description": "Two to five short answers to pick from. An option's text is only the option: it "
+                "never says that it is recommended.",
+            },
+            "recommended": {
+                "type": "string",
+                "description": "The option you would choose for this project, written exactly as it is in options. "
+                "The person sees it marked as your recommendation.",
+            },
         },
-        ["question", "options"],
+        ["question", "options", "recommended"],
         activity="curious", main_only=True,
     ),
     tool(
@@ -807,6 +830,8 @@ SPECS = {definition["name"]: definition for definition in TOOLS}
 # What a tool's `approval` says where the person approves each call of it, and what a project's permissions say
 # where they no longer want to be asked
 APPROVAL_ASK = "ask"
+# How an option of a question would say that it is the recommended one, in lowercase, which the page says itself
+RECOMMENDED_MARK = "(recommended"
 ALWAYS = "always"
 
 
@@ -824,8 +849,8 @@ def check_activities(catalog: Catalog) -> None:
         raise ValueError(f"these tools name activities catalog.json does not have: {unknown}")
 
 
-def loop_settings(config: Config) -> Settings:
-    """What the deployment configures of the loop.
+def loop_settings(config: Config, limits: dict[str, Any]) -> Settings:
+    """What the deployment configures of the loop, and the limits of the person whose turn it runs (`Sessions.limits`).
 
     Raises:
         ValueError: The configured effort is none the loop knows.
@@ -838,8 +863,8 @@ def loop_settings(config: Config) -> Settings:
         effort=config.agent_effort,
         thinking=config.agent_thinking,
         fallback_model=config.agent_fallback_model,
-        budget_usd=config.turn_budget_usd,
-        turn_limit=config.turn_limit,
+        budget_usd=float(limits["turn_budget_usd"]),
+        turn_limit=int(limits["turn_limit"]),
         base_url=config.anthropic_base_url,
         passed=config.loop_env,
         cli=config.loop_cli,
@@ -864,7 +889,8 @@ def recap(events: list[dict[str, Any]]) -> str:
         elif event["kind"] == "text":
             lines.append(f"You: {data.get('text', '')}")
         elif event["kind"] == "ask":
-            lines.append(f"You asked: {data.get('question', '')} ({' / '.join(data.get('options', []))})")
+            advised = f"; you recommended {data['recommended']}" if data.get("recommended") else ""
+            lines.append(f"You asked: {data.get('question', '')} ({' / '.join(data.get('options', []))}{advised})")
     kept: list[str] = []
     for line in reversed(lines[-RECAP_EVENTS:]):
         if sum(map(len, kept)) + len(line) > RECAP_CHARACTERS:
@@ -1099,6 +1125,8 @@ class Turn:
         self.turn_id = turn_id
         profile = sessions.me(User(id=project["user_id"], email=""))
         self.user = User(id=project["user_id"], email=profile["email"])
+        # What this turn may spend and how many steps it may take: its person's limits as the turn began
+        self.limits: dict[str, Any] = profile["limits"]
         self.stopped = threading.Event()
         self.done = threading.Event()
         self.heartbeat_seconds = heartbeat_seconds
@@ -1263,7 +1291,7 @@ class Agent:
                 workspace=workspace,
             )
             activities = {name: definition["activity"] for name, definition in SPECS.items()}
-            await TurnLoop(self, turn, brief, loop_settings(config), activities).run(self.loop)
+            await TurnLoop(self, turn, brief, loop_settings(config, turn.limits), activities).run(self.loop)
 
     def session(self, turn: Turn, store: Transcript, workspace: Workspace) -> tuple[str, bool]:
         """The loop's session that is the project's conversation, and whether it is resumed or begins now.
@@ -1605,12 +1633,35 @@ class Agent:
 
     # The person
 
-    def tool_ask_user(self, turn: Turn, question: str, options: list[str]) -> Result:
-        """Put a question to the person and end the turn: their answer is the next turn's message."""
+    def tool_ask_user(self, turn: Turn, question: str, options: list[str], recommended: str) -> Result:
+        """Put a question to the person, with the option the agent would choose, and end the turn.
+
+        The person's answer is the next turn's message. The page marks the
+        recommendation itself, so it is named apart from the options and has
+        to be one of them, and an option that carries the mark in its own
+        text is sent back to be written without it.
+
+        Raises:
+            Refused: 409 for a second question in one turn, 400 for a recommendation that is none of
+                the options or an option that says it is recommended.
+        """
         if turn.asked:
             raise Refused(409, "Ask one question at a time; ask this one after the person answers.")
+        chosen = next((option for option in options if option.strip() == recommended.strip()), None)
+        if chosen is None:
+            raise Refused(
+                400,
+                f"recommended has to be one of the options, written exactly as it is there: {' / '.join(options)}. "
+                "Ask again with the one you would choose.",
+            )
+        if any(RECOMMENDED_MARK in option.lower() for option in options):
+            raise Refused(
+                400,
+                "An option's text is only the option: take the words that say it is recommended out of it, and name "
+                "that option in recommended. Ask again.",
+            )
         turn.asked = True
-        turn.event("ask", {"question": question, "options": options})
+        turn.event("ask", {"question": question, "options": options, "recommended": chosen})
         return Result(
             "The question is with the person now, and this turn is over. Their answer is the next message you get.",
             "Asked",

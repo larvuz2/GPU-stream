@@ -14,10 +14,11 @@ photocraft-commands.md; parameters and units are explained there.
 
 Open the picture, take a screenshot at fit and one at 100% on the face or the product, and say
 what you see before you touch it: what is good, what distracts, what you propose. Then ask how
-far to go, because that is the person's call:
+far to go, because that is the person's call, and recommend "Clean" unless the brief asks for a
+look:
 
-- "Clean (recommended): dust, blemishes, stray hairs, even skin, a little light. It still looks
-  like the day it was taken."
+- "Clean: dust, blemishes, stray hairs, even skin, a little light. It still looks like the day
+  it was taken."
 - "Polished: clean, plus shaping light, stronger color, tidied background."
 - "Stylized: a look. Tell me the reference."
 - "Technical only: color and exposure, no retouching."
