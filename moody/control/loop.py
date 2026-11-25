@@ -931,7 +931,7 @@ class TurnLoop:
             }
         if result.subtype == "error_max_turns":
             return {
-                "message": f"This turn reached your limit of {settings.turn_limit} steps and stopped. You can change "
+                "message": f"This turn reached your limit of {settings.turn_limit} step{'' if settings.turn_limit == 1 else 's'} and stopped. You can change "
                 "the limit in your settings. Send a message to go on.",
                 "limit": "steps",
             }
