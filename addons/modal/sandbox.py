@@ -81,8 +81,11 @@ FILMCRAFT_VERSION = "0.20.1"
 FILMCRAFT_SHA256 = "5667c7505c91d2ad9de3c4acb15cb02fc9f138fae74dce9c7c5f08bc29edb3a8"
 PHOTOCRAFT_VERSION = "0.23.1"
 PHOTOCRAFT_SHA256 = "baabdcdbe46df2f72ccf6ecc2e98be00fbc33dbd4c1cd9426362a89a4b95f673"
+LIGHTCRAFT_VERSION = "0.21.1"
+LIGHTCRAFT_SHA256 = "c91ef47bec44995d99ce58e6c748af9fa6ab1ff1c11de9e290e0b8231176dad1"
 CRAFT_RELEASES = {
     "filmcraft": (FILMCRAFT_VERSION, FILMCRAFT_SHA256),
+    "lightcraft": (LIGHTCRAFT_VERSION, LIGHTCRAFT_SHA256),
     "photocraft": (PHOTOCRAFT_VERSION, PHOTOCRAFT_SHA256),
 }
 # The Unreal session's GitHub client: Desktop Plus, a fork of GitHub Desktop kept current with it
@@ -104,6 +107,7 @@ SHARE = "/usr/local/share/selkies-modal"
 # FilmCraft's and PhotoCraft's control channels, which each binds on the Sandbox's loopback only
 FILMCRAFT_CONTROL_PORT = 9876
 PHOTOCRAFT_CONTROL_PORT = 7878
+LIGHTCRAFT_CONTROL_PORT = 7980
 # The TCP port a session's TURN relay listens on (webrtc/turnserver.sh), exposed with `tcp_ports`
 TURN_PORT = 3478
 # The Unreal view, the Unreal session's second page beside the desktop (unreal/view/view.sh)
@@ -164,6 +168,11 @@ APP_ENV = {
         "SELKIES_MODAL_APP": "photocraft",
         # The control channel; its token is the session's own (start_session)
         "PHOTOCRAFT_CONTROL_PORT": str(PHOTOCRAFT_CONTROL_PORT),
+    },
+    "lightcraft": {
+        "SELKIES_MODAL_APP": "lightcraft",
+        "LIGHTCRAFT_CONTROL_PORT": str(LIGHTCRAFT_CONTROL_PORT),
+        "WGPU_BACKEND": "vulkan",
     },
     "unreal": {
         "SELKIES_MODAL_APP": "unreal",
@@ -246,6 +255,8 @@ def session_image(app: str = "blender") -> modal.Image:
         )
         if app == "filmcraft":
             image = image.add_local_file(HERE / "filmcraft" / "control.sh", "/usr/local/bin/selkies-modal-filmcraft", copy=True)
+        if app == "lightcraft":
+            image = image.add_local_file(HERE / "lightcraft" / "control.sh", "/usr/local/bin/selkies-modal-lightcraft", copy=True)
     elif app == "nuke":
         image = (
             modal.Image.from_registry(BASE_IMAGE)
@@ -675,6 +686,54 @@ def filmcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] |
     return result if isinstance(result, dict) else {"result": result}
 
 
+def lightcraft_requests(sandbox: modal.Sandbox, requests: str, wait_seconds: int) -> modal.container_process.ContainerProcess:
+    """Hand JSON requests, one per line, to the session's LightCraft and return the process printing its replies.
+
+    As `filmcraft_requests`, through `lightcraft/control.sh`: from inside the
+    Sandbox, the only place the control channel listens, as a command of the
+    session, so it counts as use while it waits.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-lightcraft", str(wait_seconds), bufsize=1)
+    try:
+        process.stdin.write(requests)
+        process.stdin.write_eof()
+        process.stdin.drain()
+    except modal.exception.Error:
+        # The command ended before it read anything; its status and output say why
+        pass
+    return process
+
+
+def lightcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
+    """Send one request on the session's LightCraft control channel and return its result.
+
+    `method` and `params` are those of LightCraft's control protocol:
+    `engine.execute` with `{"command", "params"}` runs any of its commands, and
+    the `ui.*` methods read and drive its window. `timeout` is how many seconds
+    to wait for LightCraft to listen and then for the reply. LightCraft gives up
+    on a reply itself after 60 s, so a long export is started with
+    `background: true` and followed with `ui.inspect`'s `export`.
+
+    The result is the reply's `result`, an object for most methods; a result
+    that is not one, such as the list `develop.controls` returns or the `null`
+    of a command with nothing to say, comes back as `{"result": ...}`.
+
+    Raises:
+        RuntimeError: LightCraft refused the request, with its message, or did not answer within `timeout`.
+    """
+    request = json.dumps({"id": 1, "method": method, "params": params or {}})
+    process = lightcraft_requests(sandbox, request + "\n", timeout)
+    output = process.stdout.read()
+    status = process.wait()
+    if not output.strip():
+        raise RuntimeError(f"LightCraft did not answer: {process.stderr.read().strip() or f'status {status}'}")
+    reply = json.loads(output.splitlines()[-1])
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("error") or output.strip())
+    result = reply.get("result")
+    return result if isinstance(result, dict) else {"result": result}
+
+
 def unreal_projects(sandbox: modal.Sandbox) -> list[dict[str, Any]]:
     """The Unreal projects in an Unreal session's workspace, as `selkies-modal-unreal-projects` describes them.
 
@@ -920,6 +979,20 @@ def filmcraft(args: argparse.Namespace) -> int:
     return status
 
 
+def lightcraft(args: argparse.Namespace) -> int:
+    """Send the JSON requests on standard input, one per line, to the session's LightCraft and print each reply."""
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    process = lightcraft_requests(sandbox, sys.stdin.read(), args.wait)
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    status = process.wait()
+    sys.stderr.write(process.stderr.read())
+    return status
+
+
 def down(args: argparse.Namespace) -> int:
     """Stop a session, which ends its billing; its workspace stays."""
     sandbox = find_session(args.name)
@@ -1073,6 +1146,12 @@ def parser() -> argparse.ArgumentParser:
     )
     control.add_argument(
         "--wait", type=int, default=60, help="seconds to wait for FilmCraft to be ready and for each reply (default: %(default)s)"
+    )
+    develop = named(
+        command("lightcraft", lightcraft, "Send the JSON requests on standard input, one per line, to a session's LightCraft.")
+    )
+    develop.add_argument(
+        "--wait", type=int, default=60, help="seconds to wait for LightCraft to listen and for each reply (default: %(default)s)"
     )
     named(command("down", down, "Stop a session."))
     drive = named(

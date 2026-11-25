@@ -1,0 +1,40 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Run by the Selkies window manager once it is up, as the session's
+# application, installed as /etc/xdg/openbox/autostart, which both backends
+# read: LightCraft, on the library of the session's project folder
+# (`craft/project.sh`), the folder a PhotoCraft or FilmCraft engine of the same
+# project opens in.
+#
+# Everything a person's work is made of stays in that folder, so the next
+# session finds it:
+#
+# - The library, `lightcraft-library`: the catalog (`catalog.snap` and the
+#   journal `catalog.log`, which LightCraft appends and syncs before it answers
+#   each change, so nothing waits for a Save), with every photo's develop
+#   settings, history, versions, masks, ratings, and albums, the saved export,
+#   curve, and filter presets, and the preview cache. LightCraft is
+#   non-destructive: an edit is a catalog record, never a change to the photo.
+#   A new library starts empty (`--no-demo`), without LightCraft's 24
+#   procedural demo photos, which would sit among a person's own.
+# - The settings folder, `.lightcraft` (LIGHTCRAFT_CONFIG_DIR): the interface's
+#   state, the user's develop presets (`presets.json`), the lens database once
+#   downloaded, optional models, and the logs.
+#
+# Photos are imported in place (`library.import`, mode `add`) from wherever
+# they are in the project folder, so the originals stay where the project's
+# other engines read them; the library holds their paths, which are the same in
+# every session since the workspace is mounted at one path.
+#
+# The control channel listens on the Sandbox's loopback only, on
+# LIGHTCRAFT_CONTROL_PORT, which the image sets. LightCraft's channel takes no
+# token: what guards it is that the port is bound to loopback in a Sandbox that
+# runs one person's session and exposes only the Selkies port (sandbox.py).
+folder="$(selkies-modal-project)" || exit 1
+mkdir -p "${folder}/.lightcraft"
+cd "${folder}" || exit 1
+export LIGHTCRAFT_CONFIG_DIR="${folder}/.lightcraft"
+exec lightcraft --no-demo --library "${folder}/lightcraft-library"
