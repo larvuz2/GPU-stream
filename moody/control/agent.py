@@ -1,65 +1,74 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
-"""A project's agent: one turn of Claude working with tools, run as a job the message route spawns.
+"""A project's agent: its tools, what it is told, and one turn of it, run as a job the message route spawns.
 
-A turn is a loop over the Messages API. Each request carries the project's
-whole conversation (`agent_messages`), the model answers with text and tool
-calls, the tools run, their results go back, and the loop ends when the model
-answers without a call, asks the person something (`ask_user`), is stopped, or
-reaches `MAX_STEPS`. As it goes it appends events to the project's log in the
-order things happen (`text`, `tool_start`, `tool_end`, `ask`, `plan`,
-`library`, `engine`, `screen`, `error`), and the database ends the turn with
-`turn_end` (`moody_end_turn`), so the page that polls the log sees the whole
-turn. A `screen` event puts an engine, and which of its pictures, on the
-person's Screen panel: the agent switches the view to what it wants them to
-look at, as `unreal_open` switches to the Unreal view once the editor opens.
+The agent's loop is the Claude Agent SDK's (`loop.py`): it asks the model,
+decides the next step, runs it, checks the result, and goes on, with
+subagents, skills loaded when the work calls for them, and the conversation
+summarized as it grows. Moody is everything around the loop and is here: the
+tools (`TOOLS`, `Agent.tool_<name>`), the system prompt (`system_prompt`),
+the project's state at the start of each turn (`Agent.state`), which skills
+and subagents a project is offered (`definitions.py`), the person's approvals
+(`Agent.approved`), and the turn itself (`Agent.run`, `Agent.converse`).
 
-The conversation is append-only, because the model's reasoning depends on it.
-The model thinks before it answers, and each thinking block is bound to the
-conversation that produced it: the top-level system prompt, the tools, and
-every message before it. A request that changed any of these would lose that
-reasoning, so:
+A turn appends events to the project's log in the order things happen
+(`thinking`, `text`, `tool_start`, `tool_end`, `ask`, `plan`, `library`,
+`engine`, `screen`, `preview`, `agent`, `approval`, `usage`, `error`), and the
+database ends it with `turn_end` (`moody_end_turn`), so the page that polls
+the log sees the whole turn. A `screen` event puts an engine, and which of its
+pictures, on the person's Screen panel: the agent switches the view to what it
+wants them to look at, as `unreal_open` switches to the Unreal view once the
+editor opens. An event a subagent caused carries its `agent_id`
+(`Turn.acting`).
 
-- The system prompt is the same for every turn of a project. It holds what
-  cannot change (the discipline and format, the engines, how to work, and the
-  skills of `moody/skills` that fit the discipline), and the tools are a fixed
-  list. What changes between turns (the name, the plan, the library, the
-  engines, GitHub) is a `system` message appended at the start of each turn,
-  after the person's message. Each open engine is listed with its app and
-  whether it has a command channel, under the project folder the engines
-  share, so the agent knows what it can drive and where files meet. Where an
-  Unreal engine runs, it also lists the
-  Unreal projects in that engine's workspace and which of them the agent has
-  not yet looked at with `unreal_projects`, and a clone of the linked repository
-  the engine started with that is still running or failed (`Agent.unreal_state`),
-  so a project just cloned is brought up without being asked; the machine is
-  asked only when such an engine runs.
-- A message is never rewritten once the model has answered past it. What a
-  turn leaves unanswered is completed by the next: a call the turn ended
-  before running is answered as not run, and `ask_user`'s call is answered
-  with the person's reply, which is how a question becomes the next turn's
-  start. A project-state message no answer followed is the one thing dropped.
-- Where a deploy changes the system prompt (a skill edited), the request asks
-  the API to drop the thinking blocks that no longer match rather than refuse
-  them (`prefix_mismatch_behavior: drop_block`).
+A project's conversation is one session of the loop
+(`projects.agent_session`), whose transcript the loop mirrors to the database
+as it writes it (`transcript.py`), so the next turn resumes it on whichever
+machine runs it. Nothing of the conversation is kept here. What a turn adds to
+it is the person's message followed by the project's state (`Agent.prompt`):
+its name, plan, library, engines, and GitHub link, which change between turns
+and so are no part of the system prompt. Each open engine is listed with its
+app and whether it has a command channel, under the project folder the
+engines share, so the agent knows what it can drive and where files meet.
+Where an Unreal engine runs, the state also lists the Unreal projects in that
+engine's workspace and which of them no `unreal_projects` call of the session
+has returned yet (`Agent.unreal_state`, which reads the session back for
+that), and a clone of the linked repository the engine started with that is
+still running or failed, so a project just cloned is brought up without being
+asked; the machine is asked only when such an engine runs. A project whose
+session is new but whose log is not (it began before its session, or the
+session could not be resumed) starts with a recap of the log (`recap`).
 
-The model is `MOODY_AGENT_MODEL`, Claude Fable 5.2 by default, the most capable
-model, which always thinks; effort is `high`. Its requests are streamed (a turn
-can think for minutes) with each tool's input streamed as it is written
-(`eager_input_streaming`), so every input is checked against its tool's schema
-before the tool runs. A request the model's safety classifiers decline is
-retried on the API's own fallback model (`fallbacks: "default"`), and the
-progress notes the model writes between tool calls come back as short
-`thinking` blocks (`display: "updates"`), shown as `text` events. The system
-prompt and the conversation are cached (`cache_control`), so a turn's later
-requests pay for the new messages only.
+A tool's definition is data (`tool`): beside its name, description, and input,
+it says what the agent looks like while the tool runs (`activity`, one of the
+catalog's `activities`, checked when an agent is made), whether it only reads,
+so the loop may run several at once, whether the person approves it first
+(`approval`), and whether only the agent itself may call it, not a subagent.
+The loop checks every input against its tool's schema before the tool runs.
+A tool's result may end the turn (`Result.ends_turn`): `ask_user` writes its
+`ask` event and ends the turn, so no machine waits on the person, and their
+answer is the next turn's message.
+
+A tool the person approves first (starting an engine, generating video) is
+not among the tools the loop may run unasked unless the project's permissions
+say `always` for it. For any other call of it the loop asks, and
+`Agent.approved` writes an `approval` event and waits for the person's answer
+(`POST /v1/projects/{pid}/approvals/{aid}`), for `Config.approval_seconds` at
+most, after which it records the approval as expired and tells the model to
+end its turn and ask. The answer is recorded in the database once
+(`moody_resolve_approval`), whoever is first.
+
+The model is `MOODY_AGENT_MODEL`, Claude Fable 5.2 by default, with summarized
+thinking, which the page shows; effort, the budget of one turn, and the most
+steps one turn may take are configuration (`loop_settings`). A subagent runs
+on the tier its definition names, which the deployment maps to a model.
 
 The turn's worker beats every `HEARTBEAT_SECONDS` on a thread of its own
 (`moody_turn_alive`), which both shows the turn is alive, so a turn whose
 worker died does not hold the project, and tells it when the person asked it
-to stop; the loop, a running generation, and an engine's start each look at
-that answer between steps.
+to stop; the loop is interrupted then, and a running generation, an engine's
+start, and an approval each look at that answer between their own steps.
 
 Every tool acts as the project's user, through `Sessions`, so the agent of one
 user's project reaches nothing of another's.
@@ -119,14 +128,29 @@ import time
 import traceback
 import unicodedata
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Protocol
+from pathlib import PurePosixPath
+from typing import Any, Callable, Iterator, get_args
 from urllib.parse import quote
 
-import anthropic
+import anyio
+import anyio.from_thread
+from claude_agent_sdk import EffortLevel, get_session_messages_from_store, project_key_for_directory
 
+from definitions import (
+    AgentSpec,
+    Skill,
+    agents_directory,
+    agents_for,
+    matching,
+    operators,
+    read_agents,
+    read_skills,
+    skills_directory,
+    skills_for,
+)
 from generation import (
     VIDEO_LONGEST,
     video_kilotokens,
@@ -144,6 +168,7 @@ from generation import (
     video_arguments,
 )
 from github_client import GitHubError
+from loop import BUILT_INS, PREFIX, Brief, Loop, Settings, Subagent, ToolSpec, TurnLoop, Workspace, sdk_loop
 from service import (
     DESKTOP,
     LIBRARY_BUCKET,
@@ -156,6 +181,7 @@ from service import (
     STREAMS,
     UNREAL_VIEW,
     Catalog,
+    Config,
     Refused,
     Sessions,
     User,
@@ -163,21 +189,10 @@ from service import (
     normal_tag,
     safe_name,
 )
+from transcript import Transcript
 import unreal
 
-HERE = Path(__file__).resolve().parent
 DEFAULT_MODEL = "claude-fable-5-2"
-EFFORT = "high"
-MAX_TOKENS = 64000
-BETAS = [
-    # Retry a request the model's safety classifiers decline on the API's own fallback model
-    "server-side-fallback-2026-07-01",
-    # Let a request drop thinking blocks a changed system prompt invalidated rather than fail
-    "thinking-binding-controls-2026-08-01",
-    # Return the model's notes between tool calls, which `display: "updates"` asks for
-    "thinking-display-updates-2026-08-18",
-]
-MAX_STEPS = 60
 HEARTBEAT_SECONDS = 20
 ENGINE_START_SECONDS = 300
 ENGINE_POLL_SECONDS = 3
@@ -186,6 +201,14 @@ OUTPUT_LIMIT = 20000
 READ_LIMIT = 100000
 IMAGE_SECONDS = 300
 VIDEO_SECONDS = 1200
+# How often a call that waits for the person's approval looks for their answer
+APPROVAL_POLL_SECONDS = 1.0
+# What the answer to an approval may be, and what a wait that ran out is recorded as
+APPROVAL_DECISIONS = ("once", "always", "deny")
+APPROVAL_EXPIRED = "expired"
+# The most of a project's earlier log a new session's recap carries, in events and in characters
+RECAP_EVENTS = 60
+RECAP_CHARACTERS = 12000
 # Where an engine mounts the user's workspace, unless its environment says otherwise
 WORKSPACE = "/home/ubuntu/workspace"
 # The agent's branches in a repository: this, the project's name as a slug, and the start of its id
@@ -193,8 +216,6 @@ BRANCH_PREFIX = "moody/"
 # Paths unreal_assets gives of one kind asked for, and of each kind when none is
 ASSET_PATHS_ONE_KIND = 250
 ASSET_PATHS_EACH = 15
-# The `disciplines` a skill names to be read for every project
-EVERY_DISCIPLINE = "all"
 # Entries engine_files gives of one folder
 FILES_LIMIT = 500
 # The exit status engine_files' listing ends with where the path is not there
@@ -248,174 +269,6 @@ class TurnStopped(Exception):
     """The person stopped the turn, or it is no longer the project's."""
 
 
-class ModelError(Exception):
-    """The model could not be asked, with what to tell the person."""
-
-
-@dataclass
-class Reply:
-    """One answer of the model: its content blocks, as the API sent them, and why it stopped."""
-
-    content: list[dict[str, Any]]
-    stop_reason: str | None
-
-
-class Model(Protocol):
-    """The Messages API as the loop uses it, which a test stands in for with a scripted model."""
-
-    def respond(
-        self,
-        system: list[dict[str, Any]],
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        on_block: Callable[[dict[str, Any]], None],
-        alive: Callable[[], bool],
-    ) -> Reply:
-        """Ask the model to continue the conversation, handing each finished content block to `on_block`.
-
-        Raises:
-            TurnStopped: `alive` said to stop while the answer streamed.
-            ModelError: the API could not be reached or refused the request.
-        """
-
-
-def as_dict(block: Any) -> dict[str, Any]:
-    """A content block as the API sent it, ready to store and send back unchanged."""
-    return block.to_dict(mode="json", exclude_none=True)
-
-
-class Claude:
-    """The Messages API through the Anthropic SDK, streamed."""
-
-    def __init__(self, key: str, model: str) -> None:
-        self.client = anthropic.Anthropic(api_key=key, max_retries=4)
-        self.model = model
-
-    def respond(
-        self,
-        system: list[dict[str, Any]],
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        on_block: Callable[[dict[str, Any]], None],
-        alive: Callable[[], bool],
-    ) -> Reply:
-        """Stream one answer, handing over each content block as it completes.
-
-        A tool input the SDK cannot parse at all ends the stream with a
-        `ValueError` before its block completes, so there is no call to
-        answer; the request is made again, twice at most.
-        """
-        for attempt in range(3):
-            try:
-                with self.client.beta.messages.stream(
-                    model=self.model,
-                    max_tokens=MAX_TOKENS,
-                    system=system,
-                    messages=messages,
-                    tools=tools,
-                    thinking={
-                        "type": "adaptive",
-                        "display": "updates",
-                        "block_binding": {"prefix_mismatch_behavior": "drop_block"},
-                    },
-                    output_config={"effort": EFFORT},
-                    cache_control={"type": "ephemeral"},
-                    fallbacks="default",
-                    betas=BETAS,
-                ) as stream:
-                    for event in stream:
-                        if event.type == "content_block_stop":
-                            on_block(as_dict(event.content_block))
-                        if not alive():
-                            raise TurnStopped()
-                    message = stream.get_final_message()
-                return Reply(content=[as_dict(block) for block in message.content], stop_reason=message.stop_reason)
-            except ValueError as error:
-                if attempt == 2:
-                    raise ModelError("The model's tool call could not be read. Send a message to try again.") from error
-            except anthropic.RateLimitError as error:
-                raise ModelError("The model is busy right now. Try again in a minute.") from error
-            except anthropic.APIStatusError as error:
-                raise ModelError(f"The model refused the request ({error.status_code}): {error.message}") from error
-            except anthropic.APIConnectionError as error:
-                raise ModelError("The model could not be reached. Try again.") from error
-        raise ModelError("The model could not be asked.")
-
-
-# Skills
-
-
-@dataclass(frozen=True)
-class Skill:
-    """A skill of `moody/skills/<name>/SKILL.md`: its name, the disciplines it is for, and its text."""
-
-    name: str
-    description: str
-    disciplines: frozenset[str]
-    body: str
-
-
-def skills_directory() -> Path:
-    """Where the skills are: beside this module in the deployed image, `moody/skills` in the repository."""
-    for candidate in (HERE / "skills", HERE.parent / "skills"):
-        if candidate.is_dir():
-            return candidate
-    return HERE / "skills"
-
-
-def front_matter(text: str) -> tuple[dict[str, str], str]:
-    """A Markdown file's front matter, as `key: value` lines, and the text after it."""
-    if not text.startswith("---\n"):
-        return {}, text
-    head, _, body = text[4:].partition("\n---")
-    fields = {}
-    for line in head.splitlines():
-        key, colon, value = line.partition(":")
-        if colon and key.strip() and not line.startswith((" ", "\t")):
-            fields[key.strip()] = value.strip().strip("\"'")
-    return fields, body.lstrip("-").lstrip("\n")
-
-
-def read_skills(directory: Path) -> list[Skill]:
-    """Every skill under a directory, in name order, each with the reference files it links to.
-
-    A skill says which disciplines it is for with a `disciplines` line in its
-    front matter (`disciplines: media, animation`, or `disciplines: all` for
-    every project); one that does not is for the disciplines that use the
-    engine it is named after, and one named after no engine is for every
-    discipline (`skills_for`). The other Markdown files
-    of a skill's directory (its `references/`) follow its text under their
-    paths, which is where its links to them lead: the agent has no tool to
-    open a file, so what a skill tells it to read has to be in the prompt.
-    """
-    skills = []
-    for path in sorted(directory.glob("*/SKILL.md")):
-        fields, body = front_matter(path.read_text())
-        disciplines = frozenset(
-            part.strip().lower() for part in fields.get("disciplines", "").strip("[]").split(",") if part.strip()
-        )
-        references = [
-            f"## {reference.relative_to(path.parent).as_posix()}\n\n{reference.read_text().strip()}"
-            for reference in sorted(path.parent.rglob("*.md"))
-            if reference != path
-        ]
-        skills.append(
-            Skill(path.parent.name, fields.get("description", ""), disciplines, "\n\n".join([body.strip(), *references]))
-        )
-    return skills
-
-
-def skills_for(skills: list[Skill], catalog: Catalog, discipline: str) -> list[Skill]:
-    """The skills that fit a discipline, which those for every discipline (`EVERY_DISCIPLINE`) always do."""
-    engines = set(catalog.disciplines.get(discipline, {}).get("engines", []))
-    return [
-        skill
-        for skill in skills
-        if not skill.disciplines.isdisjoint((discipline, EVERY_DISCIPLINE))
-        or (not skill.disciplines and (skill.name in engines or skill.name not in catalog.apps))
-    ]
-
-
 # Prompts
 
 
@@ -424,12 +277,14 @@ def project_folder(project_id: str) -> str:
     return f"{WORKSPACE}/projects/{project_id}"
 
 
-def system_prompt(catalog: Catalog, project: dict[str, Any], skills: list[Skill], tiers: frozenset[str]) -> str:
-    """The project's system prompt, the same text for every turn of the project: nothing in it changes with the work.
+def system_prompt(catalog: Catalog, project: dict[str, Any], tiers: frozenset[str]) -> str:
+    """The project's system prompt: what does not change with the work.
 
-    It is built from the project's discipline and format, the catalog, the
-    machine tiers the deployment switched on, and the skills, so a deploy that
-    changes one of those changes it, which the request's `drop_block` absorbs.
+    It is built from the project's discipline and format, the catalog, and
+    the machine tiers the deployment switched on. What changes between turns
+    arrives with each message (`Agent.prompt`), and the skills and subagents
+    the project is offered are listed by the loop, which loads a skill's text
+    only when the agent opens it.
     """
     brand = catalog.data["brand"]
     discipline = catalog.disciplines.get(project["discipline"], {"name": project["discipline"], "blurb": "", "engines": []})
@@ -457,10 +312,9 @@ def system_prompt(catalog: Catalog, project: dict[str, Any], skills: list[Skill]
         if tier["id"] in tiers
     ]
     folder = project_folder(project["id"])
-    sections = [
-        f"""You are the agent of {brand} Studio. You work with one person on one creative project, and you make it with
-them step by step: you plan, write, generate images and video, open creative engines on cloud machines and drive
-them, and you ask the person at every decision that is theirs to make.
+    return f"""You are the {brand} agent, a person's creative assistant in {brand} Studio. You work with one person on one
+creative project, and you make it with them step by step: you plan, write, generate images and video, open creative
+engines on cloud machines and drive them, and you ask the person at every decision that is theirs to make.
 
 # The project
 
@@ -479,8 +333,9 @@ The machines an engine runs on (`tier`):
 # How you work
 
 - The person decides what is theirs: the story, the look, which take to keep, what to spend. Ask with `ask_user`
-  and two to five short options. Asking ends your turn, and their answer comes back as that call's result. Decide
-  the craft questions yourself, as a professional would, and say what you chose.
+  and two to five short options. Asking ends your turn: the question is shown to the person, and their answer, an
+  option or their own words, is the next message you get. Decide the craft questions yourself, as a professional
+  would, and say what you chose.
 - Keep the plan current with `update_plan`: a few concrete tasks, one of them active at a time.
 - The library holds what the project is made of: characters, environments, props, products, shots, or whatever
   sections it needs (`set_library_sections`). Each entry has a tag such as `@mara`, and the person and the
@@ -488,14 +343,20 @@ The machines an engine runs on (`tier`):
 - `generate_image` and `generate_video` take library tags as references, so the same character looks the same
   in every shot; mention each reference's tag in the prompt where it appears. Save what you generate to the entry
   it belongs to (`save_to`). The person sees each result in the conversation; ask before you build on one.
-- An engine runs on a cloud machine and costs the person credits every minute it runs. Start one when the work
-  needs it and stop it when that work is done; do not leave one running at the end of a turn unless the person is
-  using it. The person watches a running engine in the Screen panel, and `engine_show` puts the engine and view
-  you want them to look at there (an Unreal engine has two: Desktop and Unreal). Every engine of this project
-  opens in the project's folder, `{folder}`, which they share; `engine_import` copies library entries into its
-  `library` folder.
+- An engine is a cloud machine that costs the person credits every minute it runs, so none starts unless the work
+  needs it or the person asked. Planning, writing, the library, and generating images and video need no engine:
+  do them first, with your own tools. Start an engine at the step that cannot be done without it (cutting the
+  shots together, retouching, mixing), and stop it when that work is done; do not leave one running at the end of
+  a turn unless the person is using it, and say so in a line if you do. The person watches a running engine in
+  the Screen panel, and `engine_show` puts the engine and view you want them to look at there (an Unreal engine
+  has two: Desktop and Unreal). Every engine of this project opens in the project's folder, `{folder}`, which they
+  share; `engine_import` copies library entries into its `library` folder.
+- The person approves some steps before they run: starting an engine and generating video. Call the tool when the
+  work calls for it; the person is asked then, and you get the tool's result if they agree. If they decline, do
+  not call it again: go on another way or ask what they want. If they do not answer in time, end your turn with
+  a line that says what you were about to do and why.
 - `engine_call` runs a command of an engine's own command channel, the same commands its interface runs, for every
-  engine that has one; the turn's state says which do. An engine without one you drive with `engine_exec`, or you
+  engine that has one; the project's state says which do. An engine without one you drive with `engine_exec`, or you
   ask the person to do the step on its screen. Work passes from one engine to another as files in the project's
   folder. An engine sees what was in the folder when it started and what it wrote itself, so a file another
   running engine wrote since is carried over with `engine_send`; `engine_files` lists the folder as an engine sees
@@ -509,8 +370,21 @@ The machines an engine runs on (`tier`):
   (`moody/...`), never on its default branch or a branch someone else made; give the person the branch and the
   compare link it returns, where they open a pull request. `github_read` reads the default branch, or your branch
   with `ref: agent`.
-- The project's state (its name, plan, library, engines, and GitHub link) arrives as a system message at the start
-  of each turn. Trust it over what you remember of earlier turns.
+- Your skills hold the craft and the commands of each engine. The ones this project has are listed for you; open
+  one with the Skill tool before the work it covers, not before. A skill's text names its reference files by
+  their path under its base directory, and you read one with the Read tool when the step you are on needs it.
+  Read reads nothing else.
+- You can hand work to a subagent with the Agent tool: one job, described so that it stands on its own, since a
+  subagent knows nothing of this conversation. It works with its own tools and comes back with a report, which
+  the person does not see; tell them what matters of it. Hand over what is self-contained and would crowd this
+  conversation (research, a survey of the library, a long run of commands in one engine), and start several in
+  one step when their jobs do not depend on each other. Do yourself what is quick, and everything that needs the
+  person: a subagent cannot ask them.
+- Your own tools are named `mcp__moody__<name>` in your tool list; this prompt and the skills call each by its
+  `<name>`.
+- The project's state (its name, plan, library, engines, and GitHub link) follows the person's message at the
+  start of each turn, in a `<project_state>` block that {brand} writes, not the person. Trust it over what you
+  remember of earlier turns.
 - Before you start, say in a line what you are about to do; brief updates while you work help the person follow
   along. Close with a short recap that stands on its own: what you did, what you found, and what is next.
 
@@ -518,24 +392,47 @@ The machines an engine runs on (`tier`):
 
 Write for an intelligent reader who has not seen your tool calls or your reasoning. Put the key point first, use
 plain words in full sentences, and do not use a term you made up during the work. Keep messages short: the person
-is making something with you, not reading a report.""",
-    ]
-    for skill in skills:
-        header = f"# Skill: {skill.name}\n\nThe skill's reference files, which it links to, follow its text under their paths."
-        sections.append("\n\n".join(part for part in (header, skill.description, skill.body) if part))
-    return "\n\n".join(sections)
+is making something with you, not reading a report."""
 
 
-# Tools: each one's definition for the model, a title for the page, and its implementation (`Agent.tool_<name>`)
+# What a subagent is told beside its own prompt
+SUBAGENT_NOTE = """Your tools are named `mcp__moody__<name>` in your tool list; your instructions and the skills call each by its
+`<name>`. You work for the project's agent, not for the person: you cannot ask the person anything, and they do not
+see what you write. Your last message is your report to the agent. Make it stand on its own: what you did, what you
+found, the ids, tags, and paths the agent needs to go on, and anything you could not do and why."""
 
 
-def tool(name: str, description: str, properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
-    """A tool's definition for the Messages API, its input streamed as it is written."""
+# Tools: each one's definition for the model and the loop, a title for the page, and its implementation
+# (`Agent.tool_<name>`)
+
+
+def tool(
+    name: str,
+    description: str,
+    properties: dict[str, Any],
+    required: list[str],
+    *,
+    activity: str,
+    reads: bool = False,
+    approval: str | None = None,
+    main_only: bool = False,
+) -> dict[str, Any]:
+    """A tool's definition: what the model is told of it, and what the loop and the page are.
+
+    `activity` is what the agent looks like while the tool runs, one of the
+    catalog's `activities`. `reads` says the tool changes nothing, so the loop
+    may run it beside other such calls. `approval` is `ask` for a tool the
+    person approves before it runs. `main_only` keeps a tool to the agent
+    itself: a subagent is not offered it.
+    """
     return {
         "name": name,
         "description": description,
         "input_schema": {"type": "object", "properties": properties, "required": required},
-        "eager_input_streaming": True,
+        "activity": activity,
+        "read_only": reads,
+        "approval": approval,
+        "main_only": main_only,
     }
 
 
@@ -554,12 +451,13 @@ TOOLS = [
     tool(
         "ask_user",
         "Ask the person a question whose answer is theirs to give, with options they can pick. This ends your turn: "
-        "their answer, an option or their own words, comes back as this call's result when they reply.",
+        "the question is shown to them, and their answer, an option or their own words, is the next message you get.",
         {
             "question": {"type": "string", "description": "The question, in a sentence or two."},
             "options": {**STRINGS, "description": "Two to five short answers to pick from."},
         },
         ["question", "options"],
+        activity="curious", main_only=True,
     ),
     tool(
         "update_plan",
@@ -580,6 +478,7 @@ TOOLS = [
             }
         },
         ["items"],
+        activity="thinking",
     ),
     tool(
         "set_library_sections",
@@ -587,6 +486,7 @@ TOOLS = [
         "section that still has entries stays, after the ones given.",
         {"sections": STRINGS},
         ["sections"],
+        activity="processing",
     ),
     tool(
         "library_list",
@@ -594,6 +494,7 @@ TOOLS = [
         "and its media files.",
         {"section": STRING},
         [],
+        activity="searching", reads=True,
     ),
     tool(
         "library_upsert",
@@ -607,6 +508,7 @@ TOOLS = [
             "metadata": {"type": "object", "description": "Anything else worth keeping, as JSON."},
         },
         ["section", "name"],
+        activity="creating",
     ),
     tool(
         "generate_image",
@@ -630,6 +532,7 @@ TOOLS = [
             "save_to": SAVE_TO,
         },
         ["prompt"],
+        activity="creating",
     ),
     tool(
         "generate_video",
@@ -652,6 +555,7 @@ TOOLS = [
             "save_to": SAVE_TO,
         },
         ["prompt"],
+        activity="creating", approval="ask",
     ),
     tool(
         "engine_start",
@@ -662,14 +566,16 @@ TOOLS = [
             "tier": {"type": "string", "description": "The machine tier's id, such as cpu."},
         },
         ["app", "tier"],
+        activity="processing", approval="ask",
     ),
-    tool("engine_list", "List this project's open engines.", {}, []),
-    tool("engine_stop", "Stop one of this project's engines, which ends its cost.", {"engine_id": ENGINE_ID}, ["engine_id"]),
+    tool("engine_list", "List this project's open engines.", {}, [], activity="searching", reads=True),
+    tool("engine_stop", "Stop one of this project's engines, which ends its cost.", {"engine_id": ENGINE_ID}, ["engine_id"], activity="processing"),
     tool(
         "engine_screenshot",
         "See what a running engine's screen shows now, as the person sees it.",
         {"engine_id": ENGINE_ID},
         ["engine_id"],
+        activity="analyzing",
     ),
     tool(
         "engine_exec",
@@ -677,6 +583,7 @@ TOOLS = [
         f"output. It may run for {EXEC_SECONDS // 60} minutes.",
         {"engine_id": ENGINE_ID, "command": {"type": "string", "description": "A bash command."}},
         ["engine_id", "command"],
+        activity="processing",
     ),
     tool(
         "engine_show",
@@ -688,12 +595,14 @@ TOOLS = [
             "stream": {"type": "string", "enum": [DESKTOP, UNREAL_VIEW], "description": "Left out: Desktop."},
         },
         ["engine_id"],
+        activity="processing",
     ),
     tool(
         "engine_import",
         "Copy library entries' media into a running engine, under the project folder's library/<tag>/ folders.",
         {"engine_id": ENGINE_ID, "tags": STRINGS},
         ["engine_id", "tags"],
+        activity="processing",
     ),
     tool(
         "engine_call",
@@ -706,6 +615,7 @@ TOOLS = [
             "params": {"type": "object", "description": "The method's parameters, where it takes any."},
         },
         ["engine_id", "method"],
+        activity="processing",
     ),
     tool(
         "engine_files",
@@ -722,6 +632,7 @@ TOOLS = [
             },
         },
         ["engine_id"],
+        activity="searching", reads=True,
     ),
     tool(
         "engine_send",
@@ -740,6 +651,7 @@ TOOLS = [
             "to_path": {"type": "string", "description": "Where it goes in the project's folder. Left out: the same path."},
         },
         ["from_engine_id", "path", "to_engine_id"],
+        activity="processing",
     ),
     tool(
         "preview",
@@ -771,6 +683,7 @@ TOOLS = [
             },
         },
         ["engine_id", "caption"],
+        activity="analyzing",
     ),
     tool(
         "filmcraft",
@@ -778,6 +691,7 @@ TOOLS = [
         "runs. Returns FilmCraft's answer.",
         {"engine_id": ENGINE_ID, "method": STRING, "params": {"type": "object"}},
         ["engine_id", "method"],
+        activity="processing",
     ),
     tool(
         "github_save",
@@ -791,6 +705,7 @@ TOOLS = [
             "message": {"type": "string", "description": "The commit message."},
         },
         ["path", "content", "message"],
+        activity="processing",
     ),
     tool(
         "github_read",
@@ -805,6 +720,7 @@ TOOLS = [
             },
         },
         ["path"],
+        activity="analyzing", reads=True,
     ),
     tool(
         "unreal_assets",
@@ -820,6 +736,7 @@ TOOLS = [
             },
         },
         [],
+        activity="searching", reads=True,
     ),
     tool(
         "unreal_projects",
@@ -828,6 +745,7 @@ TOOLS = [
         "engine opens it, its C++ modules, its plugins, whether its repository uses Git LFS, and its size.",
         {"engine_id": ENGINE_ID},
         ["engine_id"],
+        activity="searching", reads=True,
     ),
     tool(
         "unreal_open",
@@ -838,68 +756,78 @@ TOOLS = [
         "what the person does.",
         {"engine_id": ENGINE_ID, "path": {"type": "string", "description": "The .uproject's path, from unreal_projects."}},
         ["engine_id", "path"],
+        activity="processing",
     ),
 ]
 TOOL_NAMES = [definition["name"] for definition in TOOLS]
-SCHEMAS = {definition["name"]: definition["input_schema"] for definition in TOOLS}
-JSON_TYPES: dict[str, tuple[type, ...]] = {
-    "object": (dict,),
-    "array": (list,),
-    "string": (str,),
-    "integer": (int,),
-    "number": (int, float),
-    "boolean": (bool,),
-}
+SPECS = {definition["name"]: definition for definition in TOOLS}
+# What a tool's `approval` says where the person approves each call of it, and what a project's permissions say
+# where they no longer want to be asked
+APPROVAL_ASK = "ask"
+ALWAYS = "always"
 
 
-def invalid(schema: dict[str, Any], value: Any, where: str = "input") -> str | None:
-    """What is wrong with a value for a schema of the tools' own kinds, or nothing.
+def check_activities(catalog: Catalog) -> None:
+    """Hold every tool's `activity`, and the loop's own tools', to the activities the catalog names.
 
-    A tool's input is streamed as the model writes it and parsed leniently, so
-    a call cut short can arrive as a well-formed but incomplete object; this
-    check is what keeps such a call from running.
+    Raises:
+        ValueError: A tool names an activity the catalog does not have, which the page could not draw.
     """
-    expected = schema.get("type")
-    if expected and (
-        not isinstance(value, JSON_TYPES[expected]) or (expected in ("integer", "number") and isinstance(value, bool))
-    ):
-        return f"{where} should be {'an' if expected[0] in 'aeiou' else 'a'} {expected}"
-    if "enum" in schema and value not in schema["enum"]:
-        return f"{where} should be one of {', '.join(map(str, schema['enum']))}"
-    if "minimum" in schema and value < schema["minimum"] or "maximum" in schema and value > schema["maximum"]:
-        return f"{where} should be from {schema.get('minimum')} to {schema.get('maximum')}"
-    if expected == "array":
-        for index, item in enumerate(value):
-            problem = invalid(schema.get("items", {}), item, f"{where}[{index}]")
-            if problem:
-                return problem
-    if expected == "object":
-        for name in schema.get("required", []):
-            if name not in value:
-                return f"{where} is missing {name}"
-        for name, item in value.items():
-            if name in schema.get("properties", {}):
-                problem = invalid(schema["properties"][name], item, f"{where}.{name}")
-                if problem:
-                    return problem
-    return None
+    known = {activity["id"] for activity in catalog.data.get("activities", [])}
+    named = {definition["name"]: definition["activity"] for definition in TOOLS}
+    named.update({name: built_in.activity for name, built_in in BUILT_INS.items()})
+    unknown = {name: activity for name, activity in named.items() if activity not in known}
+    if unknown:
+        raise ValueError(f"these tools name activities catalog.json does not have: {unknown}")
 
 
-def echoable(content: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """An answer's blocks as they go back to the API: after a fallback, what the declining model left is dropped.
+def loop_settings(config: Config) -> Settings:
+    """What the deployment configures of the loop.
 
-    Where the model's classifiers declined partway through an answer and the
-    fallback model went on, the blocks before the last `fallback` block that
-    are not text (thinking, tool calls, anything unknown) are the declined
-    model's and are not sent back, while the `fallback` blocks stay where
-    they are, as the API checks the thinking around them by their place.
+    Raises:
+        ValueError: The configured effort is none the loop knows.
     """
-    boundary = max((index for index, block in enumerate(content) if block.get("type") == "fallback"), default=-1)
-    return [
-        block
-        for index, block in enumerate(content)
-        if index >= boundary or block.get("type") in ("text", "fallback")
-    ]
+    if config.agent_effort not in get_args(EffortLevel):
+        raise ValueError(f"MOODY_AGENT_EFFORT is {config.agent_effort!r}; the loop takes {', '.join(get_args(EffortLevel))}")
+    return Settings(
+        key=config.anthropic_key,
+        model=config.agent_model or DEFAULT_MODEL,
+        effort=config.agent_effort,
+        thinking=config.agent_thinking,
+        fallback_model=config.agent_fallback_model,
+        budget_usd=config.turn_budget_usd,
+        turn_limit=config.turn_limit,
+        base_url=config.anthropic_base_url,
+        passed=config.loop_env,
+        cli=config.loop_cli,
+    )
+
+
+def recap(events: list[dict[str, Any]]) -> str:
+    """What was said in a project before its session began, from its event log, for the session's first message.
+
+    The person's messages, the agent's answers, and its questions, oldest
+    first and the most recent kept where there is more than a recap carries.
+    A block of an answer is in the log once whole, after its snapshots, and
+    only the whole one is told.
+    """
+    lines = []
+    for event in events:
+        data = event["data"]
+        if data.get("agent_id") or data.get("partial"):
+            continue
+        if event["kind"] == "user_message":
+            lines.append(f"The person: {data.get('text', '')}")
+        elif event["kind"] == "text":
+            lines.append(f"You: {data.get('text', '')}")
+        elif event["kind"] == "ask":
+            lines.append(f"You asked: {data.get('question', '')} ({' / '.join(data.get('options', []))})")
+    kept: list[str] = []
+    for line in reversed(lines[-RECAP_EVENTS:]):
+        if sum(map(len, kept)) + len(line) > RECAP_CHARACTERS:
+            break
+        kept.append(line)
+    return "\n".join(reversed(kept))
 
 
 def replace_tags(prompt: str, labels: dict[str, str]) -> str:
@@ -1093,13 +1021,17 @@ def agent_branch(project: dict[str, Any]) -> str:
 
 
 def reported_unreal(history: list[dict[str, Any]]) -> set[str]:
-    """The `.uproject` paths that the conversation's `unreal_projects` calls returned to the model."""
+    """The `.uproject` paths that a conversation's `unreal_projects` calls returned to the model.
+
+    `history` is the session's messages as the Messages API has them, each a
+    role and its content.
+    """
     calls = {
         block.get("id")
         for message in history
         if message["role"] == "assistant" and isinstance(message["content"], list)
         for block in message["content"]
-        if block.get("type") == "tool_use" and block.get("name") == "unreal_projects"
+        if block.get("type") == "tool_use" and block.get("name") == f"{PREFIX}unreal_projects"
     }
     paths: set[str] = set()
     for message in history:
@@ -1108,8 +1040,11 @@ def reported_unreal(history: list[dict[str, Any]]) -> set[str]:
         for block in message["content"]:
             if block.get("type") != "tool_result" or block.get("tool_use_id") not in calls or block.get("is_error"):
                 continue
+            said = block.get("content")
+            if isinstance(said, list):
+                said = "".join(part.get("text", "") for part in said if isinstance(part, dict))
             try:
-                answer = json.loads(block["content"])
+                answer = json.loads(said)
             except (TypeError, ValueError):
                 continue
             projects = answer.get("projects") if isinstance(answer, dict) else None
@@ -1125,6 +1060,7 @@ class Result:
     summary: str
     ok: bool = True
     media: list[dict[str, Any]] = field(default_factory=list)
+    ends_turn: bool = False
 
 
 class Turn:
@@ -1140,6 +1076,10 @@ class Turn:
         self.done = threading.Event()
         self.heartbeat_seconds = heartbeat_seconds
         self.heart = threading.Thread(target=self._beat_until_done, daemon=True)
+        # Whether the turn has put a question to the person, which it does once
+        self.asked = False
+        # The subagent the tool running on this thread was called by, where it was one
+        self.actor = threading.local()
 
     @property
     def project_id(self) -> str:
@@ -1163,36 +1103,68 @@ class Turn:
                 # A missed beat is retried at the next; only a long run of them lets the turn be taken over
                 traceback.print_exc()
 
+    @contextmanager
+    def acting(self, agent_id: str | None) -> Iterator[None]:
+        """Mark the events this thread writes meanwhile as a subagent's, where one is given."""
+        self.actor.agent_id = agent_id
+        try:
+            yield
+        finally:
+            self.actor.agent_id = None
+
     def event(self, kind: str, data: dict[str, Any]) -> None:
-        """Append an event of this turn to the project's log."""
+        """Append an event of this turn to the project's log, as the subagent's whose tool writes it."""
+        agent_id = getattr(self.actor, "agent_id", None)
+        if agent_id and "agent_id" not in data:
+            data = {**data, "agent_id": agent_id}
         self.sessions.add_event(self.project_id, self.turn_id, kind, data)
 
 
 class Agent:
-    """The loop and its tools, over a `Sessions` for the projects' data and engines.
+    """The agent's turns and its tools, over a `Sessions` for the projects' data and engines.
 
     Each tool is a method `tool_<name>` whose keyword arguments are its
-    input's fields, checked against its schema before it is called (`call`);
-    what it does is its definition's description in `TOOLS`, and it answers
-    with a `Result` or raises `Refused` with what to tell the model.
+    input's fields, which the loop checked against its schema before the call
+    (`run_tool`); what it does is its definition's description in `TOOLS`,
+    and it answers with a `Result` or raises `Refused` with what to tell the
+    model. `loop` is what runs a turn: the Claude Agent SDK, or what a test
+    puts in its place.
     """
 
-    def __init__(self, sessions: Sessions, model: Model, generator: Generator | None, skills: list[Skill]) -> None:
+    def __init__(
+        self,
+        sessions: Sessions,
+        loop: Loop,
+        generator: Generator | None,
+        skills: list[Skill],
+        agents: list[AgentSpec] | None = None,
+        derived: list[AgentSpec] | None = None,
+    ) -> None:
+        check_activities(sessions.catalog)
         self.sessions = sessions
-        self.model = model
+        self.loop = loop
         self.generator = generator
         self.skills = skills
+        # The subagents defined in files, and the operators derived from the apps that have a skill
+        self.agents = agents or []
+        self.derived = derived or []
         self.heartbeat_seconds: float = HEARTBEAT_SECONDS
+        self.approval_poll_seconds: float = APPROVAL_POLL_SECONDS
+        # A definition that names a tool there is none of stops the agent here, not in the middle of a person's turn
+        for discipline in sessions.catalog.disciplines:
+            self.subagents({"discipline": discipline}, skills_for(skills, sessions.catalog, discipline))
 
     @classmethod
     def for_deployment(cls, sessions: Sessions) -> Agent:
-        """The agent as the deployment configures it: its model, fal where there is a key, and the skills."""
-        config = sessions.config
+        """The agent as the deployment configures it: the loop, fal where there is a key, the skills, and the subagents."""
+        skills = read_skills(skills_directory())
         return cls(
             sessions,
-            Claude(config.anthropic_key, config.agent_model or DEFAULT_MODEL),
-            Fal(config.fal_key) if config.fal_key else None,
-            read_skills(skills_directory()),
+            sdk_loop,
+            Fal(sessions.config.fal_key) if sessions.config.fal_key else None,
+            skills,
+            read_agents(agents_directory()),
+            operators(agents_directory(), sessions.catalog, skills),
         )
 
     @property
@@ -1220,125 +1192,138 @@ class Agent:
             turn.done.set()
             self.store.rpc("moody_end_turn", p_project=project_id, p_turn=turn_id)
 
-    # The loop
+    # The turn
 
     def converse(self, turn: Turn) -> None:
-        """Ask the model, run the tools it calls, and go on until it is done, asks, or is stopped."""
+        """Hand the turn's message to the loop and let it work until it is done, asks, or is stopped."""
         opening = self.store.rows("project_events", turn_id=f"eq.{turn.turn_id}", kind="eq.user_message")
-        if not opening:
+        if not opening or not turn.beat():
             return
-        history = self.open_turn(turn, opening[0]["data"]["text"])
-        system = [
-            {
-                "type": "text",
-                "text": system_prompt(
-                    self.sessions.catalog,
-                    turn.project,
-                    skills_for(self.skills, self.sessions.catalog, turn.project["discipline"]),
-                    self.sessions.config.tiers,
-                ),
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
-        for _ in range(MAX_STEPS):
-            if not turn.beat():
-                return
-            try:
-                reply = self.model.respond(system, history, TOOLS, lambda block: self.show(turn, block), turn.alive)
-            except TurnStopped:
-                return
-            except ModelError as error:
-                turn.event("error", {"message": str(error)})
-                return
-            if reply.stop_reason == "refusal":
-                turn.event("error", {"message": "The model declined to go on with this. Try asking another way."})
-                return
-            content = echoable(reply.content)
-            if not content:
-                return
-            self.append(turn, history, "assistant", content)
-            if reply.stop_reason == "pause_turn":
-                continue
-            calls = [block for block in content if block.get("type") == "tool_use"]
-            if not calls:
-                return
-            results, ended = self.run_tools(turn, calls, cut_off=reply.stop_reason == "max_tokens")
-            if results:
-                self.append(turn, history, "user", results)
-            if ended:
-                return
-        turn.event("error", {"message": "This turn reached its limit of steps. Send a message to go on."})
+        anyio.run(self.work, turn, opening[0]["data"])
 
-    def show(self, turn: Turn, block: dict[str, Any]) -> None:
-        """Put a finished block of the model's answer in the log: its text, and the notes it writes between tools."""
-        words = block.get("text") if block.get("type") == "text" else block.get("thinking") if block.get("type") == "thinking" else None
-        if words and words.strip():
-            turn.event("text", {"text": words})
+    async def work(self, turn: Turn, said: dict[str, Any]) -> None:
+        """One turn on the loop: its working directory, its session, what it is told, and the run itself."""
+        config, catalog, project = self.sessions.config, self.sessions.catalog, turn.project
+        offered = skills_for(self.skills, catalog, project["discipline"])
+        store = Transcript(self.store, turn.project_id)
+        with Workspace(config.loop_root, turn.project_id) as workspace:
+            session, resume = await anyio.to_thread.run_sync(self.session, turn, store, workspace)
+            prompt = await anyio.to_thread.run_sync(self.prompt, turn, said, store, session, resume, workspace)
+            unasked = [
+                name
+                for name, definition in SPECS.items()
+                if definition["approval"] != APPROVAL_ASK or project["permissions"].get(name) == ALWAYS
+            ]
+            brief = Brief(
+                system=system_prompt(catalog, project, config.tiers),
+                prompt=prompt,
+                tools=[
+                    ToolSpec(name, definition["description"], definition["input_schema"], definition["activity"], definition["read_only"])
+                    for name, definition in SPECS.items()
+                ],
+                unasked=unasked,
+                subagents=self.subagents(project, offered),
+                skills=[(skill.name, skill.directory) for skill in offered],
+                session=session,
+                resume=resume,
+                store=store,
+                workspace=workspace,
+            )
+            activities = {name: definition["activity"] for name, definition in SPECS.items()}
+            await TurnLoop(self, turn, brief, loop_settings(config), activities).run(self.loop)
 
-    def append(self, turn: Turn, history: list[dict[str, Any]], role: str, content: Any) -> None:
-        """Add a message to the conversation, stored first."""
-        self.store.insert(
-            "agent_messages", {"project_id": turn.project_id, "turn_id": turn.turn_id, "role": role, "content": content}
-        )
-        history.append({"role": role, "content": content})
+    def session(self, turn: Turn, store: Transcript, workspace: Workspace) -> tuple[str, bool]:
+        """The loop's session that is the project's conversation, and whether it is resumed or begins now.
 
-    def open_turn(self, turn: Turn, text: str) -> list[dict[str, Any]]:
-        """The conversation with this turn's message added, and the project's state after it.
-
-        A call of the last answer that has no result yet gets one here: the
-        person's message where it was `ask_user`, "not run" otherwise. Where
-        the last turn left some results of that answer (it asked while other
-        calls ran), they are completed in the same message, which the model
-        has not seen, so nothing it saw changes.
+        A project keeps one session. It is resumed where its transcript is in
+        the database under this turn's working directory, and otherwise a new
+        one is named and kept before the turn runs, so what the turn writes is
+        found by the next one whatever happens to this one's machine.
         """
-        rows = self.store.every("agent_messages", project_id=f"eq.{turn.project_id}", order="id.asc")
-        # Project states no answer followed: their turn ended before the model replied
-        while rows and rows[-1]["role"] == "system":
-            self.store.delete("agent_messages", id=f"eq.{rows[-1]['id']}")
-            rows.pop()
-        last = max((index for index, row in enumerate(rows) if row["role"] == "assistant"), default=None)
-        calls = (
-            [block for block in rows[last]["content"] if block.get("type") == "tool_use"]
-            if last is not None and isinstance(rows[last]["content"], list)
-            else []
-        )
-        after = rows[last + 1 :] if last is not None else []
-        answered = {
-            block.get("tool_use_id") for row in after if isinstance(row["content"], list) for block in row["content"]
-        }
-        missing = [call for call in calls if call["id"] not in answered]
-        history = [{"role": row["role"], "content": row["content"]} for row in rows]
-        if missing:
-            results: list[dict[str, Any]] = []
-            replied = False
-            for call in missing:
-                if call["name"] == "ask_user" and not replied:
-                    results.append({"type": "tool_result", "tool_use_id": call["id"], "content": text})
-                    replied = True
-                else:
-                    results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": call["id"],
-                            "content": "Not run: the turn ended before this call ran.",
-                            "is_error": True,
-                        }
-                    )
-            if not replied:
-                results.append({"type": "text", "text": text})
-            if len(after) == 1 and isinstance(after[0]["content"], list):
-                content = [*after[0]["content"], *results]
-                self.store.update("agent_messages", {"content": content}, id=f"eq.{after[0]['id']}")
-                history[-1]["content"] = content
-            else:
-                self.append(turn, history, "user", results)
-        else:
-            self.append(turn, history, "user", text)
-        self.append(turn, history, "system", self.state(turn, history))
-        return history
+        project = turn.project
+        session = project.get("agent_session")
+        key = project_key_for_directory(workspace.directory)
+        if session and store.has({"project_key": key, "session_id": session}):
+            return session, True
+        session = str(uuid.uuid4())
+        self.store.update("projects", {"agent_session": session}, id=f"eq.{turn.project_id}")
+        project["agent_session"] = session
+        return session, False
 
-    def state(self, turn: Turn, history: list[dict[str, Any]]) -> str:
-        """The project as it is now, for the system message that starts a turn."""
+    def prompt(
+        self, turn: Turn, said: dict[str, Any], store: Transcript, session: str, resume: bool, workspace: Workspace
+    ) -> list[dict[str, Any]]:
+        """The turn's message as the model reads it: the person's words, then the project's state as Moody's own block.
+
+        Where the message locks in an interactive card, a line after the
+        person's words says which card and with which values. A session that
+        begins now, in a project whose log already has turns, is first told
+        what was said in them (`recap`).
+        """
+        words = said.get("text", "")
+        locked = said.get("ui")
+        if locked:
+            shown = self.store.rows("project_events", project_id=f"eq.{turn.project_id}", kind="eq.ui")
+            title = next((row["data"].get("title", "") for row in shown if row["data"].get("ui_id") == locked["ui_id"]), "")
+            words += (
+                f"\n\n[The person locked in the card {json.dumps(title or locked['ui_id'])} (ui_id {locked['ui_id']}) "
+                f"with these values: {json.dumps(locked.get('value'))}]"
+            )
+
+        def history() -> list[dict[str, Any]]:
+            if not resume:
+                return []
+            messages = anyio.from_thread.run(get_session_messages_from_store, store, session, str(workspace.directory))
+            return [
+                {"role": message.type, "content": message.message.get("content") if isinstance(message.message, dict) else None}
+                for message in messages
+            ]
+
+        state = self.state(turn, history)
+        if not resume:
+            earlier = self.store.every("project_events", project_id=f"eq.{turn.project_id}", order="id.asc")
+            before = recap([row for row in earlier if row["turn_id"] != turn.turn_id])
+            if before:
+                state = (
+                    "What was said in this project before this conversation, of which you remember nothing else:\n"
+                    f"{before}\n\n{state}"
+                )
+        return [{"type": "text", "text": words}, {"type": "text", "text": f"<project_state>\n{state}\n</project_state>"}]
+
+    def subagents(self, project: dict[str, Any], offered: list[Skill]) -> list[Subagent]:
+        """The subagents a project is offered, as the loop takes them.
+
+        A definition's tools are Moody's names or patterns over them, and may
+        name the loop's own web search and fetch; a tool kept to the agent
+        itself is left out, since a subagent cannot speak to the person. Its
+        model is the tier its definition names, as the deployment maps it.
+
+        Raises:
+            ValueError: A definition names a tool there is none of.
+        """
+        config = self.sessions.config
+        models = {"inherit": "inherit", "balanced": config.agent_model_balanced, "light": config.agent_model_light}
+        own = [name for name, definition in SPECS.items() if not definition["main_only"]]
+        named = [*own, *(name for name in BUILT_INS if name in ("web_search", "web_fetch"))]
+        return [
+            Subagent(
+                name=agent.name,
+                title=agent.title,
+                description=agent.description,
+                prompt=f"{agent.prompt}\n\n{SUBAGENT_NOTE}",
+                tools=tuple(matching(agent.tools, named)) if agent.tools else (),
+                skills=agent.skills,
+                model=models[agent.model],
+            )
+            for agent in agents_for(self.agents, self.derived, offered, project["discipline"])
+        ]
+
+    def state(self, turn: Turn, history: Callable[[], list[dict[str, Any]]]) -> str:
+        """The project as it is now, which follows the person's message at the start of a turn.
+
+        `history` gives the session's messages so far, and is asked only where
+        the state depends on them (`unreal_state`).
+        """
         project = turn.project
         github = self.sessions.github_status(turn.user)
         if project["github_repo"]:
@@ -1367,6 +1352,7 @@ class Agent:
             for engine in open_engines
         ]
         credits = self.sessions.me(turn.user)["credits"]
+        always = sorted(name for name, value in project["permissions"].items() if value == ALWAYS)
         return "\n".join(
             [
                 "The project's state at the start of this turn:",
@@ -1374,6 +1360,7 @@ class Agent:
                 f"GitHub: {linked}",
                 f"Generation: {'available' if self.generator else 'not configured on this deployment'}",
                 f"Credits the person has: {credits}",
+                f"The person no longer wants to be asked before: {', '.join(always) or '(nothing; they are asked each time)'}",
                 "Plan:",
                 *(plan or ["- (empty)"]),
                 f"Library sections: {', '.join(project['library_sections']) or '(none)'}",
@@ -1386,20 +1373,22 @@ class Agent:
             ]
         )
 
-    def unreal_state(self, turn: Turn, engines: list[dict[str, Any]], history: list[dict[str, Any]]) -> list[str]:
+    def unreal_state(
+        self, turn: Turn, engines: list[dict[str, Any]], history: Callable[[], list[dict[str, Any]]]
+    ) -> list[str]:
         """What a turn's start says of the Unreal projects in each running Unreal engine's workspace.
 
-        The machine is asked only for a running Unreal engine, once per turn. A project no earlier
-        `unreal_projects` call of the conversation returned is marked as not reported yet, with
-        what to do about it: what the person cloned is what they want to talk about next. A clone
-        the engine made as it started and has not finished, or that failed, is said first: until
-        it is done the project is not there to report, and a failed one the person clones by hand.
+        The machine is asked only for a running Unreal engine, once per turn, and the session is read
+        back only then. A project no earlier `unreal_projects` call of the session returned is marked
+        as not reported yet, with what to do about it: what the person cloned is what they want to
+        talk about next. A clone the engine made as it started and has not finished, or that failed,
+        is said first: until it is done the project is not there to report, and a failed one the
+        person clones by hand.
         """
         lines = []
-        reported = reported_unreal(history)
-        for engine in engines:
-            if engine["app"] != "unreal" or engine["status"] != "running":
-                continue
+        running = [engine for engine in engines if engine["app"] == "unreal" and engine["status"] == "running"]
+        reported = reported_unreal(history()) if running else set()
+        for engine in running:
             clone = self.sessions.engine_clone(turn.user, turn.project_id, engine["id"])
             repo = turn.project["github_repo"] or "the linked repository"
             if clone is not None and clone["state"] == "cloning":
@@ -1434,69 +1423,106 @@ class Agent:
                 )
         return lines
 
-    def run_tools(
-        self, turn: Turn, calls: list[dict[str, Any]], cut_off: bool
-    ) -> tuple[list[dict[str, Any]], bool]:
-        """Run an answer's calls in order and return their results and whether the turn ends here.
+    # What the loop asks of the agent (`loop.Host`)
 
-        It ends at an `ask_user`, whose result is the person's reply, and when
-        the turn is stopped; either way the calls not run are answered at the
-        start of the next turn (`open_turn`).
+    def run_tool(self, turn: Turn, name: str, arguments: dict[str, Any], call_id: str, agent_id: str | None) -> Result:
+        """Run one call with its `tool_end` event, and return its result for the model.
+
+        The call's `tool_start` is the loop's to write, as it reports the call.
+        A tool kept to the agent itself is refused to a subagent, and nothing
+        runs once the turn is stopped.
         """
-        results: list[dict[str, Any]] = []
-        asked = False
-        for call in calls:
+        with turn.acting(agent_id):
+            try:
+                if not turn.beat():
+                    raise TurnStopped()
+                if agent_id and SPECS[name]["main_only"]:
+                    raise Refused(409, f"Only the agent itself can use {name}. Put what you need from the person in your report.")
+                result: Result = getattr(self, f"tool_{name}")(turn, **arguments)
+            except Refused as refused:
+                result = Result(refused.message, refused.message, ok=False)
+            except GitHubError as error:
+                refused = self.sessions.github_refusal(error)
+                result = Result(refused.message, refused.message, ok=False)
+            except (GenerationStopped, TurnStopped):
+                result = Result("Stopped by the person.", "Stopped", ok=False)
+            except Exception as error:
+                # A tool that fails tells the model why, and the operator gets the traceback
+                traceback.print_exc()
+                result = Result(f"{type(error).__name__}: {error}", (str(error) or type(error).__name__)[:200], ok=False)
+            ended = {"call_id": call_id, "ok": result.ok, "summary": result.summary}
+            if result.media:
+                ended["media"] = result.media
+            turn.event("tool_end", ended)
+        return result
+
+    def approved(self, turn: Turn, name: str, arguments: dict[str, Any], agent_id: str | None) -> tuple[bool, str]:
+        """Whether a call the loop may not make unasked may run, and what the model is told where it may not.
+
+        A tool the person approves first is asked about here, unless the
+        project's permissions have come to say `always` for it since the turn
+        began: an `approval` event is written and the person's answer waited
+        for, which `Sessions.answer_approval` records. A wait that outlasts
+        `Config.approval_seconds` is recorded as expired, unless the answer
+        arrived in that same moment, in which case the answer stands. Any
+        other tool that reaches this is none the agent has.
+        """
+        definition = SPECS.get(name)
+        if definition is None:
+            return False, f"There is no tool {name}."
+        if definition["approval"] != APPROVAL_ASK:
+            return True, ""
+        project = self.store.rows("projects", id=f"eq.{turn.project_id}")
+        if project and project[0]["permissions"].get(name) == ALWAYS:
+            return True, ""
+        approval_id = uuid.uuid4().hex
+        asked = {"approval_id": approval_id, "tool": name, "title": self.title(turn, name, arguments), "detail": self.approval_detail(name, arguments)}
+        with turn.acting(agent_id):
+            turn.event("approval", asked)
+        deadline = time.monotonic() + self.sessions.config.approval_seconds
+        decision = None
+        while decision is None and time.monotonic() < deadline:
             if not turn.alive():
-                return results, True
-            if cut_off:
-                results.append(self.failure(call, "Your answer was cut off at the output limit before this call was "
-                                                  "complete. Make it again with less in one call."))
-            elif call["name"] == "ask_user" and not asked and not invalid(SCHEMAS["ask_user"], call.get("input")):
-                turn.event("ask", {"question": call["input"]["question"], "options": call["input"]["options"]})
-                asked = True
-            elif call["name"] == "ask_user" and asked:
-                results.append(self.failure(call, "Ask one question at a time; ask this one after the person answers."))
-            else:
-                results.append(self.call(turn, call))
-        return results, asked
-
-    @staticmethod
-    def failure(call: dict[str, Any], message: str) -> dict[str, Any]:
-        """A call's result that says it was not run, and why."""
-        return {"type": "tool_result", "tool_use_id": call["id"], "content": message, "is_error": True}
-
-    def call(self, turn: Turn, call: dict[str, Any]) -> dict[str, Any]:
-        """Run one call with its `tool_start` and `tool_end` events, and return its result for the model."""
-        if call["name"] not in SCHEMAS:
-            return self.failure(call, f"There is no tool {call['name']}.")
-        arguments = call.get("input")
-        problem = invalid(SCHEMAS[call["name"]], arguments)
-        if problem:
-            return self.failure(
-                call, json.dumps({"INVALID_INPUT": problem, "input": arguments}) + " Make the call again with valid input."
+                return False, "Stopped by the person."
+            answers = self.store.rows("project_events", project_id=f"eq.{turn.project_id}", kind="eq.approval_result")
+            decision = next((row["data"]["decision"] for row in answers if row["data"].get("approval_id") == approval_id), None)
+            if decision is None:
+                time.sleep(self.approval_poll_seconds)
+        if decision is None:
+            decision = self.store.rpc("moody_resolve_approval", p_project=turn.project_id, p_approval=approval_id, p_decision=APPROVAL_EXPIRED)
+        if decision in ("once", ALWAYS):
+            return True, ""
+        if decision == APPROVAL_EXPIRED:
+            return False, (
+                "The person did not answer in time, so this did not run. End your turn now: say in a line what you "
+                "were about to do and why, and ask them to say when to go ahead. Do not call this again in this turn."
             )
-        turn.event("tool_start", {"call_id": call["id"], "tool": call["name"], "title": self.title(turn, call["name"], arguments)})
-        try:
-            result: Result = getattr(self, f"tool_{call['name']}")(turn, **arguments)
-        except Refused as refused:
-            result = Result(refused.message, refused.message, ok=False)
-        except GitHubError as error:
-            refused = self.sessions.github_refusal(error)
-            result = Result(refused.message, refused.message, ok=False)
-        except (GenerationStopped, TurnStopped):
-            result = Result("Stopped by the person.", "Stopped", ok=False)
-        except Exception as error:
-            # A tool that fails tells the model why, and the operator gets the traceback
-            traceback.print_exc()
-            result = Result(f"{type(error).__name__}: {error}", (str(error) or type(error).__name__)[:200], ok=False)
-        ended = {"call_id": call["id"], "ok": result.ok, "summary": result.summary}
-        if result.media:
-            ended["media"] = result.media
-        turn.event("tool_end", ended)
-        outcome = {"type": "tool_result", "tool_use_id": call["id"], "content": result.content}
-        if not result.ok:
-            outcome["is_error"] = True
-        return outcome
+        return False, "The person declined, so this did not run. Do not call it again; go on another way, or ask what they want."
+
+    def approval_detail(self, name: str, arguments: dict[str, Any]) -> str:
+        """What an approval tells the person beyond the call's title: what it will cost them, as far as that is known."""
+        catalog = self.sessions.catalog
+        if name == "engine_start":
+            tier = catalog.tiers.get(arguments.get("tier", ""))
+            if tier is None:
+                return ""
+            rate = tier["credits_per_minute"]
+            return f"{tier['name']}: {rate} credit{'s' if rate != 1 else ''} a minute until it is stopped."
+        if name == "generate_video":
+            parts = [f"{arguments.get('model', 'standard')} model"]
+            if arguments.get("duration_seconds"):
+                parts.append(f"{arguments['duration_seconds']} seconds")
+            parts.append(arguments.get("resolution", "720p"))
+            return ", ".join(parts) + "."
+        return ""
+
+    def open_engines(self, turn: Turn) -> list[str]:
+        """The project's engines that are open now, each as a line for the model."""
+        return [
+            f"- {engine['id']}: {self.app_name(engine['app'])}, {engine['status']}"
+            for engine in self.sessions.engines(turn.user, turn.project_id)
+            if engine["status"] in OPEN
+        ]
 
     def title(self, turn: Turn, name: str, arguments: dict[str, Any]) -> str:
         """A short line that says what a call does, for the page.
@@ -1514,6 +1540,7 @@ class Agent:
         app = apps.get(arguments.get("app", ""), {}).get("name", arguments.get("app", ""))
         count = arguments.get("count", 1)
         return {
+            "ask_user": "Asking you",
             "update_plan": "Updating the plan",
             "set_library_sections": "Arranging the library",
             "library_list": "Reading the library",
@@ -1540,6 +1567,20 @@ class Agent:
             "unreal_projects": "Looking for Unreal projects in the engine",
             "unreal_open": f"Opening {PurePosixPath(arguments.get('path', '')).stem or 'the project'} in Unreal",
         }.get(name, name)
+
+    # The person
+
+    def tool_ask_user(self, turn: Turn, question: str, options: list[str]) -> Result:
+        """Put a question to the person and end the turn: their answer is the next turn's message."""
+        if turn.asked:
+            raise Refused(409, "Ask one question at a time; ask this one after the person answers.")
+        turn.asked = True
+        turn.event("ask", {"question": question, "options": options})
+        return Result(
+            "The question is with the person now, and this turn is over. Their answer is the next message you get.",
+            "Asked",
+            ends_turn=True,
+        )
 
     # Plan and library
 

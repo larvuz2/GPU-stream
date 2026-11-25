@@ -7,12 +7,17 @@
 its Storage, with the least that keeps them true to the database's functions,
 whose own behavior is what the migrations' checks hold; `FakeLauncher` records
 what would have reached Modal, `FakeGitHub` what would have reached GitHub and its registry,
-`FakeFal` what would have reached fal, and `ScriptedModel` answers the agent
-the way a scripted conversation says, recording every request it was sent.
+`FakeFal` what would have reached fal, and `ScriptedLoop` (`scripted_loop.py`)
+stands in for the Claude Agent SDK and its child process, answering the agent
+the way a scripted conversation says and recording every request the model
+would have been sent. The same turns run through the real SDK and its real
+program, against a scripted API, in `test_loop.py`.
 What is tested here is this side: who a credential names, what each route and
 tool returns and refuses, that one user's sessions, projects, libraries, and
-engines are invisible to another, that the agent's conversation only ever
-grows, that GitHub's callbacks take nothing they did not sign, that the GitHub
+engines are invisible to another, that a turn's events tell what happened in
+order, that a project's conversation is one session kept in the database, what
+the person approves and what ends a turn, which skills and subagents a project
+is offered, that GitHub's callbacks take nothing they did not sign, that the GitHub
 App's token is refreshed before it expires and its repositories are its
 installations', that the agent writes to no branch of a repository but its
 own, that it reads an Unreal project's assets from the repository alone, that
@@ -28,14 +33,18 @@ from __future__ import annotations
 
 import base64
 import copy
+from contextlib import nullcontext
 from dataclasses import replace
 import hashlib
 import hmac
 import itertools
 import json
+import os
 import re
 import shlex
+import subprocess
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -44,26 +53,18 @@ from types import SimpleNamespace
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 
-import anthropic
+import anyio
 import httpx
-import httpx2
 import pytest
+from claude_agent_sdk.testing import run_session_store_conformance
 from fastapi.testclient import TestClient
 
-from agent import (
-    TOOL_NAMES,
-    Agent,
-    Claude,
-    Reply,
-    echoable,
-    invalid,
-    read_skills,
-    replace_tags,
-    skills_directory,
-    skills_for,
-    system_prompt,
-)
+from agent import SPECS, TOOL_NAMES, TOOLS, Agent, Result, check_activities, recap, replace_tags, reported_unreal, system_prompt
 from api import create_app
+from definitions import AgentSpec, agents_for, matching, operators, read_agents, read_skills, skills_directory, skills_for
+from loop import BUILT_INS, PREFIX, SDK_VARIABLES, Blocks, Settings, Workspace, child_environment, fetchable, inside, loop_name
+from scripted_loop import Reply, ScriptedLoop
+from transcript import Transcript
 from generation import IMAGE_MODELS, VIDEO_MODELS, Fal, GenerationStopped, video_kilotokens
 from github_client import EPIC_FLOW, GitHub, GitHubError, Grant, read_state, seal, sign_state, unseal
 from launcher import ModalLauncher, origin
@@ -80,17 +81,17 @@ SITE = "https://site.example.test"
 APP_CLIENT, EPIC_CLIENT = "gh-app-client", "epic-client"
 SECRETS = {APP_CLIENT: "gh-app-secret", EPIC_CLIENT: "epic-secret", "": ""}
 SLUG = "moody-studio"
-SERIAL_TABLES = ("project_events", "agent_messages")
+SERIAL_TABLES = ("project_events", "agent_transcripts")
 # The tables keyed by their user, one row each
 CONNECTIONS = ("github_connections", "epic_connections")
 DEFAULTS: dict[str, dict[str, Any]] = {
     "projects": {
         "format": "", "pinned": False, "library_sections": [], "plan": [], "github_repo": None, "github_branch": None,
-        "turn_id": None, "turn_seen_at": None, "stop_requested": False,
+        "turn_id": None, "turn_seen_at": None, "stop_requested": False, "agent_session": None, "permissions": {},
     },
     "assets": {"tag": None, "description": "", "metadata": {}, "media": []},
     "project_events": {"data": {}, "turn_id": None},
-    "agent_messages": {"turn_id": None},
+    "agent_transcripts": {"subpath": "", "uuid": None},
     "github_connections": {
         "avatar_url": "", "scope": "", "github_id": None, "name": "", "refresh_token_encrypted": None,
         "token_expires_at": None, "refresh_expires_at": None,
@@ -122,7 +123,7 @@ class FakeStore:
             "sessions": self.sessions, "api_keys": self.keys,
             **{
                 table: {}
-                for table in ("projects", "assets", "project_events", "agent_messages", "github_connections", "epic_connections")
+                for table in ("projects", "assets", "project_events", "agent_transcripts", "github_connections", "epic_connections")
             },
         }
         self.files: dict[str, tuple[bytes, str]] = {}
@@ -206,7 +207,7 @@ class FakeStore:
             self.profiles[p_user]["credits"] += p_delta
         return self.profiles[p_user]["credits"]
 
-    def moody_begin_turn(self, p_project: str, p_user: str, p_text: str, p_stale_seconds: int) -> str:
+    def moody_begin_turn(self, p_project: str, p_user: str, p_text: str, p_stale_seconds: int, p_ui: dict[str, Any] | None = None) -> str:
         project = self.tables["projects"].get(p_project)
         if project is None or project["user_id"] != p_user:
             raise Refused(*Store.REFUSALS["no_project"])
@@ -217,8 +218,51 @@ class FakeStore:
             self.insert("project_events", {"project_id": p_project, "turn_id": project["turn_id"], "kind": "turn_end"})
         turn = str(uuid.uuid4())
         project.update(turn_id=turn, turn_seen_at=moment().isoformat(), stop_requested=False, updated_at=self.stamp())
-        self.insert("project_events", {"project_id": p_project, "turn_id": turn, "kind": "user_message", "data": {"text": p_text}})
+        said = {"text": p_text} if p_ui is None else {"text": p_text, "ui": p_ui}
+        self.insert("project_events", {"project_id": p_project, "turn_id": turn, "kind": "user_message", "data": said})
         return turn
+
+    def moody_resolve_approval(self, p_project: str, p_approval: str, p_decision: str) -> str:
+        events = [e for e in self.tables["project_events"].values() if e["project_id"] == p_project]
+        asked = next((e for e in events if e["kind"] == "approval" and e["data"]["approval_id"] == p_approval), None)
+        if asked is None:
+            raise Refused(*Store.REFUSALS["no_approval"])
+        standing = next((e for e in events if e["kind"] == "approval_result" and e["data"]["approval_id"] == p_approval), None)
+        if standing is not None:
+            return standing["data"]["decision"]
+        answer = {"approval_id": p_approval, "decision": p_decision}
+        if "agent_id" in asked["data"]:
+            answer["agent_id"] = asked["data"]["agent_id"]
+        self.insert("project_events", {"project_id": p_project, "turn_id": asked["turn_id"], "kind": "approval_result", "data": answer})
+        if p_decision == "always":
+            self.tables["projects"][p_project]["permissions"][asked["data"]["tool"]] = "always"
+        return p_decision
+
+    def transcript(self, p_project: str, p_project_key: str) -> list[dict[str, Any]]:
+        rows = self.tables["agent_transcripts"].values()
+        return sorted((r for r in rows if r["project_id"] == p_project and r["project_key"] == p_project_key), key=lambda r: r["id"])
+
+    def moody_append_transcript(self, p_project: str, p_project_key: str, p_session: str, p_subpath: str, p_entries: list[dict[str, Any]]) -> int:
+        written = 0
+        for entry in p_entries:
+            known = {r["uuid"] for r in self.transcript(p_project, p_project_key) if (r["session_id"], r["subpath"]) == (p_session, p_subpath)}
+            if entry.get("uuid") is not None and entry["uuid"] in known:
+                continue
+            self.insert("agent_transcripts", {"project_id": p_project, "project_key": p_project_key, "session_id": p_session,
+                                              "subpath": p_subpath, "uuid": entry.get("uuid"), "entry": entry})
+            written += 1
+        return written
+
+    def moody_transcript_sessions(self, p_project: str, p_project_key: str) -> list[dict[str, Any]]:
+        latest: dict[str, str] = {}
+        for row in self.transcript(p_project, p_project_key):
+            if row["subpath"] == "":
+                latest[row["session_id"]] = row["created_at"]
+        return [{"session_id": session, "mtime": int(datetime.fromisoformat(stamp).timestamp() * 1000)} for session, stamp in latest.items()]
+
+    def moody_transcript_subkeys(self, p_project: str, p_project_key: str, p_session: str) -> list[dict[str, Any]]:
+        found = {r["subpath"] for r in self.transcript(p_project, p_project_key) if r["session_id"] == p_session and r["subpath"]}
+        return [{"subpath": subpath} for subpath in sorted(found)]
 
     def moody_turn_alive(self, p_project: str, p_turn: str) -> bool:
         project = self.tables["projects"].get(p_project)
@@ -309,7 +353,7 @@ class FakeStore:
             key = next(key for key, stored in self.tables[table].items() if stored is row)
             del self.tables[table][key]
             if table == "projects":
-                for owned in ("assets", "project_events", "agent_messages"):
+                for owned in ("assets", "project_events", "agent_transcripts"):
                     self.tables[owned] = {k: r for k, r in self.tables[owned].items() if r["project_id"] != row["id"]}
                 for session in self.sessions.values():
                     if session.get("project_id") == row["id"]:
@@ -725,30 +769,6 @@ class FakeFal:
         return round(0.15 * units["image"], 4)
 
 
-Step = Reply | Callable[[dict[str, Any]], Reply]
-
-
-class ScriptedModel:
-    """Claude, answering from a script: each request takes the next reply, or the reply a step makes of the request."""
-
-    def __init__(self) -> None:
-        self.steps: list[Step] = []
-        self.requests: list[dict[str, Any]] = []
-
-    def script(self, *steps: Step) -> None:
-        self.steps.extend(steps)
-
-    def respond(self, system: list[dict[str, Any]], messages: list[dict[str, Any]], tools: list[dict[str, Any]],
-                on_block: Callable[[dict[str, Any]], None], alive: Callable[[], bool]) -> Reply:
-        request = {"system": copy.deepcopy(system), "messages": copy.deepcopy(messages), "tools": [t["name"] for t in tools]}
-        self.requests.append(request)
-        step = self.steps.pop(0)
-        reply = step(request) if callable(step) else step
-        for block in reply.content:
-            on_block(block)
-        return reply
-
-
 CALL_IDS = itertools.count(1)
 
 
@@ -757,19 +777,20 @@ def say(words: str) -> dict[str, Any]:
 
 
 def use(tool: str, /, **arguments: Any) -> dict[str, Any]:
-    return {"type": "tool_use", "id": f"toolu_{next(CALL_IDS):04d}", "name": tool, "input": arguments}
+    """A call as the model makes one: of a Moody tool or one of the loop's own by Moody's name for it, else as named."""
+    name = loop_name(tool) if tool in TOOL_NAMES or tool in BUILT_INS else tool
+    return {"type": "tool_use", "id": f"toolu_{next(CALL_IDS):04d}", "name": name, "input": arguments}
 
 
 def reply(*blocks: dict[str, Any], stop: str | None = None) -> Reply:
-    calls = any(block["type"] == "tool_use" for block in blocks)
-    return Reply(content=list(blocks), stop_reason=stop or ("tool_use" if calls else "end_turn"))
+    return Reply(content=list(blocks), stop_reason=stop)
 
 
 def config(**changes: Any) -> Config:
     values: dict[str, Any] = {
         "supabase_url": "https://project.example.test", "supabase_key": "service-key", "stripe_key": "",
         "stripe_webhook_secret": "", "site_url": SITE, "capacity": 10,
-        "tiers": frozenset({"cpu", "t4"}), "pin_regions": False,
+        "tiers": frozenset({"cpu", "t4"}), "pin_regions": False, "approval_seconds": 5,
     }
     return Config(**{**values, **changes})
 
@@ -784,41 +805,78 @@ def world() -> tuple[TestClient, Sessions, FakeStore, FakeLauncher]:
 
 
 SKILLS = {
-    "filmcraft": "---\nname: filmcraft\ndescription: Editing films in FilmCraft.\n---\n\nCut on action. FILMCRAFT-SKILL-TEXT\n",
+    "filmcraft": "---\nname: filmcraft\ndescription: Editing films in FilmCraft.\n---\n\nCut on action. FILMCRAFT-SKILL-TEXT\nFor color see [color](references/color.md).\n",
     "studio-basics": "# Basics\n\nName every file. GENERAL-SKILL-TEXT\n",
     "songwriting": "---\ndescription: Writing songs.\ndisciplines: [music]\n---\nSONG-SKILL-TEXT\n",
 }
+REFERENCE = "Grade last. FILMCRAFT-REFERENCE-TEXT\n"
+AGENTS = {
+    "research.md": "---\nname: research\ntitle: Research agent\ndescription: Looks things up on the web and in the library.\n"
+                   "disciplines: all\ntools: web_search, web_fetch, library_list, library_upsert\nmodel: balanced\n---\nYou research. RESEARCH-PROMPT\n",
+    "lyricist.md": "---\nname: lyricist\ntitle: Lyricist\ndescription: Writes lyrics.\ndisciplines: music\ntools: library_*\n"
+                   "skills: songwriting\nmodel: light\n---\nYou write lyrics. LYRICIST-PROMPT\n",
+    "_operator.md": "---\ndescription: Drives {name} for one job in a running engine.\nmodel: inherit\n---\n"
+                    "You operate {name} (app `{app}`). OPERATOR-PROMPT\n",
+    "README.md": "# Subagents\n\nHow to write one.\n",
+}
+
+
+def write_definitions(folder: Path) -> tuple[Path, Path]:
+    """The fixture skills and subagent definitions as files, under a folder: where the skills are, and the agents."""
+    skills, agents = folder / "skills", folder / "agents"
+    for name, body in SKILLS.items():
+        (skills / name).mkdir(parents=True)
+        (skills / name / "SKILL.md").write_text(body)
+    (skills / "filmcraft" / "references").mkdir()
+    (skills / "filmcraft" / "references" / "color.md").write_text(REFERENCE)
+    agents.mkdir()
+    for name, body in AGENTS.items():
+        (agents / name).write_text(body)
+    return skills, agents
 
 
 @pytest.fixture
 def studio(tmp_path: Path) -> SimpleNamespace:
     """The Studio's whole backend: every integration configured, and the agent running each turn inline."""
-    for name, body in SKILLS.items():
-        (tmp_path / name).mkdir()
-        (tmp_path / name / "SKILL.md").write_text(body)
-    store, launcher, jobs, github, fal, model = FakeStore(), FakeLauncher(), InlineJobs(), FakeGitHub(), FakeFal(), ScriptedModel()
+    skills_folder, agents_folder = write_definitions(tmp_path)
+    store, launcher, jobs, github, fal, model = FakeStore(), FakeLauncher(), InlineJobs(), FakeGitHub(), FakeFal(), ScriptedLoop()
+    # The hook at a turn's end is run by the tests of how a turn ends; any other may leave an engine open without
+    # scripting what the model answers to being told so
+    model.stop_hooks = False
     settings = config(anthropic_key="sk-ant-test", fal_key="fal-test", github_app_client_id=APP_CLIENT,
                       github_app_client_secret=SECRETS[APP_CLIENT], github_app_slug=SLUG, epic_client_id=EPIC_CLIENT,
-                      epic_client_secret=SECRETS[EPIC_CLIENT], secret_key=SECRET)
+                      epic_client_secret=SECRETS[EPIC_CLIENT], secret_key=SECRET, loop_root=str(tmp_path / "loop"),
+                      loop_cli="/bin/true")
     sessions = Sessions(settings, CATALOG, store, launcher, jobs, github)
     jobs.sessions = sessions
-    agent = Agent(sessions, model, fal, read_skills(tmp_path))
-    # The heartbeat's thread stays quiet: the loop's own beats between steps are what a test drives
+    skills, agents = read_skills(skills_folder), read_agents(agents_folder)
+    derived = operators(agents_folder, CATALOG, skills)
+    agent = Agent(sessions, model, fal, skills, agents, derived)
+    # The heartbeat's thread stays quiet: the beats a turn makes at its start and before each tool are what a test drives
     agent.heartbeat_seconds = 3600
+    agent.approval_poll_seconds = 0.01
     jobs.agent = agent
-    with TestClient(create_app(sessions, settings, CATALOG)) as client:
+    with TestClient(create_app(sessions, settings, CATALOG, skills, agents, derived)) as client:
         yield SimpleNamespace(client=client, sessions=sessions, store=store, launcher=launcher, jobs=jobs,
-                              github=github, fal=fal, model=model, agent=agent)
+                              github=github, fal=fal, model=model, agent=agent, tmp=tmp_path)
+    assert model.may_run_dry or not model.ran_dry, "a turn asked the model for more than the test scripted"
 
 
 def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def new_project(client: TestClient, token: str = "alice-token", **body: Any) -> dict[str, Any]:
+def new_project(client: TestClient, token: str = "alice-token", asks: bool = False, **body: Any) -> dict[str, Any]:
+    """Make a project. Its agent runs the tools the person approves without asking, unless `asks` leaves that on."""
     response = client.post("/v1/projects", headers=auth(token), json={"name": "Mara", "discipline": "media", "format": "Movie", **body})
     assert response.status_code == 200, response.text
-    return response.json()["project"]
+    project = response.json()["project"]
+    if not asks:
+        always = {name: "always" for name, definition in SPECS.items() if definition["approval"]}
+        response = client.patch(f"/v1/projects/{project['id']}", headers=auth(token), json={"permissions": always})
+        assert response.status_code == 200, response.text
+        project = response.json()["project"]
+    return project
 
 
 def events(client: TestClient, project_id: str, token: str = "alice-token", after: int = 0) -> dict[str, Any]:
@@ -832,9 +890,41 @@ def message(client: TestClient, project_id: str, words: str, token: str = "alice
 
 
 def tool_results(request: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """The results the newest user message of a request carries, by the call they answer."""
+    """The results the newest user message of a request carries, by the call they answer.
+
+    A result's content is given as the tools wrote it: text as one string, and
+    with a picture in it, the blocks, each picture as the Messages API has one.
+    """
     user = next(m for m in reversed(request["messages"]) if m["role"] == "user")
-    return {block["tool_use_id"]: block for block in user["content"] if block["type"] == "tool_result"}
+    found = {}
+    for block in user["content"]:
+        if block["type"] != "tool_result":
+            continue
+        content = block["content"]
+        if isinstance(content, list) and all(part["type"] == "text" for part in content):
+            content = "".join(part["text"] for part in content)
+        elif isinstance(content, list):
+            content = [
+                {"type": "image", "source": {"type": "base64", "media_type": part["mimeType"], "data": part["data"]}}
+                if part["type"] == "image" else part
+                for part in content
+            ]
+        found[block["tool_use_id"]] = {**block, "content": content}
+    return found
+
+
+def said(request: dict[str, Any], back: int = 1) -> tuple[str, str]:
+    """A message of the person in a request, counted from the newest: their words, and the project state after them."""
+    spoken = [m for m in request["messages"] if m["role"] == "user" and isinstance(m["content"], list)
+              and m["content"][0]["type"] == "text"]
+    words, state = spoken[-back]["content"]
+    assert state["text"].startswith("<project_state>\n") and state["text"].endswith("\n</project_state>")
+    return words["text"], state["text"][len("<project_state>\n"):-len("\n</project_state>")]
+
+
+def kinds(client: TestClient, project_id: str, after: int = 0) -> list[str]:
+    """The kinds of a project's events, in order."""
+    return [event["kind"] for event in events(client, project_id, after=after)["events"]]
 
 
 def test_health_is_open_and_says_what_is_configured(world):
@@ -1247,10 +1337,29 @@ def test_a_message_starts_one_turn_at_a_time_and_stop_ends_it(studio):
     jobs.agent = agent
     studio.model.script(reply(say("Here we go.")))
     assert message(client, film["id"], "Go on").status_code == 202
-    sent = studio.model.requests[0]["messages"]
-    assert [(m["role"], m["content"]) for m in sent[:2]] == [("user", "Write me a film"), ("user", "Go on")], (
-        "the model knows every message the person sent, a stopped turn's too")
-    assert [m["role"] for m in sent] == ["user", "user", "system"], "the stopped turn's state is not"
+    words, state = said(studio.model.requests[0])
+    assert words == "Go on" and len(studio.model.requests[0]["messages"]) == 1
+    assert "The person: Write me a film" in state, "the model is told what the person said in a turn stopped before it began"
+
+
+def test_stopping_a_turn_interrupts_the_loop_and_ends_what_it_left_open(studio):
+    client, model = studio.client, studio.model
+    film = new_project(client)
+    stop = lambda: client.post(f"/v1/projects/{film['id']}/stop", headers=auth("alice-token")).json()
+
+    def stopped_meanwhile(request: dict[str, Any]) -> Reply:
+        assert stop() == {"stopped": True}
+        return reply(say("Listing the library."), use("library_list"), use("library_upsert", section="Props", name="Lamp"))
+
+    model.script(stopped_meanwhile, reply(say("This is never asked for.")))
+    assert message(client, film["id"], "Look around").status_code == 202
+    log = events(client, film["id"])
+    assert log["running"] is False and len(model.requests) == 1, "the loop was interrupted before it asked the model again"
+    assert [e["kind"] for e in log["events"]] == ["user_message", "text", "tool_start", "tool_end", "usage", "turn_end"]
+    ends = [e["data"] for e in log["events"] if e["kind"] == "tool_end"]
+    assert [(end["ok"], end["summary"]) for end in ends] == [(False, "Stopped")], "no tool ran once the turn was stopped, and the next was never begun"
+    assert client.get(f"/v1/projects/{film['id']}/library", headers=auth("alice-token")).json()["assets"] == []
+    assert not any(e["kind"] == "error" for e in log["events"]), "a turn the person stopped is not a failure"
 
 
 def test_a_message_waits_for_the_agent_to_be_configured(world):
@@ -1288,7 +1397,7 @@ def test_a_clip_longer_than_its_model_makes_is_refused_before_fal_is_asked(studi
     assert [called for called, _ in fal.calls] == ["bytedance/seedance-2.5/flash/reference-to-video"]
 
 
-def test_the_agent_works_through_its_tools_and_only_ever_appends_to_the_conversation(studio):
+def test_the_agent_works_through_its_tools_and_its_conversation_is_one_session_in_the_database(studio):
     client, fal, model, store = studio.client, studio.fal, studio.model, studio.store
     film = new_project(client)
     model.script(
@@ -1311,21 +1420,27 @@ def test_the_agent_works_through_its_tools_and_only_ever_appends_to_the_conversa
     assert [e["kind"] for e in log["events"]] == [
         "user_message", "text",
         "tool_start", "library", "tool_end", "tool_start", "library", "tool_end",
-        "text", "tool_start", "library", "tool_end",
+        "thinking", "tool_start", "library", "tool_end",
         "tool_start", "tool_end",
         "tool_start", "library", "tool_end",
         "tool_start", "plan", "tool_end",
-        "text", "turn_end",
+        "text", "usage", "turn_end",
     ]
-    texts = [e["data"]["text"] for e in log["events"] if e["kind"] == "text"]
-    assert texts == ["I'll set up the library.", "Making her look.", "Mara is in the library, and the first shot is ready."]
+    texts = [(e["kind"], e["data"]["text"]) for e in log["events"] if e["kind"] in ("text", "thinking")]
+    assert texts == [("text", "I'll set up the library."), ("thinking", "Making her look."),
+                     ("text", "Mara is in the library, and the first shot is ready.")], "an empty block is not shown"
+    assert all(e["data"]["block"] and "partial" not in e["data"] for e in log["events"] if e["kind"] in ("text", "thinking"))
     ends = [e["data"] for e in log["events"] if e["kind"] == "tool_end"]
     assert all(end["ok"] for end in ends), ends
     assert ends[2]["summary"] == "2 images saved to @mara, about $0.30" and len(ends[2]["media"]) == 2
     assert ends[3]["summary"] == "1 image, about $0.15", "an image not saved anywhere"
     assert ends[4]["summary"] == "1 video saved to @s01-sh01-t1, about $2.84"
     starts = [e["data"] for e in log["events"] if e["kind"] == "tool_start"]
-    assert starts[0]["tool"] == "set_library_sections" and starts[2]["title"] == "Generating 2 images"
+    assert starts[0] == {"call_id": starts[0]["call_id"], "tool": "set_library_sections", "title": "Arranging the library", "activity": "processing"}
+    assert starts[2]["title"] == "Generating 2 images" and starts[2]["activity"] == "creating"
+    assert [start["call_id"] for start in starts] == [end["call_id"] for end in ends], "each call's end follows its own start"
+    usage = next(e["data"] for e in log["events"] if e["kind"] == "usage")
+    assert usage == {"input_tokens": 600, "output_tokens": 120, "cost_usd": 0.006, "seconds": usage["seconds"], "agents": 0}
 
     # fal was asked for the right models, the references as positional names and signed links
     (sheet_model, sheet), (still_model, still), (shot_model, shot) = fal.calls
@@ -1346,75 +1461,74 @@ def test_the_agent_works_through_its_tools_and_only_ever_appends_to_the_conversa
     plan = client.get(f"/v1/projects/{film['id']}", headers=auth("alice-token")).json()["project"]["plan"]
     assert plan == [{"id": "bible", "title": "Bible", "status": "done"}, {"id": "2", "title": "Shots", "status": "active"}]
 
-    # Every request carries the same system prompt and tools, and the conversation of the one before it
+    # The loop is given Moody's prompt and tools, and none of its own file or shell tools
     requests = model.requests
     assert len(requests) == 6
-    system = requests[0]["system"]
-    prompt = system[0]["text"]
+    prompt = requests[0]["system"][0]["text"]
     assert "Discipline: Media" in prompt and "Format: Movie" in prompt and f"projects/{film['id']}" in prompt
-    assert "FILMCRAFT-SKILL-TEXT" in prompt and "GENERAL-SKILL-TEXT" in prompt and "SONG-SKILL-TEXT" not in prompt
-    assert all(r["system"] == system and r["tools"] == TOOL_NAMES for r in requests)
-    for before, after in zip(requests, requests[1:]):
-        assert after["messages"][: len(before["messages"])] == before["messages"], "the conversation is append-only"
-    first = requests[0]["messages"]
-    assert first[0] == {"role": "user", "content": "Make a film about Mara"}
-    assert first[1]["role"] == "system" and "Library sections: Characters, Environments, Props" in first[1]["content"]
-    assert requests[1]["messages"][2]["content"][0] == {"type": "thinking", "thinking": "", "signature": "sig-1"}
-    assert [m["role"] for m in requests[5]["messages"]] == ["user", "system"] + ["assistant", "user"] * 5
-    stored = sorted(store.tables["agent_messages"].values(), key=lambda m: m["id"])
-    assert [{"role": m["role"], "content": m["content"]} for m in stored] == requests[5]["messages"] + [
-        {"role": "assistant", "content": [say("Mara is in the library, and the first shot is ready.")]}]
+    assert "SKILL-TEXT" not in prompt, "no skill's text is in the prompt: the loop loads one when the work calls for it"
+    assert all(r["system"] == requests[0]["system"] for r in requests)
+    assert requests[0]["tools"] == ["Agent", "WebSearch", "WebFetch", "Skill", "Read", *(f"{PREFIX}{name}" for name in TOOL_NAMES)]
+    words, state = said(requests[0])
+    assert words == "Make a film about Mara" and "Library sections: Characters, Environments, Props" in state
+    assert "What was said in this project before" not in state, "a project's first turn has nothing before it"
 
-    # The next turn goes on from all of it, with the project's state as it is now
+    # The conversation is the loop's session, kept in the database as it is written
+    session = store.tables["projects"][film["id"]]["agent_session"]
+    options = model.options[0]
+    assert (options.session_id, options.resume) == (session, None) and uuid.UUID(session)
+    rows = [row for row in store.tables["agent_transcripts"].values() if row["project_id"] == film["id"]]
+    assert {row["session_id"] for row in rows} == {session} and {row["subpath"] for row in rows} == {""}
+    assert [row["entry"]["message"]["role"] for row in rows] == ["user"] + ["assistant", "user"] * 5 + ["assistant"]
+
+    # The next turn resumes it, from the database alone, with the project's state as it is now
     model.script(reply(say("Shot two next.")))
     message(client, film["id"], "Great, next shot")
+    assert (model.options[1].session_id, model.options[1].resume) == (None, session)
     later = model.requests[-1]["messages"]
-    assert later[: len(stored)] == [{"role": m["role"], "content": m["content"]} for m in stored]
-    assert later[-2] == {"role": "user", "content": "Great, next shot"}
-    state = later[-1]["content"]
+    assert later[:-1] == [row["entry"]["message"] for row in rows], "the model is sent the conversation as the database kept it"
+    words, state = said(model.requests[-1])
+    assert words == "Great, next shot"
     assert "- [done] Bible (id bible)" in state and "- @mara: Mara (Characters; 2 image)" in state
     assert "- @s01-sh01-t1: S01 SH01 T1 (Shots; 1 video)" in state and "Library sections: Characters, Shots" in state
+    assert "What was said in this project before" not in state, "a resumed session remembers; it is told nothing twice"
 
 
-def test_ask_user_ends_the_turn_and_the_reply_answers_it(studio):
+def test_ask_user_ends_the_turn_and_the_answer_starts_the_next_on_the_same_session(studio):
     client, model = studio.client, studio.model
     film = new_project(client)
     question = use("ask_user", question="Do you have a script, or shall we write one?", options=["I have one", "Let's write one"])
-    listing = use("library_list")
-    model.script(reply(say("Let's begin."), question, listing))
+    model.script(reply(say("Let's begin."), use("library_list"), question), reply(say("This is never asked for.")))
     message(client, film["id"], "Hi")
     log = events(client, film["id"])
-    assert [e["kind"] for e in log["events"]] == ["user_message", "text", "ask", "tool_start", "tool_end", "turn_end"]
-    assert log["events"][2]["data"] == {"question": "Do you have a script, or shall we write one?", "options": ["I have one", "Let's write one"]}
-    assert log["running"] is False and len(model.requests) == 1
+    assert [e["kind"] for e in log["events"]] == [
+        "user_message", "text", "tool_start", "tool_end", "tool_start", "ask", "tool_end", "usage", "turn_end"]
+    asked = next(e["data"] for e in log["events"] if e["kind"] == "ask")
+    assert asked == {"question": "Do you have a script, or shall we write one?", "options": ["I have one", "Let's write one"]}
+    assert log["running"] is False and len(model.requests) == 1, "the turn ended at the question: no machine waits for the person"
 
+    model.steps.clear()
     model.script(reply(say("Then let's write it together.")))
     message(client, film["id"], "Let's write one")
+    assert model.options[1].resume == model.options[0].session_id
     request = model.requests[-1]["messages"]
-    assert request[:3] == model.requests[0]["messages"] + [{"role": "assistant", "content": [say("Let's begin."), question, listing]}]
-    answer = request[3]
-    assert answer["role"] == "user" and [b["tool_use_id"] for b in answer["content"]] == [listing["id"], question["id"]]
-    assert answer["content"][1] == {"type": "tool_result", "tool_use_id": question["id"], "content": "Let's write one"}
-    assert request[4]["role"] == "system" and len(request) == 5
+    assert request[1]["content"][-1] == question and "The question is with the person now" in tool_results({"messages": request[:3]})[question["id"]]["content"]
+    assert said(model.requests[-1])[0] == "Let's write one", "the answer is the next turn's message"
 
 
-def test_a_turn_left_unfinished_is_completed_by_the_next(studio):
-    client, model, store = studio.client, studio.model, studio.store
+def test_one_question_ends_a_turn_and_a_second_in_it_is_refused(studio):
+    client, model = studio.client, studio.model
     film = new_project(client)
-    # What a turn stopped between the model's calls and their tools leaves, and one stopped before any answer
-    pending = use("library_list")
-    for role, content in (("user", "First"), ("system", "state"), ("assistant", [say("Looking."), pending]),
-                          ("user", "Second"), ("system", "stale state")):
-        store.insert("agent_messages", {"project_id": film["id"], "role": role, "content": content})
-    model.script(reply(say("Back to it.")))
-    message(client, film["id"], "Third")
-    sent = model.requests[0]["messages"]
-    assert [m["role"] for m in sent] == ["user", "system", "assistant", "user", "user", "system"]
-    assert sent[3]["content"] == "Second", "the stale state with nothing after it is gone, the rest kept"
-    results = sent[4]["content"]
-    assert results[0]["tool_use_id"] == pending["id"] and results[0]["is_error"] is True and "Not run" in results[0]["content"]
-    assert results[1] == {"type": "text", "text": "Third"}
-    assert "stale state" not in [m["content"] for m in store.tables["agent_messages"].values()]
+    first, second = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"]), use("ask_user", question="How long?", options=["Short", "Feature"])
+    turn = SimpleNamespace(asked=False, event=lambda kind, data: None)
+    assert studio.agent.tool_ask_user(turn, **first["input"]).ends_turn
+    with pytest.raises(Refused, match="one question at a time"):
+        studio.agent.tool_ask_user(turn, **second["input"])
+    assert Result("x", "y").ends_turn is False, "a tool's result ends the turn only where it says so"
+
+    model.script(reply(first))
+    message(client, film["id"], "Hi")
+    assert kinds(client, film["id"]).count("ask") == 1
 
 
 def test_a_tool_input_that_fails_its_schema_is_answered_not_run(studio):
@@ -1422,23 +1536,45 @@ def test_a_tool_input_that_fails_its_schema_is_answered_not_run(studio):
     film = new_project(client)
     bad = use("generate_image", prompt="A lighthouse", count="two")
     cut = use("library_upsert", section="Characters")
-    model.script(reply(bad), reply(cut, stop="max_tokens"), reply(use("nonsense")), reply(say("Sorry.")))
+    model.script(reply(bad), reply(cut), reply(use("nonsense")), reply(say("Sorry.")))
     message(client, film["id"], "Make a picture")
     assert fal.calls == []
     first, second, third = (tool_results(r) for r in model.requests[1:])
-    assert first[bad["id"]]["is_error"] and "INVALID_INPUT" in first[bad["id"]]["content"] and "count" in first[bad["id"]]["content"]
-    assert second[cut["id"]]["is_error"] and "cut off" in second[cut["id"]]["content"]
+    assert first[bad["id"]]["is_error"] and "Input validation error" in first[bad["id"]]["content"] and "'two'" in first[bad["id"]]["content"]
+    assert second[cut["id"]]["is_error"] and "'name' is a required property" in second[cut["id"]]["content"]
     assert third and all(result["is_error"] for result in third.values())
-    assert [e["kind"] for e in events(client, film["id"])["events"]] == ["user_message", "text", "turn_end"]
+    log = events(client, film["id"])["events"]
+    assert [e["kind"] for e in log] == ["user_message", "tool_start", "tool_end", "tool_start", "tool_end", "text", "usage", "turn_end"]
+    ends = [e["data"] for e in log if e["kind"] == "tool_end"]
+    assert not any(end["ok"] for end in ends) and "Input validation error" in ends[0]["summary"], "the page sees the call fail"
+    assert client.get(f"/v1/projects/{film['id']}/library", headers=auth("alice-token")).json()["assets"] == []
 
 
-def test_a_refused_or_failing_model_ends_the_turn_with_an_error(studio):
+def test_a_turn_the_model_could_not_finish_ends_with_an_error_the_person_can_read(studio):
     client, model = studio.client, studio.model
     film = new_project(client)
-    model.script(Reply(content=[], stop_reason="refusal"))
+    told = lambda: [e["data"]["message"] for e in events(client, film["id"])["events"] if e["kind"] == "error"]
+    model.script(reply(say("I can't help with that."), stop="refusal"))
     message(client, film["id"], "Something")
-    assert [e["kind"] for e in events(client, film["id"])["events"]][-2:] == ["error", "turn_end"]
-    assert [m["role"] for m in studio.store.tables["agent_messages"].values()] == ["user", "system"], "nothing refused is kept"
+    assert kinds(client, film["id"])[-3:] == ["error", "usage", "turn_end"] and "declined" in told()[-1]
+    model.script(Reply(content=[], error="rate_limit"))
+    message(client, film["id"], "Again")
+    assert told()[-1] == "The model is busy right now. Try again in a minute."
+    assert not any("API Error" in e["data"].get("text", "") for e in events(client, film["id"])["events"]), "the loop's own words for a failure are not the agent's"
+    model.script(Reply(content=[], error="server_error"))
+    message(client, film["id"], "Again")
+    assert told()[-1] == "The model could not be reached. Try again."
+
+    # The most steps one turn may take, and a loop that breaks, are told too
+    with_config(studio, turn_limit=2)
+    model.script(reply(use("library_list")), reply(use("library_list")), reply(say("never")))
+    message(client, film["id"], "Loop")
+    assert "limit of steps" in told()[-1] and model.options[-1].max_turns == 2
+    model.steps.clear()
+    model.may_run_dry = True
+    message(client, film["id"], "The script is empty, which breaks the loop")
+    assert told()[-1] == "Something went wrong on our side, and this turn stopped."
+    assert kinds(client, film["id"])[-3:] == ["usage", "error", "turn_end"] and events(client, film["id"])["running"] is False
 
 
 def test_the_engine_tools_act_in_the_projects_own_running_engine(studio):
@@ -2777,7 +2913,7 @@ def screens(client: TestClient, project_id: str) -> list[dict[str, Any]]:
 
 def turn_state(request: dict[str, Any]) -> str:
     """The project's state a request's turn started with."""
-    return next(m["content"] for m in reversed(request["messages"]) if m["role"] == "system")
+    return said(request)[1]
 
 
 def test_a_running_unreal_engine_reports_both_pictures_with_links_minted_for_the_page(studio):
@@ -2805,7 +2941,7 @@ def test_a_running_unreal_engine_reports_both_pictures_with_links_minted_for_the
     model.script(reply(use("engine_list"), use("engine_show", engine_id=engine["id"], stream="Unreal")), reply(say("Both run.")))
     message(client, game["id"], "What runs?")
     assert len(launcher.links) == minted, "the agent's listing and its view switch mint nothing"
-    kept = json.dumps(store.tables["project_events"]) + json.dumps(store.tables["agent_messages"])
+    kept = json.dumps(store.tables["project_events"]) + json.dumps(store.tables["agent_transcripts"])
     assert "connect_token" not in kept, "no link is written to the log or the conversation"
 
 
@@ -2955,84 +3091,614 @@ def test_a_sealed_token_opens_only_under_its_secret():
 # The agent's parts
 
 
-def test_a_schema_check_refuses_what_a_cut_off_or_wrong_input_would_be():
-    schema = {"type": "object", "properties": {"count": {"type": "integer", "minimum": 1, "maximum": 4},
-                                               "tags": {"type": "array", "items": {"type": "string"}},
-                                               "mode": {"type": "string", "enum": ["a", "b"]}}, "required": ["count"]}
-    assert invalid(schema, {"count": 2, "tags": ["@a"], "mode": "a"}) is None
-    assert invalid(schema, {}) == "input is missing count"
-    assert invalid(schema, {"count": True}) == "input.count should be an integer"
-    assert invalid(schema, {"count": 9}) == "input.count should be from 1 to 4"
-    assert invalid(schema, {"count": 1, "tags": [3]}) == "input.tags[0] should be a string"
-    assert invalid(schema, {"count": 1, "mode": "c"}) == "input.mode should be one of a, b"
-    assert invalid(schema, None) == "input should be an object"
-
-
-def test_after_a_fallback_only_what_the_fallback_model_said_goes_back():
-    declined = [
-        {"type": "thinking", "thinking": "", "signature": "a"}, say("Partial"), use("library_list"),
-        {"type": "fallback", "from": {"model": "claude-fable-5-2"}, "to": {"model": "claude-opus-4-8"}},
-        {"type": "thinking", "thinking": "", "signature": "b"}, say("Done"),
-    ]
-    assert [b["type"] for b in echoable(declined)] == ["text", "fallback", "thinking", "text"]
-    plain = [say("a"), use("engine_list")]
-    assert echoable(plain) == plain
-
-
 def test_tags_become_their_references_names_longest_first():
     labels = {"@mara": "@Image1", "@mara-young": "@Image2"}
     assert replace_tags("@Mara meets @mara-young; @mara.", labels) == "@Image1 meets @Image2; @Image1."
 
 
-def test_the_streamed_answer_comes_back_as_the_api_sent_it():
-    """The real adapter over a recorded stream: the request asks for what the module says, and blocks round-trip."""
-    sent: list[dict[str, Any]] = []
-    stream = [
-        {"type": "message_start", "message": {"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-fable-5-2",
-                                               "content": [], "stop_reason": None, "stop_sequence": None,
-                                               "usage": {"input_tokens": 10, "output_tokens": 1}}},
-        {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}},
-        {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Checking the library."}},
-        {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig-abc"}},
-        {"type": "content_block_stop", "index": 0},
-        {"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}},
-        {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Looking."}},
-        {"type": "content_block_stop", "index": 1},
-        {"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use", "id": "toolu_1", "name": "library_list", "input": {}}},
-        {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{\"section\": \"Charac"}},
-        {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "ters\"}"}},
-        {"type": "content_block_stop", "index": 2},
-        {"type": "message_delta", "delta": {"stop_reason": "tool_use", "stop_sequence": None}, "usage": {"output_tokens": 20}},
-        {"type": "message_stop"},
-    ]
+def test_every_tool_says_how_it_looks_whether_it_only_reads_and_whether_the_person_approves_it(studio, tmp_path):
+    client, model = studio.client, studio.model
+    known = {activity["id"] for activity in CATALOG.data["activities"]}
+    assert all(definition["activity"] in known for definition in TOOLS) and all(built_in.activity in known for built_in in BUILT_INS.values())
+    assert {name for name, definition in SPECS.items() if definition["approval"] == "ask"} == {"engine_start", "generate_video"}
+    assert {name for name, definition in SPECS.items() if definition["read_only"]} == {
+        "library_list", "engine_list", "engine_files", "github_read", "unreal_assets", "unreal_projects"}
+    assert [name for name, definition in SPECS.items() if definition["main_only"]] == ["ask_user"]
+    fewer = tmp_path / "catalog.json"
+    fewer.write_text(json.dumps({**CATALOG.data, "activities": [a for a in CATALOG.data["activities"] if a["id"] != "creating"]}))
+    with pytest.raises(ValueError, match="generate_image"):
+        check_activities(Catalog(fewer))
 
-    def answer(request: httpx2.Request) -> httpx2.Response:
-        sent.append({"headers": dict(request.headers), "body": json.loads(request.content)})
-        body = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in stream)
-        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=body.encode())
+    # The loop is served each tool with its schema, told which only read, and keeps every result in the conversation
+    film = new_project(client, asks=True)
+    model.script(reply(say("Hello.")))
+    message(client, film["id"], "Hi")
+    served = model.clients[0].tools
+    assert list(served) == [f"{PREFIX}{name}" for name in TOOL_NAMES]
+    listing, stopping = served[f"{PREFIX}library_list"], served[f"{PREFIX}engine_stop"]
+    assert listing["inputSchema"] == SPECS["library_list"]["input_schema"] and listing["description"] == SPECS["library_list"]["description"]
+    assert listing["annotations"]["readOnlyHint"] is True and stopping["annotations"]["readOnlyHint"] is False
+    assert all(tool["_meta"]["anthropic/maxResultSizeChars"] >= 100000 for tool in served.values()), "no result is put in a file the agent cannot read"
+    allowed = model.options[0].allowed_tools
+    assert f"{PREFIX}library_upsert" in allowed and "WebSearch" in allowed and "WebFetch" in allowed
+    assert f"{PREFIX}engine_start" not in allowed and f"{PREFIX}generate_video" not in allowed, "what the person approves is not run unasked"
 
-    claude = Claude("sk-ant-test", "claude-fable-5-2")
-    claude.client = anthropic.Anthropic(api_key="sk-ant-test", max_retries=0,
-                                        http_client=anthropic.DefaultHttpxClient(transport=httpx2.MockTransport(answer)))
-    blocks: list[dict[str, Any]] = []
-    result = claude.respond([{"type": "text", "text": "system"}], [{"role": "user", "content": "hi"}],
-                            [{"name": "library_list", "description": "d", "input_schema": {"type": "object"}, "eager_input_streaming": True}],
-                            blocks.append, lambda: True)
-    assert result.stop_reason == "tool_use"
-    assert result.content == [
-        {"type": "thinking", "thinking": "Checking the library.", "signature": "sig-abc"},
-        {"type": "text", "text": "Looking."},
-        {"type": "tool_use", "id": "toolu_1", "name": "library_list", "input": {"section": "Characters"}},
+
+def test_the_loop_is_configured_by_the_deployment_and_keeps_none_of_its_own_file_or_shell_tools(studio):
+    client, model = studio.client, studio.model
+    film = new_project(client)
+    with_config(studio, agent_model="claude-opus-5-5", agent_effort="max", agent_fallback_model="claude-sonnet-5-5",
+                turn_budget_usd=2.5, turn_limit=40)
+    model.script(reply(say("Hello.")), reply(say("Hello again.")))
+    message(client, film["id"], "Hi")
+    options = model.options[0]
+    assert options.tools == ["Agent", "WebSearch", "WebFetch", "Skill", "Read"], "no shell, and no tool that writes a file"
+    assert (options.model, options.effort, options.fallback_model, options.max_budget_usd, options.max_turns) == (
+        "claude-opus-5-5", "max", "claude-sonnet-5-5", 2.5, 40)
+    assert options.thinking == {"type": "adaptive", "display": "summarized"}, "the model's reasoning comes back summarized, for the page"
+    assert options.permission_mode == "default" and options.setting_sources == ["project"] and options.strict_mcp_config
+    assert options.verbatim_prompts, "the person's words are never read as a command of the loop or a file to attach"
+    assert options.include_partial_messages and options.forward_subagent_text and options.session_store_flush == "eager"
+    assert options.disallowed_tools == ["Agent(fork)"] and options.cwd == str(studio.tmp / "loop" / film["id"])
+
+    with_config(studio, agent_model="", agent_thinking=False, agent_fallback_model="", turn_budget_usd=0, turn_limit=0)
+    message(client, film["id"], "Hi")
+    options = model.options[1]
+    assert (options.model, options.fallback_model, options.max_budget_usd, options.max_turns) == ("claude-fable-5-2", None, None, None)
+    assert options.thinking == {"type": "disabled"}
+
+    with_config(studio, agent_effort="enormous")
+    message(client, film["id"], "Hi")
+    assert kinds(client, film["id"])[-2:] == ["error", "turn_end"], "an effort the loop does not know is the deployment's mistake, and the turn says it failed"
+
+
+def test_the_loops_process_is_started_with_the_key_and_the_turns_own_directories_and_nothing_else_of_the_worker(tmp_path, monkeypatch):
+    monkeypatch.setenv("SUPABASE_SECRET_KEY", "sb_secret_never")
+    monkeypatch.setenv("MODAL_TOKEN_SECRET", "as-never")
+    monkeypatch.setenv("FAL_KEY", "fal-never")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.test:3128")
+    settings = Settings(key="sk-ant-test", model="claude-fable-5-2", effort="high", thinking=True, fallback_model="", budget_usd=1.0,
+                        turn_limit=10, base_url="http://127.0.0.1:9", passed=frozenset({"HTTPS_PROXY", "NOT_SET_ANYWHERE"}), cli="")
+    with Workspace(str(tmp_path / "loop"), "project-1") as workspace:
+        variables = child_environment(settings, workspace)
+        assert variables["ANTHROPIC_API_KEY"] == "sk-ant-test" and variables["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9"
+        assert variables["HTTPS_PROXY"] == "http://proxy.example.test:3128" and "NOT_SET_ANYWHERE" not in variables
+        private = workspace.config.parent
+        assert {variables["HOME"], variables["CLAUDE_CONFIG_DIR"], variables["TMPDIR"]} == {str(private / name) for name in ("home", "config", "tmp")}
+        assert workspace.directory == tmp_path / "loop" / "project-1" and private != workspace.directory
+
+        # The SDK starts its program with the worker's whole environment under these; the launcher lets only these through
+        own = {"CLAUDE_CODE_ENTRYPOINT": "sdk-py", "CLAUDE_AGENT_SDK_VERSION": "0.0.0", "CLAUDE_CODE_SDK_READS_SESSION_STATE": "1",
+               "PWD": str(workspace.directory)}
+        assert set(own) == set(SDK_VARIABLES)
+        handed = {**os.environ, **variables, **own, "CLAUDECODE": "1", "CLAUDE_CODE_OAUTH_TOKEN": "oauth-never"}
+        assert handed["SUPABASE_SECRET_KEY"] == "sb_secret_never"
+        launcher = workspace.launcher("/usr/bin/env", [*variables, *SDK_VARIABLES])
+        printed = subprocess.run([launcher], env=handed, cwd=workspace.directory, capture_output=True, text=True, check=True).stdout
+        seen = dict(line.split("=", 1) for line in printed.splitlines())
+        assert seen == {**{name: value for name, value in variables.items() if name != "MOODY_LOOP_TURN"}, **own}
+        assert "never" not in printed and "MODAL_TOKEN_SECRET" not in seen and "FAL_KEY" not in seen
+        assert "sk-ant-test" not in Path(launcher).read_text(), "the launcher names variables; no value is written to a file"
+        echoed = subprocess.run([workspace.launcher("/bin/echo", ["HOME"]), "--resume=x", "a b"], env=handed, capture_output=True, text=True, check=True)
+        assert echoed.stdout == "--resume=x a b\n", "what the SDK passes its program reaches it unchanged"
+        # Started outside the turn, as the SDK does once to ask the program's version, it hands over nothing at all
+        outside = {**handed, "MOODY_LOOP_TURN": "another-turn"}
+        launcher = workspace.launcher("/usr/bin/env", [*variables, *SDK_VARIABLES])
+        assert subprocess.run([launcher], env=outside, capture_output=True, text=True, check=True).stdout == ""
+        with pytest.raises(ValueError):
+            workspace.launcher("/usr/bin/env", ["HOME; rm -rf /"])
+    assert not workspace.directory.exists() and not private.exists(), "a turn leaves nothing on the machine it ran on"
+
+
+def test_an_answer_is_shown_while_it_is_written_about_once_a_second_and_then_whole():
+    shown: list[tuple[str, dict[str, Any]]] = []
+    now = [100.0]
+
+    async def emit(kind: str, data: dict[str, Any]) -> None:
+        shown.append((kind, data))
+
+    async def play() -> None:
+        blocks = Blocks(emit, lambda: now[0])
+        await blocks.stream({"type": "message_start", "message": {"id": "msg_1"}})
+        await blocks.stream({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking"}})
+        for word in ("Looking ", "at ", "the ", "library ", "first."):
+            now[0] += 0.4
+            await blocks.stream({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": word}})
+        await blocks.stream({"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig"}})
+        await blocks.finished("msg_1", "thinking", "Looking at the library first.")
+        await blocks.stream({"type": "content_block_stop", "index": 0})
+        await blocks.stream({"type": "content_block_start", "index": 1, "content_block": {"type": "text"}})
+        await blocks.stream({"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "On it."}})
+        await blocks.finished("msg_1", "text", "On it.")
+        await blocks.stream({"type": "content_block_stop", "index": 1})
+        await blocks.stream({"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use"}})
+        await blocks.stream({"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{}"}})
+        await blocks.stream({"type": "content_block_stop", "index": 2})
+        # A stream cut before its block was reported whole still ends with what was written
+        await blocks.stream({"type": "message_start", "message": {"id": "msg_2"}})
+        await blocks.stream({"type": "content_block_start", "index": 0, "content_block": {"type": "text"}})
+        await blocks.stream({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Cut sh"}})
+        await blocks.stream({"type": "content_block_stop", "index": 0})
+        # And an answer that was never streamed is a block of its own
+        await blocks.finished("msg_3", "text", "Not streamed.")
+        await blocks.finished("msg_3", "text", "   ")
+
+    anyio.run(play)
+    assert shown == [
+        ("thinking", {"text": "Looking at the ", "block": "msg_1:0", "partial": True}),
+        ("thinking", {"text": "Looking at the library first.", "block": "msg_1:0"}),
+        ("text", {"text": "On it.", "block": "msg_1:1"}),
+        ("text", {"text": "Cut sh", "block": "msg_2:0"}),
+        ("text", {"text": "Not streamed.", "block": "msg_3:whole-1"}),
+    ], "a later event of a block replaces the earlier one, and the last is the whole block"
+
+
+def test_the_transcript_store_keeps_the_sdks_contract_and_one_projects_rows_from_anothers():
+    async def check() -> None:
+        await run_session_store_conformance(lambda: Transcript(FakeStore(), "project-a"))
+        store = FakeStore()
+        ours, theirs = Transcript(store, "project-a"), Transcript(store, "project-b")
+        key = {"project_key": "-tmp-loop-project-a", "session_id": "0b0c4f0e-0000-4000-8000-000000000001"}
+        first, title = {"type": "user", "uuid": "u-1", "message": {"role": "user", "content": "Hi"}}, {"type": "custom-title", "title": "Mara"}
+        await ours.append(key, [first, first, title, title])
+        await ours.append(key, [first])
+        assert await ours.load(key) == [first, title, title], "an entry is kept once by its uuid, and one without a uuid always"
+        assert ours.has(key) and not theirs.has(key) and await theirs.load(key) is None
+        assert await theirs.list_sessions(key["project_key"]) == [] and [s["session_id"] for s in await ours.list_sessions(key["project_key"])] == [key["session_id"]]
+        store.delete("projects", id="eq.none")
+        assert all(row["project_id"] == "project-a" for row in store.tables["agent_transcripts"].values())
+
+    anyio.run(check)
+
+
+def test_a_projects_skills_are_offered_by_name_and_read_with_their_reference_files_when_the_work_calls_for_them(studio):
+    client, model = studio.client, studio.model
+    film = new_project(client)
+    opening = use("skill", skill="filmcraft")
+    during: dict[str, Any] = {}
+
+    def follow_the_skill(request: dict[str, Any]) -> Reply:
+        text = tool_results(request)[opening["id"]]["content"]
+        base = re.search(r"Base directory for this skill: (\S+)", text).group(1)
+        offered = Path(request["options"].cwd) / ".claude" / "skills"
+        during.update(text=text, folders=sorted(path.name for path in offered.iterdir()), base=base, offered=str(offered))
+        return reply(
+            use("read", file_path=f"{base}/references/color.md"),
+            use("read", file_path="references/color.md"),
+            use("read", file_path="/etc/hostname"),
+            use("read", file_path=f"{base}/../../../../../../etc/hostname"),
+            use("read", file_path=str(studio.tmp / "skills" / "songwriting" / "SKILL.md")),
+            use("skill", skill="songwriting"),
+            use("web_fetch", url="http://169.254.169.254/latest/meta-data/"),
+            use("web_fetch", url="https://example.com/lighthouses"),
+            use("web_search", query="lighthouse films"),
+        )
+
+    model.script(reply(opening), follow_the_skill, reply(say("Done.")))
+    message(client, film["id"], "Grade the film")
+    options = model.options[0]
+    assert options.skills == ["filmcraft", "studio-basics"], "a Media project is offered its discipline's skills and the general ones"
+    assert during["folders"] == ["filmcraft", "studio-basics"] and during["base"] == f"{during['offered']}/filmcraft"
+    assert "FILMCRAFT-SKILL-TEXT" in during["text"] and "FILMCRAFT-REFERENCE-TEXT" not in during["text"], "a reference is read when the text sends the agent to it"
+    results = list(tool_results(model.requests[2]).values())
+    assert "FILMCRAFT-REFERENCE-TEXT" in results[0]["content"] and not results[0].get("is_error")
+    assert all(r["is_error"] and "Only the files of a skill can be read" in r["content"] for r in results[1:5]), results[1:5]
+    assert results[5]["is_error"], "a skill the project is not offered is not opened"
+    assert results[6]["is_error"] and "Only public web addresses" in results[6]["content"]
+    assert not results[7].get("is_error") and not results[8].get("is_error")
+    shown = tools_shown(client, film["id"])
+    assert [title for title, _, _ in shown] == [
+        "Opening the filmcraft skill", "Reading color.md", "Opening the songwriting skill",
+        "Reading example.com", "Searching the web for lighthouse films",
+    ], "a read or a fetch that is refused never starts"
+    starts = [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "tool_start"]
+    assert [(start["tool"], start["activity"]) for start in starts][:2] == [("skill", "analyzing"), ("read", "analyzing")]
+    assert not (studio.tmp / "loop" / film["id"]).exists(), "the working directory goes when the turn does"
+
+    # The same checks, as the functions that make them
+    root = studio.tmp / "skills"
+    assert inside("filmcraft/references/color.md", root, root) and inside(str(root / "filmcraft" / "SKILL.md"), root, Path("/"))
+    assert not inside("../agents/research.md", root, root) and not inside(str(root), root, root) and not inside("/etc/passwd", root, root)
+    (root / "escape").symlink_to("/etc")
+    assert not inside("escape/hostname", root, root), "a link out of the skills is followed before the check"
+    assert fetchable("https://example.com/a") and fetchable("http://8.8.8.8/")
+    assert not any(map(fetchable, ("http://localhost:8000/", "http://127.0.0.1/", "http://10.1.2.3/", "http://[::1]/", "file:///etc/passwd",
+                                    "http://169.254.169.254/", "https://metadata.internal/", "ftp://example.com/", "http://intranet/", "")))
+
+
+def test_the_system_prompt_carries_no_skill_and_says_how_the_agent_works_with_engines_approvals_and_subagents():
+    skills = read_skills(skills_directory())
+    project = {"id": "p", "discipline": "media", "format": "Movie"}
+    prompt = system_prompt(CATALOG, project, frozenset({"cpu"}))
+    offered = skills_for(skills, CATALOG, "media")
+    assert len(offered) >= 2 and not any(skill.body[:200] in prompt for skill in offered)
+    assert len(prompt) < 12000 < sum(len(skill.body) for skill in offered), "the prompt is a fraction of what the skills' texts were in it"
+    flat = " ".join(prompt.split())
+    for said_once in ("none starts unless the work needs it or the person asked", "The person approves some steps", "Agent tool",
+                      "Skill tool", "<project_state>", "mcp__moody__<name>", "the Moody agent"):
+        assert said_once in flat, said_once
+
+
+def test_subagents_are_read_from_files_offered_by_discipline_and_given_their_tools_skills_and_model(studio, tmp_path):
+    client, model = studio.client, studio.model
+    film, song = new_project(client), new_project(client, name="Tide", discipline="music", format="Song")
+    model.script(reply(say("Hello.")), reply(say("Hello.")), reply(say("Hello.")))
+    message(client, film["id"], "Hi")
+    offered = model.options[0].agents
+    assert list(offered) == ["research", "filmcraft"], "the defined ones that fit, then an operator for each of the project's skills that is an app's"
+    research, operator = offered["research"], offered["filmcraft"]
+    assert research.description == "Looks things up on the web and in the library." and research.model == "claude-sonnet-5-5"
+    assert research.tools == [f"{PREFIX}library_list", f"{PREFIX}library_upsert", "WebSearch", "WebFetch"] and research.skills is None
+    assert research.prompt.startswith("You research. RESEARCH-PROMPT") and "Your last message is your report" in research.prompt
+    assert operator.description == "Drives FilmCraft for one job in a running engine." and operator.model == "inherit"
+    assert operator.prompt.startswith("You operate FilmCraft (app `filmcraft`). OPERATOR-PROMPT") and operator.skills == ["filmcraft"]
+    assert operator.tools == [f"{PREFIX}{name}" for name in TOOL_NAMES if name.startswith("engine_") or name == "preview"] + ["Read"]
+
+    with_config(studio, agent_model_balanced="claude-opus-5-5", agent_model_light="claude-haiku-5-5")
+    message(client, song["id"], "Hi")
+    offered = model.options[1].agents
+    assert list(offered) == ["lyricist", "research"] and offered["research"].model == "claude-opus-5-5"
+    lyricist = offered["lyricist"]
+    assert lyricist.model == "claude-haiku-5-5" and lyricist.skills == ["songwriting"]
+    assert lyricist.tools == [f"{PREFIX}library_list", f"{PREFIX}library_upsert", "Read"]
+
+    # A project with no subagent to offer is offered none, and the definitions say so themselves where they are wrong
+    bare = Agent(studio.sessions, model, None, studio.agent.skills)
+    studio.jobs.agent = bare
+    message(client, film["id"], "Hi")
+    assert model.options[2].agents is None
+    listed = read_agents(studio.tmp / "agents")
+    assert [agent.name for agent in listed] == ["lyricist", "research"], "a template and a file without front matter define nothing"
+    assert [agent.name for agent in operators(studio.tmp / "agents", CATALOG, studio.agent.skills)] == ["filmcraft"]
+    assert operators(tmp_path, CATALOG, studio.agent.skills) == [], "without the template there are no operators"
+    assert [a.name for a in agents_for(listed, [], studio.agent.skills, "games")] == ["research"]
+    (tmp_path / "wrong.md").write_text("---\nname: other\ndescription: x\n---\nprompt")
+    with pytest.raises(ValueError, match="file's stem"):
+        read_agents(tmp_path)
+    (tmp_path / "wrong.md").write_text("---\nname: wrong\ndescription: x\nmodel: enormous\n---\nprompt")
+    with pytest.raises(ValueError, match="model tier"):
+        read_agents(tmp_path)
+    assert matching(("engine_*", "preview"), TOOL_NAMES)[0] == "engine_start"
+    with pytest.raises(ValueError, match="no tool is named engine_teleport"):
+        matching(("engine_teleport",), TOOL_NAMES)
+    asking = AgentSpec("asker", "Asker", "Asks.", frozenset({"all"}), ("ask_user",), (), "inherit", "Ask.")
+    with pytest.raises(ValueError, match="no tool is named ask_user"):
+        Agent(studio.sessions, model, None, studio.agent.skills, [asking])
+
+
+def test_the_subagents_and_skills_of_the_repository_load_and_name_only_tools_the_agent_has(studio):
+    skills = read_skills(skills_directory())
+    agent = Agent.for_deployment(studio.sessions)
+    assert agent.loop.__name__ == "sdk_loop" and [skill.name for skill in agent.skills] == [skill.name for skill in skills]
+    for discipline in CATALOG.disciplines:
+        offered = agent.subagents({"discipline": discipline}, skills_for(skills, CATALOG, discipline))
+        assert all(subagent.description and subagent.prompt for subagent in offered), discipline
+        assert not any("ask_user" in subagent.tools for subagent in offered)
+
+
+def test_a_subagents_steps_show_in_the_conversation_and_its_card_follows_what_it_does(studio):
+    client, model, store = studio.client, studio.model, studio.store
+    film = new_project(client)
+    films = use("Agent", subagent_type="research", description="Find lighthouse films", prompt="Find three films set in lighthouses.")
+    survey = use("Agent", subagent_type="research", description="Survey the library", prompt="List what the library holds.")
+    search, listing, broken = use("web_search", query="lighthouse films"), use("library_list"), use("library_upsert", name="No section")
+    model.script(reply(say("Two jobs out."), films, survey), reply(say("Both are back.")))
+    model.script_agent(
+        "research",
+        reply({"type": "thinking", "thinking": "Where to look.", "signature": "s"}, say("Searching the web."), search),
+        reply(say("REPORT: three films.")),
+        reply(listing, broken, use("engine_start", app="filmcraft", tier="cpu")),
+        reply(say("REPORT: the library is empty.")),
+    )
+    message(client, film["id"], "Research lighthouses")
+    log = events(client, film["id"])["events"]
+    cards = [e["data"] for e in log if e["kind"] == "agent"]
+    first, second = dict.fromkeys(card["agent_id"] for card in cards)
+    assert {card["group"] for card in cards} == {cards[0]["group"]}, "the subagents one step started share a group"
+    assert cards[0] == {"agent_id": first, "group": cards[0]["group"], "name": "research", "title": "Research agent",
+                        "task": "Find lighthouse films", "state": "working", "activity": "thinking", "detail": ""}
+    assert [card["agent_id"] for card in cards[:2]] == [first, second], "both cards are there before either works"
+    told = [(card["state"], card["activity"], card["detail"]) for card in cards if card["agent_id"] == first]
+    assert told[1:] == [
+        ("working", "thinking", "Thinking"), ("working", "thinking", "Searching the web."),
+        ("working", "searching", "Searching the web for lighthouse films"), ("working", "searching", "Searching the web for lighthouse films"),
+        ("working", "thinking", "REPORT: three films."), ("completed", "satisfied", "REPORT: three films."),
     ]
-    assert blocks == result.content
-    (request,) = sent
-    body = request["body"]
-    assert body["model"] == "claude-fable-5-2" and body["stream"] is True and body["max_tokens"] == 64000
-    assert body["thinking"] == {"type": "adaptive", "display": "updates", "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
-    assert body["output_config"] == {"effort": "high"} and body["fallbacks"] == "default"
-    assert body["cache_control"] == {"type": "ephemeral"} and body["tools"][0]["eager_input_streaming"] is True
-    assert set(request["headers"]["anthropic-beta"].split(",")) == {
-        "server-side-fallback-2026-07-01", "thinking-binding-controls-2026-08-01", "thinking-display-updates-2026-08-18"}
+    last = [card for card in cards if card["agent_id"] == first][-1]
+    assert last["seconds"] > 0 and last["tokens"] > 0
+    activities = [card["activity"] for card in cards if card["agent_id"] == second]
+    assert "confused" in activities and activities[-1] == "satisfied", "a call that failed shows, and so does the end"
+
+    theirs = [e for e in log if e["data"].get("agent_id") == first and e["kind"] != "agent"]
+    assert [(e["kind"], e["data"].get("text") or e["data"].get("tool") or e["data"].get("ok")) for e in theirs] == [
+        ("thinking", "Where to look."), ("text", "Searching the web."), ("tool_start", "web_search"), ("tool_end", True),
+        ("text", "REPORT: three films."),
+    ]
+    ends = {e["data"]["call_id"]: e["data"] for e in log if e["kind"] == "tool_end"}
+    assert ends[listing["id"]]["agent_id"] == second and ends[listing["id"]]["ok"] and not ends[broken["id"]]["ok"]
+    own = [e["data"] for e in log if e["kind"] == "text" and "agent_id" not in e["data"]]
+    assert [data["text"] for data in own] == ["Two jobs out.", "Both are back."], "the subagents' reports are the agent's to tell, not the person's to read"
+    assert not any(e["data"].get("tool") == "Agent" for e in log), "a subagent is a card, not a tool call"
+    assert next(e["data"] for e in log if e["kind"] == "usage")["agents"] == 2
+
+    # Each subagent worked in a conversation of its own, with its own prompt, tools, and model, and only its report came back
+    asked = [r for r in model.requests if r["agent"] == "research"]
+    assert asked[0]["messages"] == [{"role": "user", "content": "Find three films set in lighthouses."}]
+    assert asked[0]["system"][0]["text"].startswith("You research. RESEARCH-PROMPT") and asked[0]["model"] == "claude-sonnet-5-5"
+    assert asked[0]["tools"] == [f"{PREFIX}library_list", f"{PREFIX}library_upsert", "WebSearch", "WebFetch"]
+    refused = tool_results(asked[3])
+    assert "No such tool" in refused[next(reversed(refused))]["content"], "a subagent has only the tools its definition lists"
+    back = tool_results(model.requests[-1])
+    assert "REPORT: three films." in back[films["id"]]["content"] and "REPORT: the library is empty." in back[survey["id"]]["content"]
+    assert "Searching the web." not in json.dumps(model.requests[-1]["messages"])
+    kept = {row["subpath"] for row in store.tables["agent_transcripts"].values()}
+    assert kept == {"", f"subagents/agent-{first}", f"subagents/agent-{second}"}, "a subagent's transcript is kept beside the session's"
+
+    # A tool kept to the agent itself is refused to a subagent, whatever its definition came to list
+    turn = SimpleNamespace(beat=lambda: True, acting=lambda agent_id: nullcontext(), event=lambda kind, data: None)
+    refusal = studio.agent.run_tool(turn, "ask_user", {"question": "Which?", "options": ["A", "B"]}, "call_1", first)
+    assert not refusal.ok and "Only the agent itself can use ask_user" in refusal.content
+
+
+def answering(studio: SimpleNamespace, project_id: str, decision: str) -> threading.Thread:
+    """Answer the next approval the project's agent asks for, as the person would while the turn waits."""
+
+    def answer() -> None:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            rows = [e for e in list(studio.store.tables["project_events"].values()) if e["project_id"] == project_id]
+            answered = {e["data"]["approval_id"] for e in rows if e["kind"] == "approval_result"}
+            waiting = [e["data"]["approval_id"] for e in rows if e["kind"] == "approval" and e["data"]["approval_id"] not in answered]
+            if waiting:
+                assert studio.sessions.answer_approval(ALICE, project_id, waiting[0], decision) is True
+                return
+            time.sleep(0.005)
+
+    thread = threading.Thread(target=answer)
+    thread.start()
+    return thread
+
+
+def test_a_step_the_person_approves_waits_for_their_answer_once_always_or_no(studio):
+    client, model, store = studio.client, studio.model, studio.store
+    store.moody_ensure_profile(ALICE.id, ALICE.email, 60)["max_sessions"] = 5
+    film = new_project(client, asks=True)
+    assert film["permissions"] == {}
+    base = f"/v1/projects/{film['id']}"
+    start = lambda: use("engine_start", app="filmcraft", tier="cpu")
+
+    # Once: the call runs, and the next one is asked about again
+    first = start()
+    model.script(reply(say("Opening FilmCraft."), first), reply(say("It runs.")))
+    waiter = answering(studio, film["id"], "once")
+    message(client, film["id"], "Cut the film")
+    waiter.join()
+    log = events(client, film["id"])["events"]
+    assert [e["kind"] for e in log] == ["user_message", "text", "tool_start", "approval", "approval_result", "engine", "engine",
+                                         "tool_end", "text", "usage", "turn_end"]
+    asked = next(e["data"] for e in log if e["kind"] == "approval")
+    assert asked == {"approval_id": asked["approval_id"], "tool": "engine_start", "title": "Starting FilmCraft",
+                     "detail": "Starter: 1 credit a minute until it is stopped."}
+    assert next(e["data"] for e in log if e["kind"] == "approval_result") == {"approval_id": asked["approval_id"], "decision": "once"}
+    assert not tool_results(model.requests[1])[first["id"]].get("is_error") and len(studio.launcher.started) == 1
+    assert client.get(base, headers=auth("alice-token")).json()["project"]["permissions"] == {}
+
+    # An approval is answered once, by a decision there is, of an approval there was, by its project's person
+    again = lambda aid, decision, token="alice-token": client.post(f"{base}/approvals/{aid}", headers=auth(token), json={"decision": decision})
+    assert again(asked["approval_id"], "deny").json() == {"recorded": False}, "the first answer stands"
+    assert again(asked["approval_id"], "maybe").status_code == 400 and again("no-such-approval", "once").status_code == 404
+    assert again(asked["approval_id"], "once", "bob-token").status_code == 404
+
+    # No: nothing runs, and the model is told not to try again
+    second = start()
+    model.script(reply(second), reply(say("Then I will not.")))
+    waiter = answering(studio, film["id"], "deny")
+    message(client, film["id"], "Open another")
+    waiter.join()
+    told = tool_results(model.requests[-1])[second["id"]]
+    assert told["is_error"] and "The person declined" in told["content"] and len(studio.launcher.started) == 1
+    ends = [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "tool_end"]
+    assert (ends[-1]["ok"], ends[-1]["summary"]) == (False, "Not approved")
+
+    # Always: kept for that tool in that project, so the next call is not asked about, in this turn or a later one
+    third, fourth, fifth = start(), start(), start()
+    model.script(reply(third), reply(fourth), reply(say("Two more run.")), reply(fifth), reply(say("And one more.")))
+    waiter = answering(studio, film["id"], "always")
+    message(client, film["id"], "Open two")
+    waiter.join()
+    assert client.get(base, headers=auth("alice-token")).json()["project"]["permissions"] == {"engine_start": "always"}
+    assert f"{PREFIX}engine_start" not in model.options[-1].allowed_tools, "the turn began before the person said always"
+    message(client, film["id"], "And one more")
+    assert f"{PREFIX}engine_start" in model.options[-1].allowed_tools and f"{PREFIX}generate_video" not in model.options[-1].allowed_tools
+    assert "The person no longer wants to be asked before: engine_start" in said(model.requests[-1])[1]
+    assert kinds(client, film["id"]).count("approval") == 3 and len(studio.launcher.started) == 4
+
+    # The person takes it back in the Environment panel, and is asked again
+    patch = lambda permissions: client.patch(base, headers=auth("alice-token"), json={"permissions": permissions})
+    assert patch({}).json()["project"]["permissions"] == {}
+    for wrong in ({"engine_start": "never"}, {"Engine Start": "always"}, {"engine_start": True}):
+        assert patch(wrong).status_code == 400, wrong
+    assert patch({"generate_video": "always"}).json()["project"]["permissions"] == {"generate_video": "always"}
+
+    # No answer in time: the approval is recorded as expired, which stands, and the model is told to end its turn and ask
+    with_config(studio, approval_seconds=0.05)
+    sixth = start()
+    model.script(reply(sixth), reply(say("I wanted to open FilmCraft to cut the film. Say when to go ahead.")))
+    message(client, film["id"], "Open it")
+    log = events(client, film["id"])["events"]
+    expired = [e["data"] for e in log if e["kind"] == "approval_result"][-1]
+    assert expired["decision"] == "expired" and again(expired["approval_id"], "once").json() == {"recorded": False}
+    told = tool_results(model.requests[-1])[sixth["id"]]
+    assert told["is_error"] and "did not answer in time" in told["content"] and "End your turn now" in told["content"]
+    assert len(studio.launcher.started) == 4 and log[-1]["kind"] == "turn_end"
+
+    # A turn the person stops while it waits is over at once
+    with_config(studio, approval_seconds=30)
+    model.script(reply(start()))
+    stopper = threading.Timer(0.1, lambda: client.post(f"{base}/stop", headers=auth("alice-token")))
+    stopper.start()
+    studio.agent.heartbeat_seconds = 0.02
+    began = time.monotonic()
+    message(client, film["id"], "Open it")
+    stopper.join()
+    assert time.monotonic() - began < 10 and events(client, film["id"])["running"] is False
+    assert kinds(client, film["id"])[-2:] == ["usage", "turn_end"] and len(studio.launcher.started) == 4
+
+
+def test_a_subagents_step_is_approved_by_the_person_as_the_agents_own_is(studio):
+    client, model = studio.client, studio.model
+    film = new_project(client, asks=True)
+    job = use("Agent", subagent_type="filmcraft", description="Cut the teaser", prompt="Open FilmCraft and cut the teaser.")
+    model.script(reply(job), reply(say("The teaser is cut.")))
+    model.script_agent("filmcraft", reply(use("engine_start", app="filmcraft", tier="cpu")), reply(say("REPORT: cut.")))
+    waiter = answering(studio, film["id"], "once")
+    message(client, film["id"], "Cut a teaser")
+    waiter.join()
+    log = events(client, film["id"])["events"]
+    card = next(e["data"] for e in log if e["kind"] == "agent")
+    asked, answered = (next(e["data"] for e in log if e["kind"] == kind) for kind in ("approval", "approval_result"))
+    assert asked["agent_id"] == card["agent_id"] == answered["agent_id"] and card["title"] == "FilmCraft agent"
+    assert all(e["data"]["agent_id"] == card["agent_id"] for e in log if e["kind"] == "engine"), "what a subagent's tool writes is marked as its own"
+    assert len(studio.launcher.started) == 1
+
+
+def test_a_turn_that_would_end_with_engines_open_is_told_so_once(studio):
+    client, model = studio.client, studio.model
+    model.stop_hooks = True
+    film = new_project(client)
+    model.script(reply(say("All done.")))
+    message(client, film["id"], "Hello")
+    assert len(model.requests) == 1, "with no engine open a turn just ends"
+
+    engine = start_engine(studio, film["id"])
+    model.script(reply(say("The cut is done.")), reply(say("FilmCraft stays open: you are still watching the cut.")))
+    message(client, film["id"], "Cut it")
+    nudge = model.requests[-1]["messages"][-1]["content"]
+    assert nudge.startswith("Stop hook feedback:") and f"- {engine['id']}: FilmCraft, running" in nudge
+    assert "engine_stop" in nudge and "say in one line why" in nudge
+    assert len(model.requests) == 3, "the model is told once, and then the turn ends whatever it answers"
+
+    stop = use("engine_stop", engine_id=engine["id"])
+    model.script(reply(say("Done.")), reply(stop), reply(say("Stopped FilmCraft.")))
+    message(client, film["id"], "Finish")
+    assert studio.launcher.stopped == ["sb-1"] and len(model.requests) == 6
+
+
+def test_a_message_can_lock_in_a_card_the_agent_showed_and_the_model_reads_which_and_with_what(studio):
+    client, model, store = studio.client, studio.model, studio.store
+    film, other = new_project(client), new_project(client, name="Other")
+    post = lambda body, project=film: client.post(f"/v1/projects/{project['id']}/messages", headers=auth("alice-token"), json=body)
+    card = {"ui_id": "ui-grade", "title": "Pick a grade", "kind": "components", "spec": {}, "submit": "Lock in", "waits": True, "media": []}
+    store.insert("project_events", {"project_id": film["id"], "kind": "ui", "data": card})
+    value = {"contrast": 0.65, "look": "Kodak 2383", "layers": ["grain"]}
+    jobs, studio.jobs.agent = studio.jobs.agent, None
+    refusals = [
+        (post({"text": "", "ui": {"ui_id": "ui-nope", "value": value}}), 404),
+        (post({"text": "", "ui": {"ui_id": "ui-grade", "value": value}}, other), 404),
+        (post({"text": "", "ui": {"ui_id": "ui-grade"}}), 400),
+        (post({"text": "", "ui": {"value": value}}), 400),
+        (post({"text": "", "ui": {"ui_id": "ui-grade", "value": "x" * 70000}}), 413),
+        (post({"text": "  "}), 400),
+    ]
+    assert [response.status_code for response, _ in refusals] == [status for _, status in refusals], [r.text for r, _ in refusals]
+    assert studio.jobs.turns == []
+    studio.jobs.agent = jobs
+
+    model.script(reply(say("Grading with that.")), reply(say("Noted.")))
+    assert post({"text": "This one.", "ui": {"ui_id": "ui-grade", "value": value}}).status_code == 202
+    first = next(e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "user_message")
+    assert first == {"text": "This one.", "ui": {"ui_id": "ui-grade", "value": value}}, "the event keeps the card's state as it was sent"
+    words, _ = said(model.requests[-1])
+    assert words.startswith("This one.\n\n[The person locked in the card \"Pick a grade\" (ui_id ui-grade) with these values: ")
+    assert json.loads(words[words.index("values: ") + 8:-1]) == value
+    assert post({"ui": {"ui_id": "ui-grade", "value": None}}).status_code == 202, "a card can be locked in with no words"
+    assert said(model.requests[-1])[0].startswith("\n\n[The person locked in the card")
+
+
+def test_the_environment_lists_what_a_projects_agent_can_use(studio):
+    client = studio.client
+    film, game = new_project(client), new_project(client, name="Ember Ridge", discipline="games", format="Game")
+    environment = lambda project, token="alice-token": client.get(f"/v1/projects/{project['id']}/environment", headers=auth(token))
+    found = environment(film).json()
+    assert list(found) == ["connectors", "agents", "skills"]
+    connectors = {connector["id"]: connector for connector in found["connectors"]}
+    assert list(connectors) == ["fal", "github", "web"], "Epic is for the projects whose discipline uses Unreal"
+    assert all(set(connector) == {"id", "name", "kind", "state", "detail"} for connector in connectors.values())
+    assert (connectors["fal"]["kind"], connectors["fal"]["state"]) == ("generation", "connected")
+    assert (connectors["github"]["kind"], connectors["github"]["state"]) == ("repository", "available") and "Connect GitHub" in connectors["github"]["detail"]
+    assert (connectors["web"]["kind"], connectors["web"]["state"]) == ("search", "connected")
+    assert found["agents"] == [
+        {"name": "research", "title": "Research agent", "description": "Looks things up on the web and in the library."},
+        {"name": "filmcraft", "title": "FilmCraft agent", "description": "Drives FilmCraft for one job in a running engine."},
+    ]
+    assert found["skills"] == [{"name": "filmcraft", "description": "Editing films in FilmCraft."}, {"name": "studio-basics", "description": ""}]
+
+    connect_alice(studio)
+    assert {c["id"]: c["state"] for c in environment(film).json()["connectors"]}["github"] == "available", "connected, with no repository linked yet"
+    client.post(f"/v1/projects/{film['id']}/github", headers=auth("alice-token"), json={"repo": "alice-gh/film"})
+    github = {c["id"]: c for c in environment(film).json()["connectors"]}["github"]
+    assert github["state"] == "connected" and "alice-gh/film" in github["detail"]
+
+    played = environment(game).json()
+    epic = {c["id"]: c for c in played["connectors"]}["epic"]
+    assert (epic["kind"], epic["state"]) == ("license", "available") and [a["name"] for a in played["agents"]] == ["research"]
+    connect_epic(studio)
+    studio.github.pullers.add(unseal(SECRET, studio.store.tables["epic_connections"][ALICE.id]["token_encrypted"]))
+    assert {c["id"]: c["state"] for c in environment(game).json()["connectors"]}["epic"] == "connected"
+    assert environment(film, "bob-token").status_code == 404
+
+    with_config(studio, fal_key="", github_app_client_id="", anthropic_key="")
+    off = {c["id"]: c["state"] for c in environment(film).json()["connectors"]}
+    assert off == {"fal": "off", "github": "off", "web": "off"}
+
+
+def test_a_session_that_begins_in_a_project_with_a_past_is_told_what_was_said(studio):
+    client, model, store = studio.client, studio.model, studio.store
+    film = new_project(client)
+    question = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"])
+    model.script(reply(say("A film about Mara. One thing first."), question), reply(say("Color it is.")))
+    message(client, film["id"], "Make a film about Mara")
+    message(client, film["id"], "Color")
+    session = store.tables["projects"][film["id"]]["agent_session"]
+    assert "What was said in this project before" not in said(model.requests[-1])[1]
+
+    # The session's transcript is gone (another working directory, or a database restored without it): a new one begins
+    store.tables["agent_transcripts"].clear()
+    model.script(reply(say("Shot list next.")))
+    message(client, film["id"], "What next?")
+    fresh = store.tables["projects"][film["id"]]["agent_session"]
+    assert fresh != session and (model.options[-1].session_id, model.options[-1].resume) == (fresh, None)
+    words, state = said(model.requests[-1])
+    assert words == "What next?" and len(model.requests[-1]["messages"]) == 1
+    before = state[: state.index("The project's state at the start of this turn:")]
+    assert before.splitlines()[1:-1] == [
+        "The person: Make a film about Mara", "You: A film about Mara. One thing first.",
+        "You asked: Color or black and white? (Color / Black and white)", "The person: Color", "You: Color it is.",
+    ], "the recap is the conversation the page shows, without this turn's own message"
+
+    log = [{"kind": "user_message", "data": {"text": "x" * 5000}}] * 5 + [{"kind": "text", "data": {"text": "partial", "partial": True}},
+                                                                        {"kind": "text", "data": {"text": "a subagent's", "agent_id": "a1"}},
+                                                                        {"kind": "text", "data": {"text": "The last word."}}]
+    told = recap(log)
+    assert told.endswith("You: The last word.") and "partial" not in told and "subagent" not in told
+    assert told.count("The person:") == 2, "the most recent is kept where there is more than a recap carries"
+
+
+def test_the_unreal_projects_a_session_was_told_of_are_read_from_its_results_as_the_loop_keeps_them():
+    call = {"type": "tool_use", "id": "toolu_1", "name": f"{PREFIX}unreal_projects", "input": {"engine_id": "e"}}
+    other = {"type": "tool_use", "id": "toolu_2", "name": f"{PREFIX}library_list", "input": {}}
+    answer = json.dumps({"projects": [{"path": "game/Game.uproject"}, {"path": "demo/Demo.uproject"}]})
+    history = [
+        {"role": "user", "content": [{"type": "text", "text": "Hi"}]},
+        {"role": "assistant", "content": [call, other]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_1", "content": [{"type": "text", "text": answer}]},
+            {"type": "tool_result", "tool_use_id": "toolu_2", "content": json.dumps({"projects": [{"path": "not/Unreal.uproject"}]})},
+        ]},
+        {"role": "assistant", "content": [{**call, "id": "toolu_3"}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_3", "content": "That engine is not running.", "is_error": True}]},
+    ]
+    assert reported_unreal(history) == {"game/Game.uproject", "demo/Demo.uproject"}
 
 
 class FakeSandboxModule:
@@ -3319,19 +3985,17 @@ def test_the_github_client_speaks_the_apps_token_and_installation_endpoints():
     assert GitHub.install_url("moody-studio", "a.b") == "https://github.com/apps/moody-studio/installations/new?state=a.b"
 
 
-def test_skills_are_chosen_by_discipline_with_their_references(tmp_path):
-    for name, body in SKILLS.items():
-        (tmp_path / name).mkdir()
-        (tmp_path / name / "SKILL.md").write_text(body)
-    (tmp_path / "filmcraft" / "references").mkdir()
-    (tmp_path / "filmcraft" / "references" / "prompting.md").write_text("# Prompting\n\nPROMPTING-REFERENCE")
-    skills = read_skills(tmp_path)
+def test_skills_are_chosen_by_discipline_and_keep_their_reference_files_beside_them(tmp_path):
+    folder, _ = write_definitions(tmp_path)
+    skills = read_skills(folder)
     media = [skill.name for skill in skills_for(skills, CATALOG, "media")]
     music = [skill.name for skill in skills_for(skills, CATALOG, "music")]
     games = [skill.name for skill in skills_for(skills, CATALOG, "games")]
     assert media == ["filmcraft", "studio-basics"] and music == ["songwriting", "studio-basics"] and games == ["studio-basics"]
     film = next(skill for skill in skills if skill.name == "filmcraft")
-    assert film.description == "Editing films in FilmCraft." and "## references/prompting.md\n\n# Prompting" in film.body
+    assert film.description == "Editing films in FilmCraft." and film.body.startswith("Cut on action.")
+    assert "FILMCRAFT-REFERENCE-TEXT" not in film.body, "a reference file is no part of a skill's text"
+    assert (film.directory / "references" / "color.md").read_text() == REFERENCE
 
 
 def test_a_skill_for_every_discipline_is_read_for_every_project_whatever_it_is_named(tmp_path):
@@ -3358,8 +4022,7 @@ def test_the_studio_skill_is_read_for_every_project_and_names_only_tools_the_age
     named = set(re.findall(r"`((?:engine|unreal|github|library|generate)_[a-z_]+|ask_user|update_plan|filmcraft)[`(]", studio_skill.body))
     assert {"engine_call", "engine_files", "engine_show", "engine_exec", "engine_start", "engine_stop"} <= named
     assert named <= set(TOOL_NAMES), f"the skill names tools the agent does not have: {named - set(TOOL_NAMES)}"
-    prompt = system_prompt(CATALOG, {"id": "p", "discipline": "music", "format": "Song"}, skills_for(skills, CATALOG, "music"), frozenset({"cpu"}))
-    assert "# Skill: studio" in prompt and "handoff/" in prompt
+    assert "handoff/" in studio_skill.body and studio_skill.directory == skills_directory() / "studio"
 
 
 def test_the_store_speaks_the_data_and_storage_apis():
@@ -3378,7 +4041,7 @@ def test_the_store_speaks_the_data_and_storage_apis():
             folder = json.loads(request.content)["prefix"]
             listing = [{"name": "a.png", "id": "1"}, {"name": "shots", "id": None}] if folder == "u/p" else [{"name": "b.mp4", "id": "2"}]
             return httpx.Response(200, json=listing)
-        if path == "/rest/v1/agent_messages":
+        if path == "/rest/v1/agent_transcripts":
             offset = int(request.url.params["offset"])
             return httpx.Response(200, json=[{"id": n} for n in range(offset, min(offset + 1000, 1500))])
         if path == "/rest/v1/github_connections":
@@ -3402,7 +4065,7 @@ def test_the_store_speaks_the_data_and_storage_apis():
     removal = seen[-1]
     assert removal.method == "DELETE" and json.loads(removal.content) == {"prefixes": ["u/p/a.png", "u/p/shots/b.mp4"]}
 
-    assert len(store.every("agent_messages", project_id="eq.p", order="id.asc")) == 1500
+    assert len(store.every("agent_transcripts", project_id="eq.p", order="id.asc")) == 1500
     assert [request.url.params["offset"] for request in seen[-2:]] == ["0", "1000"]
 
     store.upsert("github_connections", {"user_id": "u", "login": "x"}, on_conflict="user_id")
