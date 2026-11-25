@@ -26,7 +26,10 @@ reasoning, so:
   skills of `moody/skills` that fit the discipline), and the tools are a fixed
   list. What changes between turns (the name, the plan, the library, the
   engines, GitHub) is a `system` message appended at the start of each turn,
-  after the person's message. Where an Unreal engine runs, it also lists the
+  after the person's message. Each open engine is listed with its app and
+  whether it has a command channel, under the project folder the engines
+  share, so the agent knows what it can drive and where files meet. Where an
+  Unreal engine runs, it also lists the
   Unreal projects in that engine's workspace and which of them the agent has
   not yet looked at with `unreal_projects`, and a clone of the linked repository
   the engine started with that is still running or failed (`Agent.unreal_state`),
@@ -61,6 +64,13 @@ that answer between steps.
 Every tool acts as the project's user, through `Sessions`, so the agent of one
 user's project reaches nothing of another's.
 
+The agent drives every engine through the same tools. `engine_call` reaches
+the command channel of whichever app the engine runs, found by the app's id
+on the launcher (`Launcher.engine_call`), so a new app with a channel needs no
+tool of its own; an engine without one is driven through `engine_exec` and its
+screen. Work passes between engines as files in the project's folder, which
+`engine_files` lists as an engine sees it.
+
 A project's repository may be a whole team's, shared by everyone who works on
 the game, so the agent reads it freely and writes only to a branch of its own
 (`tool_github_save`): `moody/`, the project's name as a slug, and the first
@@ -87,6 +97,7 @@ import traceback
 import unicodedata
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Protocol
 from urllib.parse import quote
@@ -157,6 +168,14 @@ BRANCH_PREFIX = "moody/"
 # Paths unreal_assets gives of one kind asked for, and of each kind when none is
 ASSET_PATHS_ONE_KIND = 250
 ASSET_PATHS_EACH = 15
+# The `disciplines` a skill names to be read for every project
+EVERY_DISCIPLINE = "all"
+# Entries engine_files gives of one folder
+FILES_LIMIT = 500
+# The exit status engine_files' listing ends with where the path is not there
+NO_SUCH_PATH = 44
+# One line per entry: its type, size in bytes, modification time in seconds, and name
+FILES_FORMAT = r"%y\t%s\t%T@\t%f\n"
 
 
 class TurnStopped(Exception):
@@ -295,9 +314,10 @@ def read_skills(directory: Path) -> list[Skill]:
     """Every skill under a directory, in name order, each with the reference files it links to.
 
     A skill says which disciplines it is for with a `disciplines` line in its
-    front matter (`disciplines: media, animation`); one that does not is for
-    the disciplines that use the engine it is named after, and one named after
-    no engine is for every discipline (`skills_for`). The other Markdown files
+    front matter (`disciplines: media, animation`, or `disciplines: all` for
+    every project); one that does not is for the disciplines that use the
+    engine it is named after, and one named after no engine is for every
+    discipline (`skills_for`). The other Markdown files
     of a skill's directory (its `references/`) follow its text under their
     paths, which is where its links to them lead: the agent has no tool to
     open a file, so what a skill tells it to read has to be in the prompt.
@@ -320,17 +340,22 @@ def read_skills(directory: Path) -> list[Skill]:
 
 
 def skills_for(skills: list[Skill], catalog: Catalog, discipline: str) -> list[Skill]:
-    """The skills that fit a discipline."""
+    """The skills that fit a discipline, which those for every discipline (`EVERY_DISCIPLINE`) always do."""
     engines = set(catalog.disciplines.get(discipline, {}).get("engines", []))
     return [
         skill
         for skill in skills
-        if discipline in skill.disciplines
+        if not skill.disciplines.isdisjoint((discipline, EVERY_DISCIPLINE))
         or (not skill.disciplines and (skill.name in engines or skill.name not in catalog.apps))
     ]
 
 
 # Prompts
+
+
+def project_folder(project_id: str) -> str:
+    """Where every engine of a project opens: the project's folder of the user's workspace, which they share."""
+    return f"{WORKSPACE}/projects/{project_id}"
 
 
 def system_prompt(catalog: Catalog, project: dict[str, Any], skills: list[Skill], tiers: frozenset[str]) -> str:
@@ -365,7 +390,7 @@ def system_prompt(catalog: Catalog, project: dict[str, Any], skills: list[Skill]
         for tier in catalog.data["tiers"]
         if tier["id"] in tiers
     ]
-    folder = f"{WORKSPACE}/projects/{project['id']}"
+    folder = project_folder(project["id"])
     sections = [
         f"""You are the agent of {brand} Studio. You work with one person on one creative project, and you make it with
 them step by step: you plan, write, generate images and video, open creative engines on cloud machines and drive
@@ -403,6 +428,10 @@ The machines an engine runs on (`tier`):
   you want them to look at there (an Unreal engine has two: Desktop and Unreal). Every engine of this project
   opens in the project's folder, `{folder}`, which they share; `engine_import` copies library entries into its
   `library` folder.
+- `engine_call` runs a command of an engine's own command channel, the same commands its interface runs, for every
+  engine that has one; the turn's state says which do. An engine without one you drive with `engine_exec`, or you
+  ask the person to do the step on its screen. Work passes from one engine to another as files in the project's
+  folder: `engine_files` lists it as an engine sees it, so confirm a file is there before another engine opens it.
 - `github_save` keeps the project's documents in the GitHub repository the person linked, on a branch of your own
   (`moody/...`), never on its default branch or a branch someone else made; give the person the branch and the
   compare link it returns, where they open a pull request. `github_read` reads the default branch, or your branch
@@ -594,6 +623,33 @@ TOOLS = [
         ["engine_id", "tags"],
     ),
     tool(
+        "engine_call",
+        "Call a method of a running engine's command channel, whichever app it runs: the same commands that app's "
+        "interface runs. Returns the app's answer. An engine whose app has no command channel says so; drive that one "
+        "with engine_exec, or ask the person to do the step on its screen.",
+        {
+            "engine_id": ENGINE_ID,
+            "method": {"type": "string", "description": "The method's name, as the app's skill gives it."},
+            "params": {"type": "object", "description": "The method's parameters, where it takes any."},
+        },
+        ["engine_id", "method"],
+    ),
+    tool(
+        "engine_files",
+        "List the project's folder, or a folder or file inside it, as a running engine sees it: each entry's name, "
+        "kind (file or folder), size in bytes, and when it was last modified. Every engine of the project shares "
+        "this folder, so use it to confirm a file one engine wrote is there before another opens it.",
+        {
+            "engine_id": ENGINE_ID,
+            "path": {
+                "type": "string",
+                "description": "A path inside the project's folder, like handoff/cadcraft-to-blender. Left out: the "
+                "folder itself.",
+            },
+        },
+        ["engine_id"],
+    ),
+    tool(
         "filmcraft",
         "Call a method of FilmCraft's command channel in a running FilmCraft engine: the same commands its interface "
         "runs. Returns FilmCraft's answer.",
@@ -740,6 +796,42 @@ def repository_path(path: str) -> str:
     if any(part in (".", "..") for part in parts) or len("/".join(parts)) > 255:
         raise Refused(400, "That is not a path in the repository.")
     return "/".join(parts)
+
+
+def folder_path(path: str, folder: str) -> str:
+    """A path inside a project's folder, relative to it, from one given relative to it or in full.
+
+    Raises:
+        Refused: 400 for a path outside the folder.
+    """
+    given = PurePosixPath(path.strip() or ".")
+    if given.is_absolute():
+        if not given.is_relative_to(folder):
+            raise Refused(400, f"That path is outside the project's folder, {folder}.")
+        given = given.relative_to(folder)
+    if ".." in given.parts:
+        raise Refused(400, f"That path is outside the project's folder, {folder}.")
+    return "" if given == PurePosixPath(".") else given.as_posix()
+
+
+def listed_file(line: str) -> dict[str, Any] | None:
+    """One entry of an engine's listing (`FILES_FORMAT`) as `engine_files` gives it, or nothing for another line.
+
+    A folder has no size of its own worth giving, and anything that is neither
+    a file nor a folder (a link, a socket) is `other`.
+    """
+    parts = line.split("\t", 3)
+    if len(parts) != 4 or not parts[3]:
+        return None
+    kind, size, seconds, name = parts
+    try:
+        modified = datetime.fromtimestamp(float(seconds), timezone.utc).isoformat(timespec="seconds")
+        entry = {"name": name, "kind": {"f": "file", "d": "folder"}.get(kind, "other"), "size": int(size)}
+    except (ValueError, OverflowError):
+        return None
+    if entry["kind"] == "folder":
+        del entry["size"]
+    return {**entry, "modified": modified}
 
 
 def agent_branch(project: dict[str, Any]) -> str:
@@ -1011,8 +1103,15 @@ class Agent:
             files = ", ".join(f"{kinds.count(kind)} {kind}" for kind in dict.fromkeys(kinds)) or "no media"
             entries.append(f"- {row['tag'] or '(untagged)'}: {row['name']} ({row['section']}; {files})")
         open_engines = [engine for engine in self.sessions.engines(turn.user, project["id"]) if engine["status"] in OPEN]
+        launcher = self.sessions.launcher
         engines = [
-            f"- {engine['id']}: {self.app_name(engine['app'])}, {engine['status']}, tier {engine['tier']}"
+            f"- {engine['id']}: {self.app_name(engine['app'])} (app `{engine['app']}`), {engine['status']}, "
+            f"tier {engine['tier']}, "
+            + (
+                "has a command channel (engine_call)"
+                if launcher.has_channel(engine["app"])
+                else "no command channel (engine_exec, or the person on its screen)"
+            )
             + (f", streaming {' and '.join(STREAMS[engine['app']])}" if engine["app"] in STREAMS else "")
             for engine in open_engines
         ]
@@ -1029,6 +1128,7 @@ class Agent:
                 f"Library sections: {', '.join(project['library_sections']) or '(none)'}",
                 "Library entries:",
                 *(entries or ["- (none)"]),
+                f"Project folder, which every engine of this project opens in and shares: {project_folder(project['id'])}",
                 "Open engines:",
                 *(engines or ["- (none)"]),
                 *self.unreal_state(turn, open_engines, history),
@@ -1124,7 +1224,7 @@ class Agent:
             return self.failure(
                 call, json.dumps({"INVALID_INPUT": problem, "input": arguments}) + " Make the call again with valid input."
             )
-        turn.event("tool_start", {"call_id": call["id"], "tool": call["name"], "title": self.title(call["name"], arguments)})
+        turn.event("tool_start", {"call_id": call["id"], "tool": call["name"], "title": self.title(turn, call["name"], arguments)})
         try:
             result: Result = getattr(self, f"tool_{call['name']}")(turn, **arguments)
         except Refused as refused:
@@ -1147,9 +1247,19 @@ class Agent:
             outcome["is_error"] = True
         return outcome
 
-    def title(self, name: str, arguments: dict[str, Any]) -> str:
-        """A short line that says what a call does, for the page."""
+    def title(self, turn: Turn, name: str, arguments: dict[str, Any]) -> str:
+        """A short line that says what a call does, for the page.
+
+        A call of an engine's command channel is titled with the engine's app, which is read from
+        the engine the call names; one that names no engine of the project is titled "Engine".
+        """
         apps = self.sessions.catalog.apps
+        engine = "Engine"
+        if name == "engine_call":
+            try:
+                engine = self.app_name(self.sessions.project_engine(turn.user, turn.project_id, arguments["engine_id"])["app"])
+            except Refused:
+                pass
         app = apps.get(arguments.get("app", ""), {}).get("name", arguments.get("app", ""))
         count = arguments.get("count", 1)
         return {
@@ -1166,7 +1276,9 @@ class Agent:
             "engine_exec": "Running a command",
             "engine_show": f"Showing {arguments.get('stream') or DESKTOP} on the screen",
             "engine_import": f"Importing {', '.join(arguments.get('tags', []))}",
-            "filmcraft": f"FilmCraft: {arguments.get('method', '')}",
+            "engine_call": f"{engine}: {arguments.get('method', '')}",
+            "engine_files": f"Listing {arguments.get('path') or 'the project folder'}",
+            "filmcraft": f"{self.app_name('filmcraft')}: {arguments.get('method', '')}",
             "github_save": f"Saving {arguments.get('path', '')} to the agent's branch on GitHub",
             "github_read": f"Reading {arguments.get('path', '') or 'the repository'} from "
             f"{'the agent' if arguments.get('ref') == 'agent' else 'the default'} branch on GitHub",
@@ -1444,7 +1556,10 @@ class Agent:
 
     def tool_engine_list(self, turn: Turn) -> Result:
         engines = [
-            {key: engine[key] for key in ("id", "app", "tier", "status", "started_at", "queue_position")}
+            {
+                **{key: engine[key] for key in ("id", "app", "tier", "status", "started_at", "queue_position")},
+                "command_channel": self.sessions.launcher.has_channel(engine["app"]),
+            }
             for engine in self.sessions.engines(turn.user, turn.project_id)
             if engine["status"] in OPEN
         ]
@@ -1497,7 +1612,7 @@ class Agent:
         _, sandbox = self.engine_sandbox(turn, engine_id)
         rows = self.sessions.assets_by_tags(turn.project, tags)
         links = self.sessions.links(rows)
-        folder = f"{WORKSPACE}/projects/{turn.project_id}/library"
+        folder = f"{project_folder(turn.project_id)}/library"
         lines = ["set -e"]
         files = []
         for row in rows:
@@ -1517,13 +1632,73 @@ class Agent:
             f"{len(files)} file{'s' if len(files) != 1 else ''} in the project's library folder",
         )
 
-    def tool_filmcraft(self, turn: Turn, engine_id: str, method: str, params: dict[str, Any] | None = None) -> Result:
+    def channel_call(
+        self, turn: Turn, engine_id: str, method: str, params: dict[str, Any] | None, only: str | None = None
+    ) -> Result:
+        """Call the command channel of the engine's app, or of `only` that app where a tool is one app's own.
+
+        Raises:
+            Refused: as `engine_sandbox` does, and 409 for an engine of another app than `only`, or
+                one whose app has no command channel, saying how such an engine is driven.
+        """
         row, sandbox = self.engine_sandbox(turn, engine_id)
-        if row["app"] != "filmcraft":
-            raise Refused(409, "That engine is not FilmCraft.")
-        answer = self.sessions.launcher.filmcraft(sandbox, method, params)
+        name = self.app_name(row["app"])
+        if only is not None and row["app"] != only:
+            raise Refused(409, f"That engine is not {self.app_name(only)}.")
+        if not self.sessions.launcher.has_channel(row["app"]):
+            raise Refused(
+                409,
+                f"This engine has no command channel: {name} is driven with engine_exec, or by the person on its "
+                "screen (engine_show).",
+            )
+        answer = self.sessions.launcher.engine_call(sandbox, row["app"], method, params)
         text = json.dumps(answer)
-        return Result(text if len(text) <= OUTPUT_LIMIT else text[:OUTPUT_LIMIT] + " [cut]", f"{method} done")
+        return Result(text if len(text) <= OUTPUT_LIMIT else text[:OUTPUT_LIMIT] + " [cut]", f"{name}: {method} done")
+
+    def tool_engine_call(self, turn: Turn, engine_id: str, method: str, params: dict[str, Any] | None = None) -> Result:
+        return self.channel_call(turn, engine_id, method, params)
+
+    def tool_filmcraft(self, turn: Turn, engine_id: str, method: str, params: dict[str, Any] | None = None) -> Result:
+        return self.channel_call(turn, engine_id, method, params, only="filmcraft")
+
+    def tool_engine_files(self, turn: Turn, engine_id: str, path: str = "") -> Result:
+        """List the project's folder, or a path inside it, on the engine's machine.
+
+        The machine is asked rather than the workspace Volume read from here: what an engine has
+        written is on its own mount first, and what the agent has to know is whether the engine it
+        is about to tell to open a file can see it.
+
+        Raises:
+            Refused: as `engine_sandbox` does, 400 for a path outside the folder, 404 for one not there.
+        """
+        _, sandbox = self.engine_sandbox(turn, engine_id)
+        folder = project_folder(turn.project_id)
+        inside = folder_path(path, folder)
+        # From ./, so a name that starts with a dash is never an option
+        target = shlex.quote(f"./{inside}")
+        script = "\n".join(
+            [
+                f"cd {shlex.quote(folder)} 2>/dev/null && [ -e {target} ] || exit {NO_SUCH_PATH}",
+                f"if [ -d {target} ]; then find {target} -mindepth 1 -maxdepth 1 -printf '{FILES_FORMAT}'",
+                f"else find {target} -maxdepth 0 -printf '{FILES_FORMAT}'; fi",
+            ]
+        )
+        status, output = self.sessions.launcher.exec(sandbox, script, EXEC_SECONDS)
+        where = inside or "the project folder"
+        if status == NO_SUCH_PATH:
+            raise Refused(
+                404,
+                f"There is no {inside} in the project's folder on this engine."
+                if inside
+                else f"The project's folder, {folder}, is not on this engine.",
+            )
+        if status != 0:
+            raise RuntimeError(f"the listing stopped with status {status}: {output[-500:]}")
+        found = sorted(filter(None, map(listed_file, output.splitlines())), key=lambda entry: entry["name"])
+        listing: dict[str, Any] = {"folder": folder, "path": inside, "entries": found[:FILES_LIMIT]}
+        if len(found) > FILES_LIMIT:
+            listing["more"] = len(found) - FILES_LIMIT
+        return Result(json.dumps(listing), f"{len(found)} entr{'y' if len(found) == 1 else 'ies'} in {where}")
 
     # GitHub
 

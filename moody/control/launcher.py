@@ -41,13 +41,20 @@ that start alone (`Clone.environment`, passed to `start_session` as
 `secrets`), never in its environment, its tags, or a named Secret that would
 outlive it; what the machine reports of the clone is `clone_status`.
 
+An engine's command channel is the launcher module's function named after its
+app, `<app id>_call(sandbox, method, params=None, timeout=60) -> dict`
+(`filmcraft_call`, `soundcraft_call`, `cadcraft_call`; a `-` in an id is a `_`
+in the name), found by that name alone (`ModalLauncher.channel`). So an app
+gains a channel by the launcher module gaining its function, with nothing to
+change here or in the agent, and an app without one is simply an engine the
+agent drives through its shell and its screen.
+
 Modal is imported where it is used, so the service's tests can stand in for
-the launcher module and run without Modal installed. FilmCraft's command
-channel (`filmcraft_call`) and Unreal Engine's parts (`unreal_image`, the
-Unreal view's link `unreal_view_link`, and the projects a machine found,
-`unreal_projects`, and the clone a machine made, `clone_status`) are looked up
-on the launcher module when they are needed, so a launcher without them still
-starts every other app.
+the launcher module and run without Modal installed. The command channels and
+Unreal Engine's parts (`unreal_image`, the Unreal view's link
+`unreal_view_link`, and the projects a machine found, `unreal_projects`, and
+the clone a machine made, `clone_status`) are looked up on the launcher module
+when they are needed, so a launcher without them still starts every other app.
 """
 
 from __future__ import annotations
@@ -59,7 +66,8 @@ from urllib.parse import urlsplit
 from service import IDLE_SECONDS, LIFETIME_SECONDS, READY_SECONDS, Clone, OwnCopy
 
 LAUNCHER_DIR = "/root/launcher"
-FILMCRAFT_SECONDS = 60
+# How long one call of an engine's command channel may take
+COMMAND_SECONDS = 60
 REGISTRY_SECRET_PREFIX = "moody-ghcr-"
 
 
@@ -262,13 +270,21 @@ class ModalLauncher:
         status = process.wait()
         return status, output + process.stderr.read()
 
-    def filmcraft(self, sandbox_id: str, method: str, params: dict[str, Any] | None) -> dict[str, Any]:
-        """Call FilmCraft's command channel in the session (`filmcraft_call`).
+    def channel(self, app: str) -> Any:
+        """The launcher module's command channel for an app, `<app id>_call`, or nothing where it has none."""
+        found = getattr(self.launcher, f"{app.replace('-', '_')}_call", None)
+        return found if callable(found) else None
+
+    def has_channel(self, app: str) -> bool:
+        return self.channel(app) is not None
+
+    def engine_call(self, sandbox_id: str, app: str, method: str, params: dict[str, Any] | None) -> dict[str, Any]:
+        """Call a method of the app's command channel in the session.
 
         Raises:
-            RuntimeError: FilmCraft refused or did not answer, or this launcher has no command channel.
+            RuntimeError: The app refused or did not answer, or this launcher has no command channel for it.
         """
-        call = getattr(self.launcher, "filmcraft_call", None)
+        call = self.channel(app)
         if call is None:
-            raise RuntimeError("This deployment's launcher has no FilmCraft command channel yet.")
-        return call(self.sandbox(sandbox_id), method, params, timeout=FILMCRAFT_SECONDS)
+            raise RuntimeError(f"This deployment's launcher has no command channel for {app}.")
+        return call(self.sandbox(sandbox_id), method, params, timeout=COMMAND_SECONDS)

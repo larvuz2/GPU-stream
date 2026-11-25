@@ -396,7 +396,7 @@ function engineDot(engine: Session): string {
     case 'running':
       return 'dot-live';
     case 'starting':
-      return 'dot-ember dot-live';
+      return 'dot-busy dot-live';
     case 'queued':
       return 'dot-warn dot-live';
     case 'failed':

@@ -31,6 +31,7 @@ import {
   X,
 } from 'lucide-react';
 import { BrandMark } from '../components/Brand';
+import { MoodyLogo } from '../components/Moody';
 import { Dialog } from '../components/Dialog';
 import type { Me, Project } from '../lib/api';
 import { brand } from '../lib/catalog';
@@ -39,7 +40,7 @@ import { creditCount } from '../lib/format';
 import { useNow } from './hooks';
 import { Menu } from './Menu';
 import { ErrorNotice } from './Notice';
-import { DisciplineIcon } from './DisciplineIcon';
+import { DisciplineIcon } from '../components/DisciplineIcon';
 import { ago, disciplineName } from './present';
 import type { Projects } from './useAccount';
 
@@ -102,8 +103,8 @@ export function Sidebar(props: SidebarProps) {
   if (collapsed) {
     return (
       <nav className="studio-side items-center gap-2 py-3" aria-label="Projects" data-mobile-hidden={mobileHidden}>
-        <a href="/" aria-label={`${brand} home`} className="mb-1 grid size-9 place-items-center rounded-xl">
-          <BrandMark className="size-6" />
+        <a href="/" aria-label={`${brand} home`} className="mb-1 grid size-9 place-items-center rounded-lg">
+          <BrandMark className="w-7" />
         </a>
         <button
           type="button"
@@ -141,12 +142,11 @@ export function Sidebar(props: SidebarProps) {
           aria-label={`${brand} home`}
           className="flex items-center gap-2.5 rounded-lg font-semibold tracking-tight"
         >
-          <BrandMark className="size-6" />
-          <span className="text-[1.05rem]">{brand}</span>
+          <MoodyLogo className="h-9" />
           <span
             className={cx(
-              'rounded-md border px-1.5 py-0.5 text-[0.625rem] font-semibold tracking-wider uppercase',
-              demo ? 'border-iris/50 bg-iris/15 text-iris-300' : 'border-line text-faint',
+              'mono rounded-sm border px-1.5 py-0.5 text-[0.625rem] font-semibold tracking-wider uppercase',
+              demo ? 'border-line-strong bg-ink-700 text-fg' : 'border-line text-faint',
             )}
             title={demo ? 'Sample data: nothing here is a real account, and no request is sent' : undefined}
           >
@@ -174,7 +174,7 @@ export function Sidebar(props: SidebarProps) {
           title={ready ? undefined : 'Projects are not available on this server yet'}
           onClick={onNewProject}
         >
-          <Plus className="size-4 text-ember-300" aria-hidden="true" />
+          <Plus className="size-4 text-fg" aria-hidden="true" />
           New project
         </button>
         <div className="relative">
@@ -403,7 +403,7 @@ function ProjectRow({ project, active, now, onSelect, onDelete, onRename, onPin 
       <div className="project-row" data-active={active}>
         <DisciplineIcon
           id={project.discipline}
-          className={cx('size-4 flex-none', active ? 'text-ember-300' : 'text-faint')}
+          className={cx('size-3', active ? 'text-fg' : 'text-faint')}
         />
         {renaming ? (
           <input
@@ -567,7 +567,7 @@ function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onSign
   const initial = email.charAt(0) || '?';
   const balance = me === null ? '—' : creditCount(me.credits);
   const avatar = (
-    <span className="grid size-8 flex-none place-items-center rounded-full border border-line-strong bg-gradient-to-br from-ember/30 to-iris/30 text-[0.8125rem] font-semibold uppercase">
+    <span className="grid size-8 flex-none place-items-center rounded-md border border-line-strong bg-ink-700 text-[0.8125rem] font-semibold uppercase">
       {initial}
     </span>
   );
@@ -591,7 +591,7 @@ function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onSign
                 {email || 'Your account'}
               </span>
               <span className="flex items-center gap-1 text-xs text-muted">
-                <Coins className="size-3 text-ember-300" aria-hidden="true" />
+                <Coins className="size-3 text-fg" aria-hidden="true" />
                 <span className="tabular-nums">{balance}</span> credits
               </span>
             </span>
@@ -608,7 +608,7 @@ function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onSign
           </div>
           <div className="mx-1 mb-1 flex items-center justify-between gap-2 rounded-xl border border-line bg-white/[0.03] py-2 pr-2 pl-3">
             <span className="flex items-center gap-2 text-sm">
-              <Coins className="size-4 text-ember-300" aria-hidden="true" />
+              <Coins className="size-4 text-fg" aria-hidden="true" />
               <span className="font-semibold tabular-nums">{balance}</span>
               <span className="text-muted">credits</span>
             </span>

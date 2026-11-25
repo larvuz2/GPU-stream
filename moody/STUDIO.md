@@ -45,7 +45,9 @@ write together.
 
 The agent's craft knowledge is a skill (`moody/skills/filmcraft/SKILL.md`):
 pre-production, prompting with references, and editing with taste, mapped to
-FilmCraft's commands.
+FilmCraft's commands. How a production runs across engines is a skill of its
+own, read for every project (`moody/skills/studio/SKILL.md`), and
+`moody/skills/README.md` is the guide to writing another.
 
 ## Engines
 
@@ -72,6 +74,22 @@ the steps that link it: Unreal Engine's editor on the user's Epic account,
   directory of the workspace Volume and opens in the project's folder
   (`projects/<project id>`), so a FilmCraft edit and a PhotoCraft poster read and
   write the same files.
+- **One tool drives every engine.** An app's command channel is the launcher
+  function named after it, `<app id>_call(sandbox, method, params=None,
+  timeout=60) -> dict` in `addons/modal/sandbox.py` (`filmcraft_call`,
+  `soundcraft_call`, `cadcraft_call`), which the control plane finds by that
+  name. The agent's `engine_call(engine_id, method, params)` reaches whichever
+  app the engine runs, so an app gains a channel with no change to the control
+  plane, and an engine without one answers that it has none and is driven
+  through `engine_exec` and its screen. `filmcraft(engine_id, method, params)`
+  is the same call for a FilmCraft engine.
+- **Work moves between engines as files.** `engine_files(engine_id, path?)`
+  lists the project's folder as one engine's machine sees it (each entry's
+  name, kind, size, and modification time), and the agent confirms a hand-off
+  there, on the engine that receives it, before that engine opens the file.
+  Hand-offs are kept in `handoff/<from app id>-to-<to app id>/`. Each turn
+  starts with the project folder's path and, for each open engine, its app and
+  whether it has a command channel.
 
 ## GitHub
 
@@ -204,5 +222,8 @@ private); `url` fields are signed and expire.
 3. The control plane: projects, library, engines per project, the agent, GitHub.
 4. The app: the three panes over that API.
 5. The landing page: disciplines first, one page (the two-option toggle goes).
-6. Next: PhotoCraft engine, Unreal Engine, engines exchanging files beyond the
+6. The agent driving any engine with a command channel through one tool, and
+   moving work between engines through the project's folder (`engine_call`,
+   `engine_files`, the `studio` skill).
+7. Next: PhotoCraft engine, Unreal Engine, engines exchanging files beyond the
    shared folder, billing the agent's model and generation use.

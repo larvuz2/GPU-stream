@@ -280,7 +280,7 @@ function EngineRow({ engine, onScreen, onShow, onStop, children }: EngineRowProp
     <li
       className={cx(
         'rounded-xl border bg-white/[0.025] p-2.5 transition-colors',
-        onScreen ? 'border-ember/40' : 'border-line',
+        onScreen ? 'border-line-strong' : 'border-line',
       )}
       style={{ '--accent': app?.accent }}
     >
@@ -306,7 +306,7 @@ function EngineRow({ engine, onScreen, onShow, onStop, children }: EngineRowProp
                   engine.status === 'running'
                     ? 'dot-live'
                     : engine.status === 'starting'
-                      ? 'dot-ember dot-live'
+                      ? 'dot-busy dot-live'
                       : 'dot-warn dot-live',
                 )}
                 aria-hidden="true"
@@ -316,7 +316,7 @@ function EngineRow({ engine, onScreen, onShow, onStop, children }: EngineRowProp
             </span>
           </span>
         </button>
-        {onScreen && running ? <span className="pill h-6 text-[0.6875rem] text-ember-200">On screen</span> : null}
+        {onScreen && running ? <span className="pill h-6 text-[0.6875rem] text-fg">On screen</span> : null}
         {confirming ? (
           <span className="flex items-center gap-1">
             <button
@@ -1247,7 +1247,7 @@ function RepoPicker({ project, loadRepos, busy, onLink, onInstall }: RepoPickerP
           <label className="flex items-center gap-2 text-xs text-muted">
             <input
               type="checkbox"
-              className="accent-ember-300"
+              className="accent-white"
               checked={privateRepo}
               onChange={(event) => {
                 setPrivateRepo(event.target.checked);

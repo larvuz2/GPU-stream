@@ -285,7 +285,7 @@ function AuthForm({ mode, titleId, onModeChange }: AuthFormProps) {
   const disabled = busy !== null;
   return (
     <div>
-      <BrandMark className="size-9" />
+      <BrandMark className="h-6 text-fg" />
       <h2 id={titleId} className="display mt-4 text-[1.7rem]">
         {signingUp ? `Create your ${brand} account` : 'Welcome back'}
       </h2>

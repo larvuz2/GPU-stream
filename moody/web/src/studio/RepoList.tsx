@@ -110,7 +110,7 @@ export function RepoList({ loadRepos, busy, chosen = null, onPick, onInstall }: 
                 {repo.private ? <Lock className="size-3 flex-none text-faint" aria-label="Private" /> : null}
                 <span className="min-w-0 flex-1 truncate">{repo.full_name}</span>
                 {chosen === repo.full_name ? (
-                  <Check className="size-3.5 flex-none text-ember-200" aria-hidden="true" />
+                  <Check className="size-3.5 flex-none text-fg" aria-hidden="true" />
                 ) : (
                   <span className="text-[0.6875rem] text-faint">{ago(repo.updated_at, now)}</span>
                 )}
