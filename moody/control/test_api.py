@@ -3641,10 +3641,15 @@ def test_a_subagents_steps_show_in_the_conversation_and_its_card_follows_what_it
 
 
 def answering(studio: SimpleNamespace, project_id: str, decision: str) -> threading.Thread:
-    """Answer the next approval the project's agent asks for, as the person would while the turn waits."""
+    """Answer the next approval the project's agent asks for, as the person would while the turn waits.
+
+    It answers as soon as the approval is in the log. The bound is only for
+    a turn that never asks, and is long because a loaded machine starts the
+    loop's program slowly.
+    """
 
     def answer() -> None:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             rows = [e for e in list(studio.store.tables["project_events"].values()) if e["project_id"] == project_id]
             answered = {e["data"]["approval_id"] for e in rows if e["kind"] == "approval_result"}

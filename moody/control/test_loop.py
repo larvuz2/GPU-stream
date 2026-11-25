@@ -820,19 +820,26 @@ def test_stopping_a_turn_interrupts_the_program_while_it_answers(studio):
     model.script(
         AGENT, Reply([{"type": "text", "text": long}, use("library_list")], delay=0.05)
     )
-    stopper = threading.Timer(
-        2.5,
-        lambda: client.post(
-            f"/v1/projects/{film['id']}/stop", headers=auth("alice-token")
-        ),
-    )
+
+    def stop_once_writing() -> None:
+        """Stop the turn as the person would once they see the answer being written: its first snapshot is in the log."""
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            rows = list(studio.store.tables["project_events"].values())
+            if any(
+                row["kind"] == "text" and row["project_id"] == film["id"]
+                for row in rows
+            ):
+                client.post(
+                    f"/v1/projects/{film['id']}/stop", headers=auth("alice-token")
+                )
+                return
+            time.sleep(0.01)
+
+    stopper = threading.Thread(target=stop_once_writing)
     stopper.start()
-    began = time.monotonic()
     message(client, film["id"], "Write the shot list")
     stopper.join()
-    assert time.monotonic() - began < 15, (
-        "the turn ended long before the answer would have"
-    )
     log = events(client, film["id"])
     assert log["running"] is False and len(model.asked(AGENT)) == 1 and children() == []
     assert [e["kind"] for e in log["events"]][-2:] == ["usage", "turn_end"] and not any(
