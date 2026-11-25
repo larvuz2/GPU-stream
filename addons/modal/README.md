@@ -32,6 +32,7 @@ writes after you approve it in a browser.
 | `exec -- <command>` | Runs a command in the session's environment: on its display, with its GPU |
 | `blender` | Runs the Python on standard input inside the session's Blender, the one the page shows |
 | `filmcraft` | Sends the JSON requests on standard input, one per line, to a FilmCraft session's control channel and prints each reply |
+| `soundcraft` | Sends the JSON requests on standard input, one per line, to a SoundCraft session's control channel and prints each reply |
 | `ls` | Lists the running sessions |
 | `down` | Stops a session, with the scene Blender has open kept for the next one |
 | `drive-login` | Opens Google's sign-in on a Nuke session's screen and keeps the Drive access it grants as a Modal Secret, which `up --secret` hands to a session as rclone's `gdrive:` |
@@ -443,6 +444,94 @@ On 2026-11-24, with the image cached unless said otherwise:
 | A repository that does not exist | `failed` 0.7 s after the clone started |
 | Rebuild after a change to the client's package script, or to the bundle changes | 220 s, or 95 to 130 s |
 
+## SoundCraft
+
+`--app soundcraft` starts a session for
+[SoundCraft](https://github.com/storytold/soundcraft), the same team's digital
+audio workstation, installed the same way from its release
+(`SOUNDCRAFT_VERSION`, `SOUNDCRAFT_SHA256`). It needs no GPU:
+
+```bash
+addons/modal/selkies-modal up --app soundcraft --name song --gpu none --env SELKIES_MODAL_PROJECT=projects/trailer
+```
+
+- SoundCraft opens the newest `.scraft` session in the project folder, and in a
+  folder with none a new `project.scraft`, which SoundCraft's command-line tool
+  writes before the window opens. A session keeps the audio it imports in
+  `Audio Files` beside its file and its earlier saves in `Backups`.
+- Unsaved changes outlive the session. SoundCraft autosaves them within seconds
+  of each edit into `.soundcraft` in the project folder (its settings folder:
+  preferences, presets, logs, autosaves), and offers them at the next start in
+  a "Recover Unsaved Work" question it has no flag to answer. The session's
+  autostart answers it, pressing Recover through the control channel once the
+  window has its size, so the next session opens with the changes, unsaved, as
+  FilmCraft's does. Checked across `down` and `up` with the files dated three
+  days back: a track, a fader, and a marker made without saving were there, the
+  session marked changed. Where the press does not land, the question stays on
+  screen for the person.
+- Sound reaches the page. SoundCraft plays to the default ALSA device, which
+  the base container's PipeWire carries to the sink Selkies captures. Checked
+  with a stand-in page on the session's WebSocket: no audio frames while the
+  transport is stopped, 500 Opus frames in 5 s while it plays, and the sink's
+  monitor at the loudness of the bounce of the same session (-27.9 LUFS). A
+  bounce renders offline and needs no sound device at all.
+
+### Its command channel
+
+Every menu item and button in SoundCraft is one of its 483 commands, and the
+running application takes them as JSON on a control channel
+([SoundCraft's protocol](https://github.com/storytold/soundcraft/blob/main/docs/control-protocol.md)).
+The channel listens on the Sandbox's loopback only (port 7801). SoundCraft's
+channel has no token, unlike FilmCraft's and PhotoCraft's: it answers whatever
+reaches that address, which is every process of the Sandbox and nothing
+outside it. `soundcraft` sends JSON requests, one per line, from inside the
+Sandbox:
+
+```bash
+addons/modal/selkies-modal soundcraft --name song <<'EOF'
+{"method": "engine.execute", "params": {"command": "track.new", "params": {"kind": "instrument", "name": "Keys", "instrument": "subtractive_synth"}}}
+{"method": "engine.execute", "params": {"command": "file.bounce_mix", "params": {"path": "mix.wav"}}}
+{"method": "session.inspect"}
+EOF
+```
+
+Each reply is printed on a line of its own; a refusal carries SoundCraft's
+reason, and the status is then 1. The first request waits for SoundCraft to
+listen (`--wait`, 60 s unless given). From Python,
+`soundcraft_call(sandbox, method, params, timeout)` sends one request and
+returns its result, raising `RuntimeError` with SoundCraft's message.
+SoundCraft answers a request within 90 s or gives up on it, and a bounce
+renders within its request.
+
+### Measured
+
+On Sandboxes without a GPU, with the 2 CPUs and 4 GiB `up` reserves:
+
+| | |
+| --- | --- |
+| `up`, image cached | 7-34 s to the link; Selkies listens 4-6 s after the Sandbox starts |
+| First `session.inspect` after `up` | 0.6 s |
+| One command through `soundcraft_call` | 0.24 s |
+| 170 notes as one `soundcraft` run | 4.6 s |
+| Bounce of a 26 s mix (3 instruments, an audio track, 8 inserts, a reverb return) to 24-bit WAV | 1.1 s |
+| Bounce of the same session looped to 3 min 49 s | 8.0 s; its four stems 31 s |
+
+The 26 s export measured stereo, 48 kHz, 24-bit, 25.86 s, -14.2 LUFS
+integrated and -0.7 dBFS true peak with ffmpeg's EBU R 128 meter, against the
+-14.17 LUFS SoundCraft reported for it.
+
+### Several engines of one project
+
+Engines of one project mount the same directory of the Volume, and each sees it
+as it was when its Sandbox started. A FilmCraft session started beside a
+running SoundCraft one listed the master and stems SoundCraft had written
+minutes before. Files written after that do not cross between two running
+Sandboxes, in either direction (not after a minute), and
+`Sandbox.reload_volumes()` is refused while an application holds files open in
+the folder, which each does. A session that is stopped and started again sees
+them: 13 s after a write in the running SoundCraft session, a restarted
+FilmCraft session listed the file and imported the WAV.
+
 ## The session
 
 The image is the base container by digest with three additions: Blender's
@@ -450,8 +539,9 @@ release archive from blender.org, checked against the hash blender.org
 publishes, `xprintidle` to read the display's idle counter, and this
 directory's scripts. `BASE_IMAGE`, `BLENDER_VERSION`, and `BLENDER_SHA256` at
 the top of `sandbox.py` choose what it is built from, as `FILMCRAFT_VERSION`,
-`FILMCRAFT_SHA256`, `PHOTOCRAFT_VERSION`, and `PHOTOCRAFT_SHA256` do for
-FilmCraft's and PhotoCraft's images, and a change to any of them builds a new
+`FILMCRAFT_SHA256`, `PHOTOCRAFT_VERSION`, `PHOTOCRAFT_SHA256`,
+`SOUNDCRAFT_VERSION`, and `SOUNDCRAFT_SHA256` do for FilmCraft's, PhotoCraft's,
+and SoundCraft's images, and a change to any of them builds a new
 image on the next `up` or `build`.
 
 The Selkies window manager runs Blender as the session's application,
