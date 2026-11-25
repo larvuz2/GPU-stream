@@ -69,7 +69,29 @@ the command channel of whichever app the engine runs, found by the app's id
 on the launcher (`Launcher.engine_call`), so a new app with a channel needs no
 tool of its own; an engine without one is driven through `engine_exec` and its
 screen. Work passes between engines as files in the project's folder, which
-`engine_files` lists as an engine sees it.
+`engine_files` lists as an engine sees it. Each running engine sees that
+folder as it was when it started, so what one writes reaches another that is
+already running through `engine_send`, which carries the file or folder from
+one machine into the other's folder; an engine started afterwards finds it
+there by itself, since every machine's writes are committed to the Volume
+within seconds.
+
+The agent shows its work as it goes with `preview`: any files an engine wrote
+in the project's folder, of whatever length or size the agent chose to render,
+become a `preview` event, a work-in-progress card in the conversation. The
+tool knows nothing of any one engine; it reads each file with ffprobe on the
+engine's machine, and where a file is heavier than a conversation should carry
+or in a format browsers do not play, has that machine's ffmpeg encode a
+lighter copy outside the project's folder (`PREVIEW_ENCODINGS`), the original
+staying where it is. What bounds it is the deployment's configuration alone
+(`Config.preview_limit_bytes` and its neighbors), never a duration. The copy
+is stored in the bucket under the project's `previews/` folder, apart from the
+library's entries, and the event keeps its path, which each reading of the log
+signs afresh (`Sessions.shown_events`). The model gets the file's facts as
+text, not the pixels or the sound, which would cost tokens on every later
+request of the conversation; `look` adds one small picture of each file when
+it has to judge the result. `engine_screenshot` shows its picture as the same
+card.
 
 A project's repository may be a whole team's, shared by everyone who works on
 the game, so the agent reads it freely and writes only to a branch of its own
@@ -89,6 +111,7 @@ from __future__ import annotations
 
 import base64
 import json
+import mimetypes
 import re
 import shlex
 import threading
@@ -124,8 +147,10 @@ from github_client import GitHubError
 from service import (
     DESKTOP,
     LIBRARY_BUCKET,
+    MEGABYTE,
     OPEN,
     PLAN_STATUSES,
+    PREVIEWS,
     SIGNED_URL_SECONDS,
     STARTABLE,
     STREAMS,
@@ -176,6 +201,47 @@ FILES_LIMIT = 500
 NO_SUCH_PATH = 44
 # One line per entry: its type, size in bytes, modification time in seconds, and name
 FILES_FORMAT = r"%y\t%s\t%T@\t%f\n"
+# The exit status a probe ends with for a path that is a folder, not a file
+NOT_A_FILE = 45
+# How long carrying a file between two engines may take
+SEND_SECONDS = 1800
+# Where an engine keeps the copies it encodes for a preview until they are read: outside the project's folder
+PREVIEW_SCRATCH = "/tmp/moody-preview"
+# The line a probe prints in place of ffprobe's answer where the engine has no ffmpeg
+NO_FFMPEG = "NO-FFMPEG"
+# What ffprobe is asked of a file: enough to say what it is, how long, and how large
+PROBE_ENTRIES = "format=format_name,duration:stream=codec_type,codec_name,pix_fmt,width,height,sample_rate,channels"
+PREVIEW_KINDS = ("image", "audio", "video", "file")
+MEDIA_KINDS = PREVIEW_KINDS[:3]
+# File name endings Python's table of types does not place, by the kind of media they hold
+MEDIA_ENDINGS = {
+    ".exr": "image", ".psd": "image", ".tga": "image", ".dpx": "image", ".hdr": "image", ".avif": "image",
+    ".mxf": "video", ".mkv": "video", ".flac": "audio", ".opus": "audio", ".m4a": "audio",
+}
+# The file name endings a browser shows as they are, by kind; a video must also be of a codec and pixel format below
+WEB_ENDINGS = {
+    "image": (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".avif"),
+    "audio": (".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac"),
+    "video": (".mp4", ".m4v", ".webm"),
+}
+WEB_VIDEO_CODECS = ("h264", "vp8", "vp9", "av1")
+# 4:2:0 at 8 bits is what every browser's decoder takes; engines differ on the rest
+WEB_PIXEL_FORMATS = ("yuv420p", "yuvj420p")
+# The lighter copy an engine's ffmpeg encodes of each kind: its ending, its content type, what it is called, and
+# ffmpeg's arguments between the input and the output. A comma inside a filter's expression is escaped for ffmpeg.
+PREVIEW_ENCODINGS: dict[str, tuple[str, str, str, list[str]]] = {
+    "image": (".webp", "image/webp", "a WebP", ["-frames:v", "1", "-vf", "scale=min(2048\\,iw):-2", "-c:v", "libwebp", "-q:v", "82"]),
+    "audio": (".m4a", "audio/mp4", "an AAC", ["-vn", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart"]),
+    "video": (
+        ".mp4",
+        "video/mp4",
+        "an H.264",
+        ["-vf", "scale=trunc(min(1280\\,iw)/2)*2:-2", "-c:v", "libx264", "-preset", "veryfast", "-crf", "27", "-pix_fmt",
+         "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart"],
+    ),
+}
+# The largest picture `look` hands the model, which ffmpeg makes far smaller than this
+LOOK_BYTES = 4 * 1024 * 1024
 
 
 class TurnStopped(Exception):
@@ -431,7 +497,14 @@ The machines an engine runs on (`tier`):
 - `engine_call` runs a command of an engine's own command channel, the same commands its interface runs, for every
   engine that has one; the turn's state says which do. An engine without one you drive with `engine_exec`, or you
   ask the person to do the step on its screen. Work passes from one engine to another as files in the project's
-  folder: `engine_files` lists it as an engine sees it, so confirm a file is there before another engine opens it.
+  folder. An engine sees what was in the folder when it started and what it wrote itself, so a file another
+  running engine wrote since is carried over with `engine_send`; `engine_files` lists the folder as an engine sees
+  it, so confirm a file is there before that engine opens it.
+- Show your work as you go with `preview`. After each step that changed something, and before you ask the person
+  to decide, render or export what shows it with the engine's own commands (a frame, a few seconds, one section,
+  or the whole piece: as much as shows the change and no more) into the project's folder, and preview it with a
+  one-line caption. The person sees or hears it in the conversation; you get its facts, and `look: true` when you
+  have to judge the result yourself. One preview per step: do not flood the conversation.
 - `github_save` keeps the project's documents in the GitHub repository the person linked, on a branch of your own
   (`moody/...`), never on its default branch or a branch someone else made; give the person the branch and the
   compare link it returns, where they open a pull request. `github_read` reads the default branch, or your branch
@@ -637,8 +710,9 @@ TOOLS = [
     tool(
         "engine_files",
         "List the project's folder, or a folder or file inside it, as a running engine sees it: each entry's name, "
-        "kind (file or folder), size in bytes, and when it was last modified. Every engine of the project shares "
-        "this folder, so use it to confirm a file one engine wrote is there before another opens it.",
+        "kind (file or folder), size in bytes, and when it was last modified. Every engine of the project opens in "
+        "this folder, but a running engine sees only what was there when it started and what it wrote itself, so "
+        "use it to confirm a file is there on the engine that is about to open it.",
         {
             "engine_id": ENGINE_ID,
             "path": {
@@ -648,6 +722,55 @@ TOOLS = [
             },
         },
         ["engine_id"],
+    ),
+    tool(
+        "engine_send",
+        "Carry a file or a folder of the project's folder from one running engine to another running engine, which "
+        "does not see what the first wrote after it started. It arrives at the same path in the receiving engine's "
+        "folder unless to_path says otherwise, complete or not at all, and is on the project's storage for every "
+        "engine started later. Returns its size, how long it took, and its entry as the receiving engine lists it. "
+        "There is a size limit, which a refusal names.",
+        {
+            "from_engine_id": {"type": "string", "description": "The running engine that has the file."},
+            "path": {
+                "type": "string",
+                "description": "The file or folder, inside the project's folder, like handoff/soundcraft-to-filmcraft/mix.wav.",
+            },
+            "to_engine_id": {"type": "string", "description": "The running engine that receives it."},
+            "to_path": {"type": "string", "description": "Where it goes in the project's folder. Left out: the same path."},
+        },
+        ["from_engine_id", "path", "to_engine_id"],
+    ),
+    tool(
+        "preview",
+        "Show the person work in progress: one or more files an engine wrote in the project's folder (a frame, a "
+        "range you bounced or exported, a render, a document), as a card in the conversation with your caption. "
+        "What you render, and how long or large, is yours to choose with the engine's own commands; a file too heavy "
+        "for a conversation, or in a format browsers do not play, is shown as a lighter copy the engine encodes, the "
+        "original untouched. You get each file's facts (length, dimensions, size, and for sound its loudness and "
+        "peak), not the picture or the sound; ask for those with look only when you must judge the result yourself. "
+        "A preview is not kept in the library.",
+        {
+            "engine_id": ENGINE_ID,
+            "path": {"type": "string", "description": "A file inside the project's folder, like previews/chorus.wav."},
+            "paths": {**STRINGS, "description": "Several files, in the order to show them, in place of path."},
+            "caption": {"type": "string", "description": "One line that says what this shows and what changed."},
+            "kind": {
+                "type": "string",
+                "enum": list(PREVIEW_KINDS),
+                "description": "What the files are. Left out: read from each file's name.",
+            },
+            "compare": {
+                "type": "boolean",
+                "description": "With exactly two files of one kind: show them as a before and after pair, before first.",
+            },
+            "look": {
+                "type": "boolean",
+                "description": "Also return a small picture of each file to you: an image itself, four frames of a "
+                "video, the waveform of a sound.",
+            },
+        },
+        ["engine_id", "caption"],
     ),
     tool(
         "filmcraft",
@@ -832,6 +955,134 @@ def listed_file(line: str) -> dict[str, Any] | None:
     if entry["kind"] == "folder":
         del entry["size"]
     return {**entry, "modified": modified}
+
+
+def readable_size(size: int) -> str:
+    """A size in bytes as a person reads it: `812 KB`, `2.3 MB`, `1.4 GB`."""
+    if size < MEGABYTE:
+        return f"{max(1, round(size / 1024))} KB"
+    if size < 1024 * MEGABYTE:
+        return f"{size / MEGABYTE:.1f} MB"
+    return f"{size / (1024 * MEGABYTE):.1f} GB"
+
+
+def media_kind(name: str) -> str:
+    """What a file is to a preview, by its name's ending: `image`, `audio`, or `video`, and `file` for anything else.
+
+    The ending decides, not ffprobe: ffprobe finds a "video stream" in a text
+    file and a "picture" in a PDF, so a file whose ending names no media is a
+    plain file unless the agent says what it is.
+    """
+    ending = PurePosixPath(name).suffix.lower()
+    guessed = MEDIA_ENDINGS.get(ending) or (mimetypes.guess_type(name)[0] or "").split("/")[0]
+    return guessed if guessed in MEDIA_KINDS else "file"
+
+
+def probed(output: str) -> tuple[int, dict[str, Any] | None]:
+    """What an engine's probe of a file printed: the file's size, and ffprobe's answer, or nothing where it has no ffmpeg.
+
+    A file ffprobe cannot read answers with no streams, which is an answer.
+
+    Raises:
+        RuntimeError: The output is not a probe's.
+    """
+    first, _, rest = output.partition("\n")
+    try:
+        size = int(first.strip())
+    except ValueError:
+        raise RuntimeError(f"the engine's probe answered {output[:200]!r}") from None
+    if rest.strip() == NO_FFMPEG:
+        return size, None
+    try:
+        answer = json.loads(rest)
+    except ValueError:
+        answer = {}
+    return size, answer if isinstance(answer, dict) else {}
+
+
+def media_stream(probe: dict[str, Any], kind: str) -> dict[str, Any]:
+    """The first stream of a kind (`video`, `audio`) in ffprobe's answer, or an empty one."""
+    return next((stream for stream in probe.get("streams", []) if stream.get("codec_type") == kind), {})
+
+
+def media_facts(kind: str, probe: dict[str, Any]) -> dict[str, Any]:
+    """What ffprobe's answer says of a file of a kind: its length, its size on screen, and what it is encoded as.
+
+    A picture has no length worth giving (ffprobe reports one frame's), and
+    sound has no size on screen.
+    """
+    facts: dict[str, Any] = {}
+    picture, sound = media_stream(probe, "video"), media_stream(probe, "audio")
+    try:
+        seconds = float(probe.get("format", {}).get("duration") or 0)
+    except ValueError:
+        seconds = 0.0
+    if kind in ("audio", "video") and seconds > 0:
+        facts["seconds"] = round(seconds, 2)
+    if kind in ("image", "video") and picture.get("width") and picture.get("height"):
+        facts["width"], facts["height"] = picture["width"], picture["height"]
+    if kind in ("image", "video") and picture.get("codec_name"):
+        facts["codec"] = picture["codec_name"]
+    if kind == "audio" and sound:
+        facts["codec"] = sound.get("codec_name")
+    if kind in ("audio", "video") and sound.get("sample_rate"):
+        facts["sample_rate"], facts["channels"] = int(sound["sample_rate"]), sound.get("channels")
+    return facts
+
+
+def plays_in_browser(kind: str, name: str, probe: dict[str, Any] | None) -> bool:
+    """Whether a browser shows a file of a kind as it is: by its ending, and for video by its codec and pixel format.
+
+    Without ffprobe's answer the ending is all there is to go by.
+    """
+    if PurePosixPath(name).suffix.lower() not in WEB_ENDINGS.get(kind, ()):
+        return False
+    if kind != "video" or probe is None:
+        return True
+    picture = media_stream(probe, "video")
+    return picture.get("codec_name") in WEB_VIDEO_CODECS and picture.get("pix_fmt") in WEB_PIXEL_FORMATS
+
+
+def look_arguments(kind: str, seconds: float) -> list[str]:
+    """ffmpeg's arguments, between input and output, for the one small JPEG `look` hands the model of a file.
+
+    A picture is itself, no wider than 1280 pixels. A video is four frames
+    spread over its length on one sheet, since one frame says nothing of
+    motion or of a cut; its first frame where its length is not known. Sound is
+    its waveform over its whole length, which shows level, dynamics, silence,
+    and clipping at a glance.
+    """
+    if kind == "audio":
+        return ["-filter_complex", "showwavespic=s=1280x320:colors=white", "-frames:v", "1"]
+    if kind == "video" and seconds > 0:
+        return ["-vf", f"fps=4/{seconds:.3f},scale=640:-2,tile=2x2", "-frames:v", "1", "-q:v", "4"]
+    return ["-frames:v", "1", "-vf", "scale=min(1280\\,iw):-2", "-q:v", "4"]
+
+
+def loudness(output: str) -> dict[str, float]:
+    """The integrated loudness and true peak in the summary ffmpeg's `ebur128` filter prints, as far as it has them."""
+    found = {}
+    for name, pattern in (("loudness_lufs", r"^\s+I:\s+(-?[\d.]+) LUFS"), ("true_peak_dbfs", r"^\s+Peak:\s+(-?[\d.]+) dBFS")):
+        matches = re.findall(pattern, output, flags=re.MULTILINE)
+        if matches:
+            found[name] = float(matches[-1])
+    return found
+
+
+@dataclass
+class Shown:
+    """One file of a preview, ready to store: what the person is shown, and what the model is told of it."""
+
+    # The event's item, without the path it is stored at: its kind, name, and length and size on screen where known
+    item: dict[str, Any]
+    data: bytes
+    content_type: str
+    # The name it is stored under, which ends as the copy does where one was encoded
+    stored_as: str
+    # The file's facts, for the model
+    facts: dict[str, Any]
+    # The picture `look` hands the model, where it was asked for and could be made
+    picture: bytes | None = None
 
 
 def agent_branch(project: dict[str, Any]) -> str:
@@ -1278,6 +1529,8 @@ class Agent:
             "engine_import": f"Importing {', '.join(arguments.get('tags', []))}",
             "engine_call": f"{engine}: {arguments.get('method', '')}",
             "engine_files": f"Listing {arguments.get('path') or 'the project folder'}",
+            "engine_send": f"Sending {PurePosixPath(arguments.get('path', '')).name or 'a file'} to another engine",
+            "preview": "Preparing a preview",
             "filmcraft": f"{self.app_name('filmcraft')}: {arguments.get('method', '')}",
             "github_save": f"Saving {arguments.get('path', '')} to the agent's branch on GitHub",
             "github_read": f"Reading {arguments.get('path', '') or 'the repository'} from "
@@ -1577,17 +1830,203 @@ class Agent:
     def tool_engine_screenshot(self, turn: Turn, engine_id: str) -> Result:
         row, sandbox = self.engine_sandbox(turn, engine_id)
         picture = self.sessions.launcher.screenshot(sandbox)
-        path = f"{turn.project['user_id']}/{turn.project_id}/screens/{uuid.uuid4().hex[:12]}.jpg"
-        self.store.upload(LIBRARY_BUCKET, path, picture, "image/jpeg")
-        link = self.store.sign(LIBRARY_BUCKET, [path], SIGNED_URL_SECONDS).get(path)
-        return Result(
+        name = self.app_name(row["app"])
+        shown = Shown({"kind": "image", "name": "screen.jpg"}, picture, "image/jpeg", "screen.jpg", {})
+        self.show_preview(turn, engine_id, f"{name}'s screen", [shown], compare=False)
+        return Result([self.picture_block(picture), {"type": "text", "text": f"{name}'s screen now."}], "Screenshot")
+
+    @staticmethod
+    def picture_block(picture: bytes) -> dict[str, Any]:
+        """A JPEG as the model takes one in a tool's result."""
+        return {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(picture).decode()}}
+
+    # Previews
+
+    def show_preview(self, turn: Turn, engine_id: str, caption: str, files: list[Shown], compare: bool) -> None:
+        """Store a preview's files under the project's `previews/` folder and put its card in the conversation.
+
+        The event keeps each file's path in the bucket, which a reading of the
+        log signs (`Sessions.shown_events`); nothing is written to the library.
+        """
+        items = []
+        for shown in files:
+            path = f"{turn.project['user_id']}/{turn.project_id}/{PREVIEWS}/{uuid.uuid4().hex[:12]}-{safe_name(shown.stored_as)}"
+            self.store.upload(LIBRARY_BUCKET, path, shown.data, shown.content_type)
+            items.append({**shown.item, "path": path})
+        turn.event("preview", {"engine_id": engine_id, "caption": caption, "items": items, "compare": compare})
+
+    def tool_preview(
+        self,
+        turn: Turn,
+        engine_id: str,
+        caption: str,
+        path: str | None = None,
+        paths: list[str] | None = None,
+        kind: str | None = None,
+        compare: bool = False,
+        look: bool = False,
+    ) -> Result:
+        """Show files of the project's folder on an engine as one work-in-progress card (`preview`).
+
+        Every file is prepared before any is stored, so a preview one of whose
+        files is refused shows nothing rather than part of itself, and the
+        copies the engine encoded are removed from it whatever happened.
+
+        Raises:
+            Refused: as `engine_sandbox` and `prepared` do, and 400 for no file, more files than a
+                preview may show, or a pair that is not two files of one kind.
+        """
+        _, sandbox = self.engine_sandbox(turn, engine_id)
+        config = self.sessions.config
+        folder = project_folder(turn.project_id)
+        chosen = [folder_path(given, folder) for given in ([path] if path else []) + (paths or [])]
+        if not chosen or not all(chosen):
+            raise Refused(400, "Name the file to show, or several, inside the project's folder.")
+        if len(chosen) > config.preview_files:
+            raise Refused(400, f"A preview shows at most {config.preview_files} files; show the ones that matter, or make two previews.")
+        if compare and len(chosen) != 2:
+            raise Refused(400, "A before and after pair is exactly two files: the one before, then the one after.")
+        scratch = f"{PREVIEW_SCRATCH}/{uuid.uuid4().hex[:12]}"
+        try:
+            files = [self.prepared(sandbox, folder, inside, kind, f"{scratch}/{index}", look) for index, inside in enumerate(chosen)]
+        finally:
+            self.sessions.launcher.exec(sandbox, f"rm -rf {shlex.quote(scratch)}", EXEC_SECONDS)
+        if compare and files[0].item["kind"] != files[1].item["kind"]:
+            raise Refused(400, "A before and after pair is two files of one kind.")
+        words = caption.strip()[:300]
+        self.show_preview(turn, engine_id, words, files, compare)
+        answer = {
+            "shown": words,
+            "files": [shown.facts for shown in files],
+            "note": "The person sees this as a work-in-progress card in the conversation. "
+            + (
+                "The pictures above are yours to judge by: an image itself, four frames of a video, a sound's waveform."
+                if look
+                else "You were given the facts, not the media; call again with look: true only if you must judge it yourself."
+            ),
+        }
+        pictures = [self.picture_block(shown.picture) for shown in files if shown.picture is not None]
+        kinds = [shown.item["kind"] for shown in files]
+        counted = ", ".join(f"{kinds.count(one)} {one}{'s' if kinds.count(one) != 1 else ''}" for one in dict.fromkeys(kinds))
+        summary = f"Showed {counted}{' as before and after' if compare else ''}: {words}"
+        text = json.dumps(answer)
+        return Result([*pictures, {"type": "text", "text": text}] if pictures else text, summary[:200])
+
+    def prepared(self, sandbox: str, folder: str, inside: str, kind: str | None, scratch: str, look: bool) -> Shown:
+        """One file of a preview, read from the engine: itself, or the lighter copy the engine's ffmpeg encodes of it.
+
+        The engine is asked what the file is (`probed`), and the file is shown
+        as it is where a browser shows it and it is light
+        (`plays_in_browser`, `Config.preview_original_bytes`). Otherwise the
+        engine encodes a copy of its kind (`PREVIEW_ENCODINGS`) outside the
+        project's folder, and that is what is read. An engine without ffmpeg
+        cannot encode one: there the file is shown as it is, as a plain file
+        where a browser would not play it, and its facts say so. Whatever is
+        shown has to fit `Config.preview_limit_bytes`; the refusal tells the
+        agent to render less, since how much to render is its choice.
+
+        Raises:
+            Refused: 404 for a path that is not there, 400 for a folder or a file that is not of
+                the kind given, 413 for a preview over the limit, 422 where ffmpeg could not
+                encode the copy.
+        """
+        launcher, config = self.sessions.launcher, self.sessions.config
+        name = PurePosixPath(inside).name
+        target = shlex.quote(f"./{inside}")
+        script = "\n".join(
             [
-                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(picture).decode()}},
-                {"type": "text", "text": f"{self.app_name(row['app'])}'s screen now."},
-            ],
-            "Screenshot",
-            media=[{"kind": "image", "url": link}],
+                f"cd {shlex.quote(folder)} 2>/dev/null && [ -e {target} ] || exit {NO_SUCH_PATH}",
+                f"[ -f {target} ] || exit {NOT_A_FILE}",
+                f"stat -c %s {target}",
+                f"command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1 || {{ echo {NO_FFMPEG}; exit 0; }}",
+                f"ffprobe -v error -print_format json -show_entries {PROBE_ENTRIES} {target} 2>/dev/null || true",
+            ]
         )
+        status, output = launcher.exec(sandbox, script, EXEC_SECONDS)
+        if status == NO_SUCH_PATH:
+            raise Refused(404, f"There is no {inside} in the project's folder on this engine. Export or render it there first.")
+        if status == NOT_A_FILE:
+            raise Refused(400, f"{inside} is a folder; name the files in it to show.")
+        if status != 0:
+            raise RuntimeError(f"the probe stopped with status {status}: {output[-500:]}")
+        size, probe = probed(output)
+        chosen = kind or media_kind(name)
+        plays = plays_in_browser(chosen, name, probe)
+        # Whether this engine's ffmpeg reads the file as its kind, and so can measure it and encode a copy
+        ffmpeg = probe is not None and bool(media_stream(probe, "audio" if chosen == "audio" else "video"))
+        if chosen in MEDIA_KINDS and probe is not None and not ffmpeg and not plays:
+            if kind is not None:
+                raise Refused(400, f"{inside} is not {'an' if chosen[0] in 'aeiou' else 'a'} {chosen} file, as far as ffprobe reads it.")
+            # Named like media, but ffprobe finds none in it and no browser would show it: the file it is
+            chosen = "file"
+        facts: dict[str, Any] = {"path": inside, "kind": chosen, "size": readable_size(size), **media_facts(chosen, probe or {})}
+        item = {"kind": chosen, "name": name, **{key: facts[key] for key in ("seconds", "width", "height") if key in facts}}
+        limit = config.preview_limit_bytes
+        source = f"{folder}/{inside}"
+        stored_as, content_type = name, mimetypes.guess_type(name)[0] or "application/octet-stream"
+        heavy = chosen in MEDIA_KINDS and (not plays or size > config.preview_original_bytes)
+        if heavy and ffmpeg:
+            ending, content_type, encoding, arguments = PREVIEW_ENCODINGS[chosen]
+            source = f"{scratch}{ending}"
+            command = shlex.join(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", f"./{inside}", *arguments, source])
+            status, output = launcher.exec(
+                sandbox,
+                f"cd {shlex.quote(folder)} && mkdir -p {shlex.quote(str(PurePosixPath(scratch).parent))} && {command} 2>&1 "
+                f"&& stat -c %s {shlex.quote(source)}",
+                EXEC_SECONDS,
+            )
+            if status != 0:
+                raise Refused(422, f"ffmpeg could not encode a preview copy of {inside}: {output.strip()[-500:] or f'status {status}'}")
+            size = int(output.strip().splitlines()[-1])
+            stored_as = f"{PurePosixPath(name).stem}{ending}"
+            facts["shown_as"] = f"{encoding} copy of {readable_size(size)}; the original is untouched"
+        elif heavy:
+            facts["note"] = (
+                ("This engine has no ffmpeg" if probe is None else "This engine's ffmpeg does not read the file")
+                + ", so no lighter copy was encoded and nothing was measured: it is shown as it is"
+                + ("." if plays else ", as a file to open, since browsers do not play it.")
+            )
+            if not plays:
+                item = {"kind": "file", "name": name}
+        if size > limit:
+            raise Refused(
+                413,
+                f"{inside} is {readable_size(size)} as a preview, over the {readable_size(limit)} a preview may be. Render "
+                "or export something lighter and preview that: a shorter range, a lower resolution, or a lower bitrate. "
+                "The file itself stays where it is.",
+            )
+        if chosen == "audio" and ffmpeg:
+            _, heard = launcher.exec(
+                sandbox,
+                f"cd {shlex.quote(folder)} && ffmpeg -nostdin -hide_banner -nostats -i {target} -map 0:a:0 "
+                "-af ebur128=peak=true:framelog=verbose -f null - 2>&1 | grep -E '^ +(I|Peak):'",
+                EXEC_SECONDS,
+            )
+            facts.update(loudness(heard))
+        try:
+            data = launcher.read_file(sandbox, source, limit)
+        except ValueError:
+            raise Refused(413, f"{inside} grew past the {readable_size(limit)} a preview may be while it was read.") from None
+        shown = Shown(item, data, content_type, stored_as, facts)
+        if look and ffmpeg and chosen in MEDIA_KINDS:
+            picture = f"{scratch}-look.jpg"
+            command = shlex.join(
+                ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", f"./{inside}", *look_arguments(chosen, facts.get("seconds", 0)), picture]
+            )
+            status, output = launcher.exec(
+                sandbox,
+                f"cd {shlex.quote(folder)} && mkdir -p {shlex.quote(str(PurePosixPath(scratch).parent))} && {command} 2>&1",
+                EXEC_SECONDS,
+            )
+            if status == 0:
+                shown.picture = launcher.read_file(sandbox, picture, LOOK_BYTES)
+            else:
+                facts["look"] = f"No picture could be made of it: {output.strip()[-300:]}"
+        elif look:
+            facts["look"] = "There is no picture of it to give: " + (
+                "it is not an image, a video, or a sound." if chosen == "file" else "this engine's ffmpeg does not read it."
+            )
+        return shown
 
     def tool_engine_exec(self, turn: Turn, engine_id: str, command: str) -> Result:
         _, sandbox = self.engine_sandbox(turn, engine_id)
@@ -1699,6 +2138,82 @@ class Agent:
         if len(found) > FILES_LIMIT:
             listing["more"] = len(found) - FILES_LIMIT
         return Result(json.dumps(listing), f"{len(found)} entr{'y' if len(found) == 1 else 'ies'} in {where}")
+
+    def tool_engine_send(
+        self, turn: Turn, from_engine_id: str, path: str, to_engine_id: str, to_path: str | None = None
+    ) -> Result:
+        """Carry a file or a folder of the project's folder from one running engine of the project to another.
+
+        Both engines are found through the project, so neither can be another
+        project's or another user's. What is sent is measured on the sending
+        engine first and refused over `Config.transfer_limit_bytes`, before a
+        byte moves. The launcher carries it (`Launcher.send`), asking between
+        pieces whether the turn still runs, and the receiving engine is then
+        asked for the entry, which is what the agent is told: the proof that
+        the engine about to open the file has it.
+
+        Raises:
+            Refused: as `engine_sandbox` does for either engine, 400 for one engine named twice or
+                a path outside the folder, 404 for nothing at the path, 413 over the limit.
+        """
+        sender, source = self.engine_sandbox(turn, from_engine_id)
+        receiver, target = self.engine_sandbox(turn, to_engine_id)
+        if source == target:
+            raise Refused(400, "That is one engine, which already has the file; name the engine that should receive it.")
+        folder = project_folder(turn.project_id)
+        inside = folder_path(path, folder)
+        there = folder_path(to_path, folder) if to_path else inside
+        if not inside or not there:
+            raise Refused(400, "Name a file or a folder inside the project's folder, not the folder itself.")
+        launcher = self.sessions.launcher
+        quoted = shlex.quote(f"./{inside}")
+        status, output = launcher.exec(
+            source,
+            f"cd {shlex.quote(folder)} 2>/dev/null && [ -e {quoted} ] || exit {NO_SUCH_PATH}\n"
+            f"if [ -d {quoted} ]; then du -sb {quoted} | cut -f1; else stat -c %s {quoted}; fi",
+            EXEC_SECONDS,
+        )
+        sending, receiving = self.app_name(sender["app"]), self.app_name(receiver["app"])
+        if status == NO_SUCH_PATH:
+            raise Refused(404, f"There is no {inside} in the project's folder on the {sending} engine.")
+        try:
+            size = int(output.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            raise RuntimeError(f"measuring {inside} stopped with status {status}: {output[-500:]}") from None
+        limit = self.sessions.config.transfer_limit_bytes
+        if size > limit:
+            raise Refused(
+                413,
+                f"{inside} is {readable_size(size)}, over the {readable_size(limit)} that passes between running engines. "
+                f"Send only what {receiving} needs, or a lighter export; or stop the {receiving} engine and start it "
+                "again, since an engine opens on everything the project's folder holds when it starts.",
+            )
+        started = time.monotonic()
+        try:
+            carried = launcher.send(source, f"{folder}/{inside}", target, f"{folder}/{there}", turn.alive)
+        except FileNotFoundError:
+            raise Refused(404, f"There is no {inside} in the project's folder on the {sending} engine.") from None
+        except InterruptedError:
+            raise TurnStopped() from None
+        seconds = round(time.monotonic() - started, 1)
+        arrived = shlex.quote(f"./{there}")
+        status, output = launcher.exec(
+            target, f"cd {shlex.quote(folder)} && find {arrived} -maxdepth 0 -printf '{FILES_FORMAT}'", EXEC_SECONDS
+        )
+        entry = next(filter(None, map(listed_file, output.splitlines())), None)
+        if status != 0 or entry is None:
+            raise RuntimeError(f"{there} is not on the {receiving} engine after the transfer: {output[-500:]}")
+        answer = {
+            "sent": inside,
+            "from": {"engine_id": from_engine_id, "app": sender["app"]},
+            "to": {"engine_id": to_engine_id, "app": receiver["app"], "path": there},
+            "bytes": carried,
+            "seconds": seconds,
+            "entry": {**entry, "name": there},
+            "note": f"{receiving} has it at {folder}/{there} now, and it is on the project's storage for any engine "
+            "started later. Open it there by that path.",
+        }
+        return Result(json.dumps(answer), f"{PurePosixPath(inside).name} is in {receiving}'s folder: {readable_size(size)} in {seconds:g} s")
 
     # GitHub
 

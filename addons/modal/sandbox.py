@@ -1111,7 +1111,10 @@ def read_file(sandbox: modal.Sandbox, path: str, limit: int) -> bytes:
     return data
 
 
-# Says what is at $1: `folder`, a file's size in bytes, or status 44 for neither
+# The bytes of a transfer in hand at once: what one write to a session's command carries (its buffer takes 16 MiB),
+# large enough that the round trip each write waits on does not set the pace
+SEND_PIECE = 8 * 1024 * 1024
+# Says what is at $1:`folder`, a file's size in bytes, or status 44 for neither
 MEASURE = 'if [ -d "$1" ]; then echo folder; elif [ -f "$1" ]; then stat -c %s "$1"; else exit 44; fi'
 # Writes standard input at $1 under a name of its own, moved into place only once all $2 bytes arrived
 RECEIVE_FILE = (
@@ -1176,33 +1179,49 @@ def send_file(
         reader = source.exec(run, "sh", "-c", SEND_FILE, "sh", path, pid_file, text=False)
         writer = target.exec(run, "sh", "-c", RECEIVE_FILE, "sh", to_path, found, text=False)
     carried = 0
-    stopped = False
+    piece = bytearray()
+    stopped = broken = False
+
+    def hand_over() -> None:
+        """Send the piece in hand and wait until the writer took it, so no more than a piece is ever held."""
+        nonlocal carried
+        writer.stdin.write(bytes(piece))
+        writer.stdin.drain()
+        carried += len(piece)
+        piece.clear()
+
     try:
-        for piece in reader.stdout:
+        for read in reader.stdout:
+            piece += read
+            if len(piece) < SEND_PIECE:
+                continue
             if keep_going is not None and not keep_going():
                 stopped = True
                 break
-            writer.stdin.write(piece)
-            # Each piece is sent before the next is read, so the writer's buffer holds one piece, never the file
-            writer.stdin.drain()
-            carried += len(piece)
+            hand_over()
+        if not stopped and piece:
+            hand_over()
         writer.stdin.write_eof()
         writer.stdin.drain()
-    except modal.exception.Error as error:
-        raise RuntimeError(f"the transfer broke after {carried} bytes: {error}") from error
+    except modal.exception.Error:
+        # The writer ended before it took everything; its own words say why, below
+        broken = True
     received = writer.wait()
-    if stopped:
+    if stopped or broken:
         # The reader is blocked writing to a stream nobody reads now, and would count as use of its session forever
         source.exec("sh", "-c", 'kill "$(cat "$1")"; rm -f "$1"', "sh", pid_file).wait()
+    else:
+        source.exec("rm", "-f", pid_file).wait()
+    if stopped:
         # A file short of its size was never moved into place; a folder's unpacked part is removed
         if found == "folder":
             target.exec(run, "rm", "-rf", "--", to_path).wait()
         raise InterruptedError(f"stopped after {carried} bytes")
-    source.exec("rm", "-f", pid_file).wait()
+    if received != 0 or broken:
+        said = writer.stderr.read().decode(errors="replace").strip()
+        raise RuntimeError(f"could not write {to_path}: {said or f'the transfer broke after {carried} bytes'}")
     if reader.wait() != 0:
         raise RuntimeError(f"could not read {path}: {reader.stderr.read().decode(errors='replace').strip()}")
-    if received != 0:
-        raise RuntimeError(f"could not write {to_path}: {writer.stderr.read().decode(errors='replace').strip()}")
     return carried
 
 
