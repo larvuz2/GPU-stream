@@ -592,8 +592,10 @@
     pointer-events: none;
   }
 
+  /* The options share the width, and go to a second line before any of them is cut short. */
   .ui-segmented {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.15rem;
     padding: 0.15rem;
     border: 1px solid var(--color-line-strong);
@@ -602,20 +604,17 @@
   }
 
   .ui-segment {
-    flex: 1 1 0;
-    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .ui-segment > span {
     display: block;
-    overflow: hidden;
     padding: 0.3rem 0.6rem;
     border-radius: 0.45rem;
     color: var(--color-muted);
     font-size: 0.8125rem;
     font-weight: 600;
     text-align: center;
-    text-overflow: ellipsis;
     white-space: nowrap;
     transition:
       background-color 0.15s ease,
@@ -1502,5 +1501,55 @@
 
   .ui-card[data-locked='true'] .ui-html-frame {
     opacity: 0.75;
+  }
+
+  /* A 3D model's stage */
+  .ui-model {
+    aspect-ratio: 4 / 3;
+    max-height: 26rem;
+    width: 100%;
+    background:
+      radial-gradient(ellipse at 50% 60%, rgb(255 255 255 / 0.07), transparent 65%),
+      var(--color-ink-950);
+  }
+
+  .ui-model-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .ui-model-canvas:active {
+    cursor: grabbing;
+  }
+
+  .ui-model-canvas:focus-visible {
+    outline: 2px solid var(--color-lime);
+    outline-offset: -2px;
+    border-radius: 0.6rem;
+  }
+
+  .ui-card[data-locked='true'] .ui-model-canvas {
+    cursor: default;
+  }
+
+  .ui-model-wait {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    color: var(--color-muted);
+    font-size: 0.75rem;
+  }
+
+  .ui-model-reset {
+    position: absolute;
+    right: 0.4rem;
+    bottom: 0.4rem;
+    background: rgb(8 8 8 / 0.78);
   }
 }

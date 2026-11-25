@@ -25,6 +25,9 @@
  * - The two cues (`card-cue-*.m4a`, eight seconds, mono) are synthesized with numpy, a pad of sine
  *   partials and a pulse of plucked notes over a thump, written as WAV and encoded with
  *   `ffmpeg -c:a aac -b:a 96k -movflags +faststart`.
+ * - The robot (`card-robot.glb`, 4,119 vertices) is built with numpy from boxes, cylinders, and
+ *   spheres, placed and grouped into four materials, and written as a binary glTF by hand: a JSON
+ *   chunk and one buffer of positions, normals, and indices.
  * @module
  */
 import type { UiData, UiMedia } from '../tree';
@@ -363,6 +366,46 @@ export const EXAMPLES: Example[] = [
         file('fog', 'card-layer-fog.webp'),
         file('title', 'card-layer-title.webp'),
       ],
+    },
+  },
+  {
+    id: 'model',
+    asked: 'Can I see Pip before we rig him?',
+    says: 'Here he is, straight out of Blender. Turn him around, try a finish, and leave him at the angle you want for the hero render.',
+    ui: {
+      ui_id: 'ui-model',
+      title: 'Pip, the lantern robot',
+      kind: 'components',
+      spec: {
+        type: 'stack',
+        children: [
+          { type: 'model', id: 'angle', src: 'pip', finish: '$finish', color: '$paint', spin: true },
+          {
+            type: 'segmented',
+            id: 'finish',
+            label: 'Finish',
+            options: [
+              { value: 'original', label: 'Painted' },
+              { value: 'clay', label: 'Clay' },
+              { value: 'metal', label: 'Metal' },
+              { value: 'gloss', label: 'Gloss' },
+              { value: 'wire', label: 'Wire' },
+            ],
+          },
+          {
+            type: 'color',
+            id: 'paint',
+            label: 'Finish color',
+            value: '#c6c0f5',
+            suggest: ['#c6c0f5', '#d6fa72', '#e8a04a', '#f2f0e8', '#5f8f4e'],
+            when: { finish: { not: 'original' } },
+          },
+          { type: 'text', tone: 'muted', text: 'Drag to orbit, scroll to zoom. The angle you leave him at is the one I render.' },
+        ],
+      },
+      submit: 'Render from this angle',
+      waits: true,
+      media: [file('pip', 'card-robot.glb', 'model')],
     },
   },
   {

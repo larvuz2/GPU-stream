@@ -101,6 +101,8 @@ export default defineConfig({
           groups: [
             { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
             { name: 'supabase', test: /node_modules[\\/]@supabase[\\/]/ },
+            // Fetched only when a card shows a 3D model (`src/studio/ui/components/Model.tsx`).
+            { name: 'three', test: /node_modules[\\/]three[\\/]/ },
           ],
         },
       },

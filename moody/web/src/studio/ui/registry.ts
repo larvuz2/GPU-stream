@@ -21,7 +21,7 @@ import { Compare, Gallery, Image, Swatches, Text, Video } from './components/con
 import { Checkboxes, ColorInput, Field, NumberInput, Segmented, Select, Slider, Toggle } from './components/inputs';
 import { Layers } from './components/Layers';
 import { Grid, Row, Stack, Tab, Tabs } from './components/layout';
-import { Pending } from './components/Pending';
+import { Model } from './components/Model';
 import { Pick, Reorder } from './components/pick';
 import { Table } from './components/Table';
 import type { UiNode } from './tree';
@@ -54,7 +54,7 @@ export const COMPONENTS: Record<ComponentType, ComponentDef> = {
   swatches: { view: Swatches },
   table: { view: Table, start: STARTS.table },
   chart: { view: Chart },
-  model: { view: Pending, start: STARTS.model, words: WORDS.model },
+  model: { view: Model, start: STARTS.model, words: WORDS.model },
   layers: { view: Layers, start: STARTS.layers, words: WORDS.layers },
   slider: { view: Slider, start: STARTS.slider, words: WORDS.slider },
   number: { view: NumberInput, start: STARTS.number, words: WORDS.number },
