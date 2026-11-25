@@ -38,7 +38,7 @@
 # them too, and the file this script's process ID goes in
 # (SELKIES_MODAL_PID_FILE): terminating a Sandbox kills it outright, so the
 # launcher stops a session by signaling this script, which ends it the way the
-# idle timeout does, with Blender's scene kept.
+# idle timeout does, with Blender's scene and CADCraft's drawings kept.
 
 set -u
 
@@ -124,11 +124,20 @@ keep_scene() {
   mv "${SELKIES_MODAL_BLENDER_RECOVERY}/quit.blend" "${SELKIES_MODAL_BLENDER_RECOVERY}/resume-${MODAL_SANDBOX_ID}.blend"
 }
 
+# Has CADCraft save the drawings with unsaved changes (cadcraft/keep.sh), run
+# in the session's environment, where its control channel's token is found.
+keep_drawings() {
+  [ "${SELKIES_MODAL_APP-}" = cadcraft ] || return 0
+  timeout 20 selkies-modal-run selkies-modal-cadcraft-keep
+}
+
 # Stops the entrypoint and exits with the given status, once Blender has kept
-# its scene. s6-svscan takes its services down on SIGTERM; a session that
-# outlasts the wait goes with the Sandbox, which ends when this process does.
+# its scene and CADCraft its drawings. s6-svscan takes its services down on
+# SIGTERM; a session that outlasts the wait goes with the Sandbox, which ends
+# when this process does.
 end_session() {
   keep_scene || say "Blender did not keep its scene; its last auto-save is what the workspace has"
+  keep_drawings || say "CADCraft did not save its drawings; its last autosave is what the project folder has"
   kill -TERM "${SESSION_PID}" 2> /dev/null
   for _ in $(seq 1 20); do
     kill -0 "${SESSION_PID}" 2> /dev/null || break

@@ -84,10 +84,14 @@ PHOTOCRAFT_VERSION = "0.23.1"
 PHOTOCRAFT_SHA256 = "baabdcdbe46df2f72ccf6ecc2e98be00fbc33dbd4c1cd9426362a89a4b95f673"
 SOUNDCRAFT_VERSION = "0.20.1"
 SOUNDCRAFT_SHA256 = "a217c7f65bb55ef4d7417f1c204244d974f25d6b779477727c440800d8256081"
+# CADCraft's Debian package, by the same rule
+CADCRAFT_VERSION = "0.20.1"
+CADCRAFT_SHA256 = "8e6ad1f487d6cd44dbcb73cd88ef1efb52252a2071094f2c23a468a641a06faa"
 CRAFT_RELEASES = {
     "filmcraft": (FILMCRAFT_VERSION, FILMCRAFT_SHA256),
     "photocraft": (PHOTOCRAFT_VERSION, PHOTOCRAFT_SHA256),
     "soundcraft": (SOUNDCRAFT_VERSION, SOUNDCRAFT_SHA256),
+    "cadcraft": (CADCRAFT_VERSION, CADCRAFT_SHA256),
 }
 # The Unreal session's GitHub client: Desktop Plus, a fork of GitHub Desktop kept current with it
 # that publishes Linux packages; its Debian package and the SHA-256 its GitHub release lists for it
@@ -116,6 +120,9 @@ TURN_PORT = 3478
 UNREAL_VIEW_PORT = 8090
 # Where an Unreal session's clone of its repository says how far it is (unreal/clone.py)
 UNREAL_CLONE_STATUS = "/tmp/selkies-modal/unreal-clone.json"
+
+# CADCraft's, on loopback as well
+CADCRAFT_CONTROL_PORT = 9878
 
 # What the session is, whoever starts it. Modal terminates TLS and its connect
 # token guards the address, so Selkies serves plain HTTP with no login of its
@@ -194,6 +201,14 @@ APP_ENV = {
         "BLENDER_USER_RESOURCES": f"{WORKSPACE}/.blender",
         "SELKIES_MODAL_BLENDER_RECOVERY": f"{WORKSPACE}/.blender/autosave",
     },
+    "cadcraft": {
+        "SELKIES_MODAL_APP": "cadcraft",
+        # The control channel; CADCraft makes its token itself as it starts (cadcraft/control.sh)
+        "CADCRAFT_CONTROL_PORT": str(CADCRAFT_CONTROL_PORT),
+        # Mesa's Vulkan in software (lavapipe), as FilmCraft draws: a Sandbox has no render node
+        # with or without a GPU, and a drawing is 2D lines the CPU rasterizes at the display's rate
+        "WGPU_BACKEND": "vulkan",
+    },
 }
 APPS = tuple(APP_ENV)
 
@@ -258,6 +273,9 @@ def session_image(app: str = "blender") -> modal.Image:
         )
         if app == "filmcraft":
             image = image.add_local_file(HERE / "filmcraft" / "control.sh", "/usr/local/bin/selkies-modal-filmcraft", copy=True)
+        if app == "cadcraft":
+            image = image.add_local_file(HERE / "cadcraft" / "control.sh", "/usr/local/bin/selkies-modal-cadcraft", copy=True)
+            image = image.add_local_file(HERE / "cadcraft" / "keep.sh", "/usr/local/bin/selkies-modal-cadcraft-keep", copy=True)
         if app == "soundcraft":
             image = image.add_local_file(HERE / "soundcraft" / "control.sh", "/usr/local/bin/selkies-modal-soundcraft", copy=True)
     elif app == "nuke":
@@ -801,6 +819,60 @@ def unreal_view_link(sandbox: modal.Sandbox) -> str:
     return f"{credentials.url}/?_modal_connect_token={credentials.token}"
 
 
+def cadcraft_requests(sandbox: modal.Sandbox, requests: str, wait_seconds: int) -> modal.container_process.ContainerProcess:
+    """Hand JSON requests, one per line, to the session's CADCraft and return the process printing its replies.
+
+    The requests go from inside the Sandbox, the only place the control
+    channel listens and its token is: `cadcraft/control.sh` adds the token
+    CADCraft wrote as it started to each and prints each reply on a line of its
+    own, and runs as a command of the session, so it counts as use while it
+    waits.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-cadcraft", str(wait_seconds), bufsize=1)
+    try:
+        process.stdin.write(requests)
+        process.stdin.write_eof()
+        process.stdin.drain()
+    except modal.exception.Error:
+        # The command ended before it read anything; its status and output say why
+        pass
+    return process
+
+
+def cadcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
+    """Send one request on the session's CADCraft control channel and return its result.
+
+    `method` and `params` are those of CADCraft's control protocol:
+    `engine.execute` with `{"command", "params"}` runs any of its commands,
+    `cmdline.input` with `{"text"}` types at its command line as a person does,
+    `drawing.inspect` reads the drawing back, and the `ui.*` methods read and
+    drive its window. `timeout` is how many seconds to wait for CADCraft to be
+    ready, which it is as its window opens, and then for the reply. CADCraft
+    gives up on a reply itself after 60 s, saying whether the request had
+    started, which the error raised here repeats (`timeout (may-have-run)`):
+    the drawing is inspected before such a request is sent again.
+
+    The result is the reply's `result`, an object for most methods; a result
+    that is not one, such as the list `engine.commands` returns, comes back as
+    `{"result": ...}`.
+
+    Raises:
+        RuntimeError: CADCraft refused the request, with its message, or did not answer within `timeout`.
+    """
+    request = json.dumps({"id": 1, "method": method, "params": params or {}})
+    process = cadcraft_requests(sandbox, request + "\n", timeout)
+    output = process.stdout.read()
+    status = process.wait()
+    if not output.strip():
+        raise RuntimeError(f"CADCraft did not answer: {process.stderr.read().strip() or f'status {status}'}")
+    reply = json.loads(output.splitlines()[-1])
+    if not reply.get("ok"):
+        state = f" ({reply['state']})" if reply.get("state") else ""
+        raise RuntimeError(f"{reply.get('error') or output.strip()}{state}")
+    result = reply.get("result")
+    return result if isinstance(result, dict) else {"result": result}
+
+
 def screenshot(sandbox: modal.Sandbox) -> bytes:
     """The session's screen as a JPEG no wider than 1280 pixels, small enough to hand to a model.
 
@@ -1003,6 +1075,20 @@ def soundcraft(args: argparse.Namespace) -> int:
     return status
 
 
+def cadcraft(args: argparse.Namespace) -> int:
+    """Send the JSON requests on standard input, one per line, to the session's CADCraft and print each reply."""
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    process = cadcraft_requests(sandbox, sys.stdin.read(), args.wait)
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    status = process.wait()
+    sys.stderr.write(process.stderr.read())
+    return status
+
+
 def down(args: argparse.Namespace) -> int:
     """Stop a session, which ends its billing; its workspace stays."""
     sandbox = find_session(args.name)
@@ -1162,6 +1248,12 @@ def parser() -> argparse.ArgumentParser:
     )
     sound.add_argument(
         "--wait", type=int, default=60, help="seconds to wait for SoundCraft to listen and for each reply (default: %(default)s)"
+    )
+    drafting = named(
+        command("cadcraft", cadcraft, "Send the JSON requests on standard input, one per line, to a session's CADCraft.")
+    )
+    drafting.add_argument(
+        "--wait", type=int, default=60, help="seconds to wait for CADCraft to be ready and for each reply (default: %(default)s)"
     )
     named(command("down", down, "Stop a session."))
     drive = named(
