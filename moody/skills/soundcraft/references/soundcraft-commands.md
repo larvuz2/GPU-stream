@@ -53,7 +53,7 @@ relative path such as `masters/song.wav` lands in it.
 | MIDI note times | **ticks from the clip's start, 960 to a quarter note**: a 16th is 240, an 8th 480, a bar of 4/4 is 3840 |
 | Range | `start` and `end` (or `length`); left out, the edit selection |
 | Track | its id or its name (`"Bass"`); several as `tracks: ["Bass", "Keys"]` |
-| Clip, bus, marker | the id a command returned or `session.inspect` shows; tracks, clips, sources, busses, and markers share one id space |
+| Clip, bus, marker | the id a command returned or `session.inspect` shows; tracks, clips, sources, buses, and markers share one id space |
 | Insert and send slots | `0`-`9` or `"a"`-`"j"` |
 | Level | dB; a fader runs -144 to +12 |
 | Pan | -1 (left) to 1 (right) |
@@ -68,7 +68,7 @@ its `end` into samples, and a later tempo change leaves the clip's box where it 
 ## Reading state
 
 `session.inspect` returns `name`, `path`, `dirty`, `sample_rate`, `bit_depth`, `frame_rate`,
-`tempo` (`[{bpm, tick}]`), `meter`, `markers`, `busses`, `sources` (each with `loaded`),
+`tempo` (`[{bpm, tick}]`), `meter`, `markers`, the buses (a key SoundCraft spells with a double s), `sources` (each with `loaded`),
 `length_samples`, `selection`, `transport`, `undo` (the last step's label), and `tracks`, in
 their order on screen. A track has `id`, `name`, `kind` (`audio`, `instrument`, `midi`, `aux`,
 `master`, `vca`, `folder`, `video`), `format`, `volume_db`, `pan` (two values on a stereo track),

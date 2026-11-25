@@ -505,11 +505,11 @@ renders within its request.
 
 ### Measured
 
-On Sandboxes without a GPU:
+On Sandboxes without a GPU, with the 2 CPUs and 4 GiB `up` reserves:
 
 | | |
 | --- | --- |
-| `up`, image cached | 26-34 s to the link; Selkies listens 5 s after the Sandbox starts |
+| `up`, image cached | 7-34 s to the link; Selkies listens 4-6 s after the Sandbox starts |
 | First `session.inspect` after `up` | 0.6 s |
 | One command through `soundcraft_call` | 0.24 s |
 | 170 notes as one `soundcraft` run | 4.6 s |

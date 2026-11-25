@@ -43,7 +43,7 @@ every 2 or 4 bars inside it. Lay the sections out as markers first (`markers.add
 | Beat for a vocalist | intro 4, verse 16, hook 8, verse 16, hook 8, bridge 8, hook 8, outro 4 | leave the midrange open for the voice |
 | House or techno track, 5-7 min | intro 16-32 (drums, DJ-mixable), build 16, drop 32, break 16-32, build 8-16, drop 32, outro 16-32 | changes every 8 or 16 bars; elements enter and leave one at a time |
 | Lo-fi loop, 2-3 min | A 8, A' 8, B 8, A 8, repeated with variation | texture and small changes carry it |
-| Podcast episode | cold open 15-60 s, theme 5-15 s, introduction, segments, break stings, close, theme out | theme music ducks under the first words |
+| Podcast episode | cold open 15-60 s, theme 5-15 s, introduction, segments, break idents, close, theme out | theme music ducks under the first words |
 | Film cue | by the picture: in on a cut or a line, out on a cut or under the next scene | see mixing.md, "To picture" |
 | Sound effect | attack, body, tail; layers a few milliseconds apart | one file per effect, tails intact |
 

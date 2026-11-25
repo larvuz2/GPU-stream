@@ -256,7 +256,7 @@ with the other engines").
   `compressor` (-22, 3:1), `de_esser` (`freq: 6000`), in that order.
 - **Match the speakers** to each other: bounce each soloed over the same stretch and bring their
   `lufs` within 1 LU with `clip.gain` or the fader.
-- **Music and stings:** theme in at full level, ducked under the first words; beds 20-25 dB
+- **Music and idents:** theme in at full level, ducked under the first words; beds 20-25 dB
   under speech or out.
 - **Master:** maximizer to -16 LUFS, ceiling -1.5; MP3 with ffmpeg.
 
