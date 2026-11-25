@@ -34,8 +34,9 @@ An application's own interface is reached from inside the Sandbox, the one
 place it listens: Blender runs the Python it finds in a spool directory
 (`blender_python`), and FilmCraft answers JSON requests on a control channel
 bound to the Sandbox's loopback, for the session's own token only
-(`filmcraft_call`). Neither is exposed beyond the Sandbox, so driving one takes
-the Modal credentials that started it, as a link does. An Unreal session
+(`filmcraft_call`), as PhotoCraft does once a connection has proved it holds
+the token (`photocraft_call`). None is exposed beyond the Sandbox, so driving one
+takes the Modal credentials that started it, as a link does. An Unreal session
 describes the projects cloned into its workspace the same way
 (`unreal_projects`), and has a second page beside its desktop on a port of its
 own, the Unreal view (`unreal_view_link`). One started for a project linked to
@@ -228,8 +229,9 @@ def session_image(app: str = "blender") -> modal.Image:
     image carries what that takes, Firefox among it (`nuke/install-deps.sh`).
     FilmCraft and PhotoCraft are the Debian packages of their GitHub releases,
     each checked against the hash its release publishes (`craft/install.sh`),
-    with what finds the session's project folder (`craft/project.sh`); FilmCraft
-    adds the client of its control channel (`filmcraft/control.sh`). Unreal's
+    with what finds the session's project folder (`craft/project.sh`); each adds
+    the client of its control channel (`filmcraft/control.sh`,
+    `photocraft/control.sh`). Unreal's
     is the desktop its editor runs beside, without the editor
     (`unreal_desktop`); `unreal_image` is the same desktop with the editor.
     """
@@ -246,6 +248,8 @@ def session_image(app: str = "blender") -> modal.Image:
         )
         if app == "filmcraft":
             image = image.add_local_file(HERE / "filmcraft" / "control.sh", "/usr/local/bin/selkies-modal-filmcraft", copy=True)
+        if app == "photocraft":
+            image = image.add_local_file(HERE / "photocraft" / "control.sh", "/usr/local/bin/selkies-modal-photocraft", copy=True)
     elif app == "nuke":
         image = (
             modal.Image.from_registry(BASE_IMAGE)
@@ -519,8 +523,9 @@ def start_session(
 
     The session's tokens are made here and reach the Sandbox as a Modal Secret;
     nothing else holds them. Beside Selkies' two are the tokens of FilmCraft's
-    and PhotoCraft's control channels, which each takes as 64 hex characters
-    and every request on FilmCraft's carries (`filmcraft_call`), and the secret
+    and PhotoCraft's control channels, which each takes as 64 hex characters:
+    every request on FilmCraft's carries it (`filmcraft_call`), and a connection
+    to PhotoCraft's proves it holds it (`photocraft_call`). The last is the secret
     the TURN relay mints its credentials with (`with_turn`). They are made for
     every session, since a caller holding a built image does not say which
     application it is, and a session of another application leaves them unread.
@@ -668,6 +673,59 @@ def filmcraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] |
     status = process.wait()
     if not output.strip():
         raise RuntimeError(f"FilmCraft did not answer: {process.stderr.read().strip() or f'status {status}'}")
+    reply = json.loads(output.splitlines()[-1])
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("error") or output.strip())
+    result = reply.get("result")
+    return result if isinstance(result, dict) else {"result": result}
+
+
+def photocraft_requests(sandbox: modal.Sandbox, requests: str, wait_seconds: int) -> modal.container_process.ContainerProcess:
+    """Hand JSON requests, one per line, to the session's PhotoCraft and return the process printing its replies.
+
+    The requests go from inside the Sandbox, the only place the control
+    channel listens and its token is: `photocraft/control.sh` authenticates a
+    connection for each by PhotoCraft's challenge, which proves the token to
+    both sides without sending it, and prints each reply on a line of its own.
+    It runs as a command of the session, so it counts as use while it waits.
+    """
+    process = sandbox.exec("/usr/local/bin/selkies-modal-run", "selkies-modal-photocraft", str(wait_seconds), bufsize=1)
+    try:
+        process.stdin.write(requests)
+        process.stdin.write_eof()
+        process.stdin.drain()
+    except modal.exception.Error:
+        # The command ended before it read anything; its status and output say why
+        pass
+    return process
+
+
+def photocraft_call(sandbox: modal.Sandbox, method: str, params: dict[str, Any] | None = None, timeout: int = 60) -> dict[str, Any]:
+    """Send one request on the session's PhotoCraft control channel and return its result.
+
+    `method` and `params` are those of PhotoCraft's control protocol:
+    `engine.execute` with `{"command", "params"}` runs any of its commands,
+    `app.open` and `app.save` read and write files of the project folder, the
+    one folder the channel may touch, and the `ui.*` methods read and drive its
+    window. `timeout` is how many seconds to wait for PhotoCraft to listen,
+    which it does a few seconds after its window opens, and then for the reply.
+    PhotoCraft gives up on a reply itself after 60 s without undoing what it
+    started, so a long filter or save is started with `"wait": false` and
+    followed with `jobs.list`.
+
+    The result is the reply's `result`, an object for most methods; a result
+    that is not one, such as the list `engine.commands` returns, comes back as
+    `{"result": ...}`.
+
+    Raises:
+        RuntimeError: PhotoCraft refused the request, with its message, or did not answer within `timeout`.
+    """
+    request = json.dumps({"id": 1, "method": method, "params": params or {}})
+    process = photocraft_requests(sandbox, request + "\n", timeout)
+    output = process.stdout.read()
+    status = process.wait()
+    if not output.strip():
+        raise RuntimeError(f"PhotoCraft did not answer: {process.stderr.read().strip() or f'status {status}'}")
     reply = json.loads(output.splitlines()[-1])
     if not reply.get("ok"):
         raise RuntimeError(reply.get("error") or output.strip())
@@ -920,6 +978,20 @@ def filmcraft(args: argparse.Namespace) -> int:
     return status
 
 
+def photocraft(args: argparse.Namespace) -> int:
+    """Send the JSON requests on standard input, one per line, to the session's PhotoCraft and print each reply."""
+    sandbox = find_session(args.name)
+    if sandbox is None:
+        raise SystemExit(f"selkies-modal: no session named {args.name} is running")
+    process = photocraft_requests(sandbox, sys.stdin.read(), args.wait)
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    status = process.wait()
+    sys.stderr.write(process.stderr.read())
+    return status
+
+
 def down(args: argparse.Namespace) -> int:
     """Stop a session, which ends its billing; its workspace stays."""
     sandbox = find_session(args.name)
@@ -1073,6 +1145,12 @@ def parser() -> argparse.ArgumentParser:
     )
     control.add_argument(
         "--wait", type=int, default=60, help="seconds to wait for FilmCraft to be ready and for each reply (default: %(default)s)"
+    )
+    control = named(
+        command("photocraft", photocraft, "Send the JSON requests on standard input, one per line, to a session's PhotoCraft.")
+    )
+    control.add_argument(
+        "--wait", type=int, default=60, help="seconds to wait for PhotoCraft to be ready and for each reply (default: %(default)s)"
     )
     named(command("down", down, "Stop a session."))
     drive = named(
