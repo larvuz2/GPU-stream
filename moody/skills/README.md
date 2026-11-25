@@ -105,6 +105,11 @@ finds the same thing in the same place in every skill.
    `handoff/<from app id>-to-<to app id>/` of the project's folder, and what it accepts from
    others. `moody/skills/studio` holds the convention and the table of routes; the engine's skill
    holds the exact recipe for its side.
+9. **Show your work.** How the agent makes this engine's work in progress visible with `preview`:
+   the engine's own commands that write a frame, a range, a page, or a render into `previews/` of
+   the project's folder, each one already run. The skill gives the commands; how long or how
+   large a preview is stays the agent's judgment for the moment, never a number in the skill.
+   `moody/skills/studio` holds when to preview and how the tool behaves.
 
 Write to the agent as "you", in the imperative, about the person as "the person". Name tools and
 their parameters as they are in `TOOLS` (`moody/control/agent.py`).
@@ -118,7 +123,9 @@ their parameters as they are in `TOOLS` (`moody/control/agent.py`).
 - An engine without one is driven with `engine_exec(engine_id, command)` (a shell in the engine's
   environment) and by the person on its screen (`engine_show`, `engine_screenshot`).
 - Files between engines are confirmed with `engine_files(engine_id, path)` before the next engine
-  opens them.
+  opens them. A running engine does not see what another wrote after it started:
+  `engine_send(from_engine_id, path, to_engine_id)` carries the file across, and an engine started
+  afterwards finds it by itself.
 
 ## Every command was run before it was written down
 

@@ -1,6 +1,6 @@
 ---
 name: studio
-description: Run a production across more than one engine. Pick the engine for each task, start and stop engines with their cost in mind, pass work from one engine to the next as files in the project's shared folder, confirm each hand-off before the next engine opens it, and keep the person looking at the right screen. Read for every project, beside the skill of each engine in use.
+description: Run a production across more than one engine. Pick the engine for each task, start and stop engines with their cost in mind, pass work from one engine to the next as files in the project's shared folder, also between engines that run at the same time, confirm each hand-off before the next engine opens it, show the work in progress in the conversation, and keep the person looking at the right screen. Read for every project, beside the skill of each engine in use.
 disciplines: all
 ---
 
@@ -29,8 +29,11 @@ game.
 2. **Say the cost and ask** before you start a machine (see [Cost and time](#cost-and-time)).
 3. **Start, show, and drive.** `engine_start`, then `engine_show` so the person watches, then the
    engine's own commands.
-4. **Hand off as a file**, in the folder convention below, and confirm it with `engine_files`.
-5. **Stop what is done** and say what is still running and what it costs a minute.
+4. **Show the step.** `preview` what changed, with a line that says what it is (see
+   [Show your work](#show-your-work)).
+5. **Hand off as a file**, in the folder convention below: `engine_send` it to an engine that is
+   already running, and confirm it with `engine_files`.
+6. **Stop what is done** and say what is still running and what it costs a minute.
 
 ## Questions to ask first
 
@@ -78,7 +81,8 @@ is $1.80 an hour. The turn's state says how many credits the person has.
   the tier without a GPU; viewport-heavy 3D, renders, and Unreal Engine need a GPU.
 - Two engines running cost the sum of both. A hand-off does not need both at once: export, confirm
   the file, and start the receiving engine when its work begins. Keep the first running only if the
-  person is still using it or the work will come straight back.
+  person is still using it or the work will come straight back; when both do run, `engine_send`
+  moves the file between them.
 - Before you end a turn, look at the open engines. `engine_stop` each one nobody is using, after
   its work is saved, and tell the person which you left running and why.
 - If the credits left will not cover the task you estimated, say so before starting it.
@@ -87,8 +91,26 @@ is $1.80 an hour. The turn's state says how many credits the person has.
 ## The project folder and hand-offs
 
 Every engine of a project opens in the same folder, the one the turn's state names as the project
-folder. A file one engine saves there is a file every other engine of the project can open. That
-folder is how work moves; nothing is copied between machines.
+folder, and that folder is how work moves. Each engine's machine has its own view of it:
+
+- **An engine sees the folder as it was when the engine started**, plus what it wrote itself.
+  What an engine writes is on the project's storage within seconds, so an engine **started
+  afterwards** finds it there with nothing to do.
+- **Two engines that are both running do not see each other's new files**, however long you wait;
+  the folder cannot be refreshed under a running application.
+- **`engine_send` carries a file or a folder from one running engine to another**:
+
+```text
+engine_send(from_engine_id, path="handoff/soundcraft-to-filmcraft/mix-v1.wav", to_engine_id)
+```
+
+It arrives at the same path in the receiving engine's folder (`to_path` puts it elsewhere),
+whole or not at all, and the answer holds its entry as the receiving engine lists it and how long
+it took. Measured between two running engines: 1 MB in about 2 seconds, 100 MB in about 6, 1 GB
+in under a minute. There is a size limit, which the refusal names; for more than that, send only
+what the receiver needs, or save the receiving engine's work, `engine_stop` it, and start it
+again. Send the new version each time the sender exports one: the receiver keeps the file it was
+sent, not the sender's later changes.
 
 Layout, which you keep:
 
@@ -129,11 +151,11 @@ Confirm twice, because each machine has its own view of the folder:
 2. On the receiving engine, before it opens the file. This is the listing that counts, since it is
    the machine that has to see the file.
 
-The dependable order is to export, confirm on the sender, then start the receiver and confirm
-there. An engine that was already running when the file was written may not show it yet. If the
-sender lists the file and the receiver does not, list again after a short wait; if it still does
-not, tell the person, and offer to stop the receiving engine and start it again, which opens the
-folder afresh. Never tell an engine to open a file its own listing does not show.
+So the order is: export, confirm on the sender, then either `engine_send` to a receiver that is
+already running (its answer is the receiver's listing of the file) or start the receiver and
+confirm there with `engine_files`. An engine started within a few seconds of the export can miss
+it: if the sender lists the file and the new receiver does not, `engine_send` it. Never tell an
+engine to open a file its own listing does not show.
 
 To make the folder before an engine writes to it:
 
@@ -190,6 +212,44 @@ then, do the part that is possible (export the file, confirm it) and tell the pe
 - Close a turn with what was made, where its files are in the project folder, which engines still
   run, and what comes next.
 
+## Show your work
+
+The person should see the work being made, not only the finished piece. `preview` puts files an
+engine wrote in the project's folder into the conversation as a work-in-progress card:
+
+```text
+preview(engine_id, path="previews/chorus-v2.wav", caption="The chorus with the new bass line, bars 17 to 24")
+preview(engine_id, paths=["previews/shot04-before.png", "previews/shot04-after.png"],
+        caption="Shot 4 before and after the grade", compare=true)
+```
+
+- **When.** After each step that changed something the person can see or hear; before you ask them
+  to decide, so they decide on what is in front of them; and whenever something changed that the
+  Screen does not show (a mix, a render, an export setting, a file another engine will open).
+- **What.** Whatever shows the change, made with that engine's own commands, which its skill
+  lists: a frame, a range bounce, a low-resolution export of a range, a PNG of a page, a render.
+  Write it under `previews/` in the project folder, named for what it is.
+- **How much is your judgment for the moment.** Two seconds of one effect, one section, one shot,
+  or the whole piece when the whole is the question. There is no fixed length. Render light
+  (a lower resolution, a compressed range) when the point is the cut or the arrangement, and full
+  quality when the point is the quality.
+- **Say what it shows** in the caption, in one line: what it is and what changed since the last.
+- **Pictures, sound, video, and files** all work. A file too heavy for a conversation, or in a
+  format browsers do not play (a WAV master, ProRes, an EXR), is shown as a lighter copy the engine
+  encodes; the original stays where it is. A preview over the size limit is refused, and the
+  refusal says so: render a shorter range or a lower resolution and preview that.
+- **`compare: true`** with exactly two files of one kind shows a before and after pair, before
+  first.
+- **You get facts, not the media**: length, dimensions, size, and for sound its loudness and peak.
+  That is enough to report with. Add `look: true` only when you must judge the result yourself (is
+  the frame too dark, did the cut land); it returns a small picture of each file, a sound's as
+  its waveform.
+- **Do not flood the conversation.** One preview per step, not one per command; several files that
+  belong together go in one preview. `engine_screenshot` appears as the same kind of card, so
+  after one of those the person has already seen the screen.
+- A preview is not a deliverable and is not kept in the library. What the person approves is
+  exported in full and saved to the library the usual way.
+
 ## Taste
 
 - Fewer engines is better. Do not open a second engine for something the first does well enough.
@@ -199,11 +259,11 @@ then, do the part that is possible (export the file, confirm it) and tell the pe
 
 ## What is not possible yet
 
-- Engines do not send to each other directly, except Blender and the Unreal editor on one Unreal
-  engine. Everything else is a file in the project folder that you move the work through.
+- Engines do not open each other's documents live, except Blender and the Unreal editor on one
+  Unreal engine. Everything else is a file in the project folder that you export, send, and import.
 - An engine marked "not available yet" cannot be started, and its routes wait for it.
-- `engine_files` lists; it does not read a file's contents, copy, or delete. Use `engine_exec` for
-  those, and ask before deleting.
-- Two engines running at once are not known to see each other's new files at once. That is why
-  the receiving engine's own listing is the check, and why the dependable order starts the
-  receiver after the export.
+- `engine_files` lists; it does not read a file's contents or delete. Use `engine_exec` for those,
+  and ask before deleting.
+- A running engine never sees another running engine's new file by itself: `engine_send` it, each
+  version again. Above the size limit `engine_send` refuses, and the receiver has to be stopped
+  and started again to see the file.
