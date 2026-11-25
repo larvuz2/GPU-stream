@@ -245,7 +245,8 @@ def session_image(app: str = "blender") -> modal.Image:
     each checked against the hash its release publishes (`craft/install.sh`),
     with what finds the session's project folder (`craft/project.sh`); FilmCraft
     adds the client of its control channel (`filmcraft/control.sh`). CADCraft
-    is installed the same way, with its own client (`cadcraft/control.sh`). Unreal's
+    is installed the same way, with its own client (`cadcraft/control.sh`) and
+    what saves its drawings as a session ends (`cadcraft/keep.sh`). Unreal's
     is the desktop its editor runs beside, without the editor
     (`unreal_desktop`); `unreal_image` is the same desktop with the editor.
     """
@@ -264,6 +265,7 @@ def session_image(app: str = "blender") -> modal.Image:
             image = image.add_local_file(HERE / "filmcraft" / "control.sh", "/usr/local/bin/selkies-modal-filmcraft", copy=True)
         if app == "cadcraft":
             image = image.add_local_file(HERE / "cadcraft" / "control.sh", "/usr/local/bin/selkies-modal-cadcraft", copy=True)
+            image = image.add_local_file(HERE / "cadcraft" / "keep.sh", "/usr/local/bin/selkies-modal-cadcraft-keep", copy=True)
     elif app == "nuke":
         image = (
             modal.Image.from_registry(BASE_IMAGE)

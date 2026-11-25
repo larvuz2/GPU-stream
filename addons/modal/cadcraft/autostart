@@ -24,9 +24,16 @@
 # project folder rather than one for the whole workspace: CADCraft offers to
 # recover every autosave the folder holds that its last run left behind, and a
 # folder shared by every project would offer one project's drawings in
-# another. A session that ended with changes unsaved, by the idle timeout or
-# `down`, so reopens offering those CADCraft had autosaved (every ten minutes
-# of changes, its SAVETIME), as its own crash recovery does.
+# another.
+#
+# What a person drew is there when they come back, two ways. A session that
+# ends by the idle timeout or `down` saves every drawing with unsaved changes
+# first (`cadcraft/keep.sh`). One that ends with no chance to, at the Sandbox's
+# lifetime or a crash, leaves CADCraft's autosaves, which the next start offers
+# in its Drawing Recovery window (the `drawingrecovery` command); CADCraft
+# writes them every SAVETIME minutes of changes, ten by its default and kept
+# only in a home that goes with the Sandbox, so each start sets it to one, the
+# least it takes.
 #
 # The control channel listens on the Sandbox's loopback only, on
 # CADCRAFT_CONTROL_PORT, for requests carrying the token CADCraft makes each
@@ -42,4 +49,8 @@ if [ -z "${file}" ]; then
   file="./drawing.dxf"
   cadcraft-cli run --metric --save "${file}" > /dev/null
 fi
+
+# Its token is ready as its window opens, which the client waits for
+echo '{"method": "engine.execute", "params": {"command": "setvar", "params": {"name": "SAVETIME", "value": 1}}}' |
+  selkies-modal-cadcraft 120 > /dev/null 2>&1 &
 exec cadcraft "${folder}/${file#./}"
