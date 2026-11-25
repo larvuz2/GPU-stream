@@ -12,6 +12,10 @@
  * button becomes a stop button, since the control plane takes one turn at a time. The field grows
  * with its text up to a limit, then scrolls. Its text is held by the workspace, so a suggestion
  * from elsewhere (the welcome's openings) can fill it.
+ *
+ * While the agent's open question recommends an answer (`agree`), Enter in the empty field sends
+ * that answer: agreeing with the agent is then as short as saying yes, and the field's placeholder
+ * says so. Anything typed is sent as it is, as ever.
  * @module
  */
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
@@ -29,6 +33,8 @@ interface ComposerProps {
   running: boolean;
   /** Why nothing can be sent now, or `null` when a message can be. */
   blocked: string | null;
+  /** The answer the agent recommends to its open question, which Enter in the empty field sends; `null` for none. */
+  agree: string | null;
   /** Sends the text. */
   onSend: (text: string) => Promise<void>;
   /** Stops the running turn. */
@@ -41,13 +47,15 @@ interface ComposerProps {
  * @param props The component's props.
  * @returns The composer.
  */
-export function Composer({ value, onChange, running, blocked, onSend, onStop }: ComposerProps) {
+export function Composer({ value, onChange, running, blocked, agree, onSend, onStop }: ComposerProps) {
   const fieldId = useId();
   const field = useRef<HTMLTextAreaElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const text = value.trim();
-  const canSend = blocked === null && !running && !busy && text !== '';
+  const idle = blocked === null && !running && !busy;
+  const canSend = idle && text !== '';
+  const canAgree = idle && text === '' && agree !== null;
 
   useLayoutEffect(() => {
     const element = field.current;
@@ -57,15 +65,19 @@ export function Composer({ value, onChange, running, blocked, onSend, onStop }: 
     }
   }, [value]);
 
-  /** Sends the text and clears the field, or keeps it with the reason it was refused. */
+  /**
+   * Sends the text and clears the field, or keeps it with the reason it was refused. With the
+   * field empty, it sends the answer the agent recommends, where its open question has one.
+   */
   async function send(): Promise<void> {
-    if (!canSend) {
+    const message = canSend ? text : canAgree ? agree : null;
+    if (message === null) {
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      await onSend(text);
+      await onSend(message);
       onChange('');
     } catch (failure) {
       setError(failure);
@@ -121,7 +133,13 @@ export function Composer({ value, onChange, running, blocked, onSend, onStop }: 
           ref={field}
           id={fieldId}
           rows={1}
-          placeholder={running ? 'The agent is working…' : 'Describe what to make next, or answer the agent'}
+          placeholder={
+            running
+              ? 'The agent is working…'
+              : canAgree
+                ? 'Enter to agree with the recommendation, or answer in your own words'
+                : 'Describe what to make next, or answer the agent'
+          }
           value={value}
           disabled={blocked !== null}
           onChange={(event) => {

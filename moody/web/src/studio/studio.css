@@ -955,6 +955,22 @@
     opacity: 0.55;
   }
 
+  /*
+   * The agent's recommendation: its word on one option, quiet and in its own lavender, never the
+   * lime of the person's choice. The option's number takes the same tone, so the eye finds it.
+   */
+  .ask-recommended {
+    color: var(--color-lavender);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    opacity: 0.85;
+  }
+
+  .ask-option[data-recommended] .ask-key {
+    border-color: var(--ai-line);
+    color: var(--color-lavender);
+  }
+
   .ask-key {
     display: grid;
     place-items: center;

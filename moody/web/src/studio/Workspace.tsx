@@ -46,7 +46,7 @@ import { DisciplineIcon } from '../components/DisciplineIcon';
 import { disciplineName, planProgress } from './present';
 import { describeAnswer } from './ui/answer';
 import { Stage, type StreamStandIn } from './Stage';
-import { buildTranscript, processMedia, type ProcessEntry, type Reveal } from './transcript';
+import { buildTranscript, openQuestion, processMedia, type ProcessEntry, type Reveal } from './transcript';
 import { connected, type Account, type Epic, type GitHub, type Projects } from './useAccount';
 import { useProject } from './useProject';
 
@@ -366,6 +366,7 @@ export function Workspace(props: WorkspaceProps) {
           onChange={setDraft}
           running={data.running}
           blocked={blocked}
+          agree={openQuestion(items)?.recommended ?? null}
           onSend={data.send}
           onStop={data.stop}
         />

@@ -19,6 +19,9 @@
  * here starts a turn whose events arrive over a few seconds, under the studio's own polling, and
  * an engine started here queues, starts, and runs. The images are the site's own artwork.
  *
+ * Every question the demo's agents ask names the answer they would give (`recommended`), as the
+ * agent on Anthropic's loop does.
+ *
  * The film's agent shows its work before it asks: four previews of every kind a card takes (a
  * file, a frame, a before and after pair of a grade, and a six-second animatic), one more than a
  * turn keeps in view, so the earliest is folded. A third project, Lighthouse theme, is a score in
@@ -509,6 +512,7 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
         'Wide on the violet flats at dusk, then cut to the city',
         'Title card over the beacon’s last glow',
       ],
+      recommended: 'Cold open on Pip in the workshop as the lights die',
     },
   });
   add({ turn_id: t2, kind: 'turn_end', data: {} }, SECOND);
@@ -594,7 +598,11 @@ function gameEvents(start: number, cloned: number, engine: Session): Scheduled[]
     later(6, {
       turn_id: second,
       kind: 'ask',
-      data: { question: 'Shall I open EmberRidge in Unreal?', options: ['Open it in Unreal', 'Not yet'] },
+      data: {
+        question: 'Shall I open EmberRidge in Unreal?',
+        options: ['Open it in Unreal', 'Not yet'],
+        recommended: 'Open it in Unreal',
+      },
     }),
     later(6.5, { turn_id: second, kind: 'turn_end', data: {} }),
   ];
@@ -771,6 +779,7 @@ function scoreEvents(start: number, engine: Session): Scheduled[] {
           'A second, brighter section in C major',
           'Keep it piano alone and let it breathe',
         ],
+        recommended: 'Repeat it with strings under the piano',
       },
     }),
     step(87, { turn_id: turn, kind: 'turn_end', data: {} }),

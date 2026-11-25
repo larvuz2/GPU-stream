@@ -426,6 +426,11 @@ export interface AskData {
   question: string;
   /** The answers offered, each sent as the person's message when chosen. */
   options: string[];
+  /**
+   * The answer the agent would give, one of `options`; absent from a log written before the
+   * agent recommended.
+   */
+  recommended?: string;
 }
 
 /** The agent's plan changed. */
@@ -1185,7 +1190,7 @@ const isToolEnd: Guard<ToolEndData> = (value): value is ToolEndData =>
 
 /** Checks a value into an {@link AskData}. */
 const isAsk: Guard<AskData> = (value): value is AskData =>
-  isRecord(value) && isString(value.question) && isStrings(value.options);
+  isRecord(value) && isString(value.question) && isStrings(value.options) && optional(isString)(value.recommended);
 
 /**
  * Reads one event of a page, by the kind it names.

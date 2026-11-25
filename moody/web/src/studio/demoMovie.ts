@@ -251,6 +251,8 @@ function asking(stage: number, turn: TurnId, start: number): Script {
           'I have a script to paste',
           'Pitch me three ideas',
         ],
+        recommended:
+          'A young lamplighter and her lantern robot cross the drifting isles to relight the last lamp before the long night',
       },
     });
     ends = 6;
@@ -280,6 +282,7 @@ function asking(stage: number, turn: TurnId, start: number): Script {
           'Add her grandfather Theo, the tinkerer who built Wick',
           'Suggest a cast for me',
         ],
+        recommended: 'Iris, nineteen, the last lamplighter, and Wick, her lantern robot, who speaks in clicks',
       },
     });
     ends = 5.2;
@@ -305,6 +308,7 @@ function asking(stage: number, turn: TurnId, start: number): Script {
                 'Stop-motion felt and paper',
                 'Clean stylized 3D with soft light',
               ],
+              recommended: 'Cinematic and painterly: warm lamplight against violet dusk',
             },
           }
         : { kind: 'ui', data: STYLE_CARD },

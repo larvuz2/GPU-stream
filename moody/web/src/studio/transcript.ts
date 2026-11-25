@@ -28,7 +28,8 @@
  *   Anything else a subagent wrote (an asset in the library, an approval it waits on) is the
  *   conversation's.
  * - An `ask` is answered by the person's next message, whichever way it was sent: a choice button
- *   or the composer.
+ *   or the composer. The option it names as `recommended` is kept as the agent's recommendation
+ *   where it is one of the options offered.
  * - An `approval` is answered by its `approval_result`.
  * - A `ui` card is locked in by a later `user_message` whose `ui` names it, with that message's
  *   value; one not locked in is `current` until the person sends anything else.
@@ -91,7 +92,16 @@ export type TranscriptItem =
       media: Media[];
       first: boolean;
     }
-  | { type: 'ask'; key: string; question: string; options: string[]; answer: string | null; first: boolean }
+  | {
+      type: 'ask';
+      key: string;
+      question: string;
+      options: string[];
+      /** The option the agent would choose, or `null` where it named none of them. */
+      recommended: string | null;
+      answer: string | null;
+      first: boolean;
+    }
   | {
       type: 'agents';
       key: string;
@@ -210,6 +220,18 @@ interface Prose {
   parts: Part[];
   /** The turn. */
   turn: TurnId | null;
+}
+
+/**
+ * Whether an answer is one of a question's options, as a person or the agent wrote it: letter
+ * case and the space around it do not tell two answers apart.
+ *
+ * @param option The option.
+ * @param answer The answer, or `undefined` for none.
+ * @returns `true` where they are the same answer.
+ */
+export function sameAnswer(option: string, answer: string | null | undefined): boolean {
+  return typeof answer === 'string' && answer.trim().toLowerCase() === option.trim().toLowerCase();
 }
 
 /**
@@ -464,6 +486,7 @@ function fold(events: readonly StudioEvent[], entriesOf: (agentId: string) => Su
           key,
           question: event.data.question,
           options: event.data.options,
+          recommended: event.data.options.find((option) => sameAnswer(option, event.data.recommended)) ?? null,
           answer: null,
           first: false,
         });

@@ -10,8 +10,8 @@
  * The person's messages sit on the right; the agent's entries share a gutter on the left, its mark
  * beside the first of each run: its prose, a compact card per tool call that unfolds to what the
  * call came to (`ToolCard.tsx`), a block of cards for the subagents it handed work to
- * (`AgentsBlock.tsx`), its questions as buttons that answer by sending the choice, and the media
- * its tools produced, inline. A change the agent made to the plan, the library, or an engine reads
+ * (`AgentsBlock.tsx`), its questions as buttons that answer by sending the choice, the one the
+ * agent recommends marked as such, and the media its tools produced, inline. A change the agent made to the plan, the library, or an engine reads
  * as a line that leads to it. A message just sent shows at once, dimmed until the log has it.
  *
  * What the agent reasons is a quiet note that unfolds (`ThinkingNote.tsx`), with the eyes beside
@@ -74,6 +74,7 @@ import {
   agentActivity,
   foldPreviews,
   openQuestion,
+  sameAnswer,
   type Activity,
   type Locked,
   type Reveal,
@@ -614,6 +615,7 @@ function Entry({
           <AskCard
             question={item.question}
             options={item.options}
+            recommended={item.recommended}
             answer={item.answer}
             live={open && canSend && !data.running}
             onChoose={onChoose}
@@ -691,6 +693,8 @@ interface AskCardProps {
   question: string;
   /** The answers offered. */
   options: string[];
+  /** The answer the agent would give, one of the options, or `null`. */
+  recommended: string | null;
   /** The person's answer, once given. */
   answer: string | null;
   /** Whether the choices can be sent now. */
@@ -702,10 +706,16 @@ interface AskCardProps {
 /**
  * Renders the agent's question with its answers as buttons.
  *
+ * The option the agent would choose says so after its text, as a quiet "(recommended)" in the
+ * agent's lavender: it is the agent's word, not an action, so it never takes the lime of what the
+ * person does, and it stays on the option once the question is answered, whichever answer was
+ * given. Agreeing is one click on that option, or Enter in the empty composer (`Composer.tsx`),
+ * which the line under the options says while the question is open.
+ *
  * @param props The component's props.
  * @returns The card.
  */
-function AskCard({ question, options, answer, live, onChoose }: AskCardProps) {
+function AskCard({ question, options, recommended, answer, live, onChoose }: AskCardProps) {
   const [sending, setSending] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
 
@@ -733,13 +743,14 @@ function AskCard({ question, options, answer, live, onChoose }: AskCardProps) {
       <p className="mt-2 font-medium text-fg">{question}</p>
       <ul className="mt-3 grid grid-cols-1 gap-2">
         {options.map((option, index) => {
-          const chosen = answered && answer.trim().toLowerCase() === option.trim().toLowerCase();
+          const chosen = answered && sameAnswer(option, answer);
           return (
             <li key={option}>
               <button
                 type="button"
                 className="ask-option"
                 data-chosen={answered ? chosen : undefined}
+                data-recommended={option === recommended ? true : undefined}
                 disabled={!live || answered || sending !== null}
                 onClick={() => {
                   void choose(option);
@@ -748,14 +759,23 @@ function AskCard({ question, options, answer, live, onChoose }: AskCardProps) {
                 <span className="ask-key" aria-hidden="true">
                   {chosen ? <Check className="size-3 text-fg" /> : index + 1}
                 </span>
-                <span className="min-w-0 flex-1">{option}</span>
+                <span className="min-w-0 flex-1">
+                  {option}
+                  {option === recommended ? <span className="ask-recommended"> (recommended)</span> : null}
+                </span>
                 {sending === option ? <span className="spinner size-3.5" aria-hidden="true" /> : null}
               </button>
             </li>
           );
         })}
       </ul>
-      {answered || !live ? null : <p className="mt-3 text-xs text-faint">Or answer in your own words below.</p>}
+      {answered || !live ? null : (
+        <p className="mt-3 text-xs text-faint">
+          {recommended === null
+            ? 'Or answer in your own words below.'
+            : 'Press Enter in the empty message box to go with the recommendation, or answer in your own words.'}
+        </p>
+      )}
       {error === null ? null : (
         <div className="mt-3">
           <ErrorNotice error={error} />
