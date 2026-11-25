@@ -246,9 +246,10 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
         summary={locked === null ? [] : summarizeValue(locked.value)}
         advice={recommended === null ? null : { kept, changed: departuresOfValue(held, recommended.value) }}
         onReturn={() => {
-          setValue(null);
+          // The document is started again and will say what it opens on; until it has, the card
+          // already stands on the recommendation it gave before.
+          setValue(recommended?.value ?? null);
           setReported(false);
-          setRecommended(null);
           setRun((count) => count + 1);
         }}
         onLock={() => {
