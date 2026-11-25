@@ -42,7 +42,16 @@ import { isNumber, isRecord, isString } from '../../lib/narrow';
 import { departuresOfValue, summarizeValue } from './answer';
 import { limit } from './catalog';
 import { LockBar } from './LockBar';
-import { cardDocument, mediaAddresses, policy, readPageFont, shellDocument, themeDeclarations, type FrameFont } from './sandbox';
+import {
+  cardDocument,
+  FRAME_GUTTER,
+  mediaAddresses,
+  policy,
+  readPageFont,
+  shellDocument,
+  themeDeclarations,
+  type FrameFont,
+} from './sandbox';
 import type { UiCardProps } from './UiCard';
 import { clamp, sameValue } from './values';
 
@@ -205,6 +214,8 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
   // A locked card stands by what was locked in, whatever the document reported since.
   const held = locked === null ? value : locked.value;
   const kept = recommended !== null && sameValue(held, recommended.value);
+  // The frame reaches past the card's content by the document's own gutter, so the two line up.
+  const box = { height, width: `calc(100% + ${FRAME_GUTTER * 2}px)`, margin: -FRAME_GUTTER };
   return (
     <>
       <div className="ui-body">
@@ -213,7 +224,7 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
             This card stopped: its document tried to leave its frame, which a card may not do. Nothing was sent.
           </p>
         ) : srcdoc === null ? (
-          <div className="ui-html-frame" style={{ height }} role="status" aria-label={`Opening ${ui.title}`} />
+          <div className="ui-html-frame" style={box} role="status" aria-label={`Opening ${ui.title}`} />
         ) : (
           <iframe
             key={run}
@@ -222,7 +233,7 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
             className="ui-html-frame"
             sandbox="allow-scripts"
             srcDoc={srcdoc}
-            style={{ height }}
+            style={box}
             inert={locked !== null}
           />
         )}
