@@ -26,9 +26,13 @@
  * The input's value is the entry the file became, `{tag, name, kind}`, which is what the agent
  * reads; the address the page plays the file from is kept here, for as long as the card is on
  * the page. A card shown on a page that cannot take files says so in the input's place.
+ *
+ * While a file is on its way the input holds the card open (`Card.hold`), so an answer is never
+ * locked in a moment before the file it was meant to carry. An input that left the card
+ * meanwhile (its condition stopped holding) takes no value from a file that arrives after.
  * @module
  */
-import { useRef, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { FileIcon, Upload as UploadIcon } from 'lucide-react';
 import { CATALOG } from '../catalog';
 import { useCard } from '../context';
@@ -97,6 +101,17 @@ export function Upload({ node }: ViewProps) {
   const wanted = WANTS[accept] ?? 'a file';
   const value = isUploadedFile(input.value) ? input.value : null;
   const upload = card.upload;
+  const hold = card.hold;
+  const key = input.domId;
+  // Whether the input is still on the card: one that left while its file was on its way takes no value.
+  const shownNow = useRef(true);
+  useEffect(() => {
+    shownNow.current = true;
+    return () => {
+      shownNow.current = false;
+      hold(key, null);
+    };
+  }, [hold, key]);
 
   /**
    * Sends a file to the library and takes the entry it became as the input's value.
@@ -112,14 +127,19 @@ export function Upload({ node }: ViewProps) {
       return;
     }
     setPhase({ name: 'sending', file: file.name, size: file.size });
+    hold(key, `Still adding ${file.name}`);
     try {
       const entry = await upload(file, { section: text(node, 'section') });
-      setShown({ tag: entry.tag, url: entry.url });
-      input.set({ tag: entry.tag, name: entry.name, kind: entry.kind });
-      setPhase({ name: 'idle' });
+      if (shownNow.current) {
+        setShown({ tag: entry.tag, url: entry.url });
+        input.set({ tag: entry.tag, name: entry.name, kind: entry.kind });
+        setPhase({ name: 'idle' });
+      }
     } catch (failure) {
       const why = failure instanceof Error && failure.message !== '' ? failure.message : `${file.name} could not be added.`;
       setPhase({ name: 'refused', why });
+    } finally {
+      hold(key, null);
     }
   }
 

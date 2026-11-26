@@ -8,7 +8,7 @@
  * Small hooks the cards' components share.
  * @module
  */
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
 /** How long something sent waits to be seen done before it can be sent again. */
 const SENDING_TIMEOUT_MS = 12_000;
@@ -35,12 +35,10 @@ export function useSending(): [boolean, () => void] {
       window.clearTimeout(timer);
     };
   }, [sending]);
-  return [
-    sending,
-    () => {
-      setSending(true);
-    },
-  ];
+  const send = useCallback(() => {
+    setSending(true);
+  }, []);
+  return [sending, send];
 }
 
 /**

@@ -25,6 +25,10 @@
  *   answered now (the agent is working, or the conversation moved past it), and it says so.
  * - **Locked**: the controls show what was locked in and take no change, and the card lists it.
  *
+ * An input may hold the card open while it is at work (`Card.hold`): a file on its way to the
+ * library is not yet the input's value, so until it is in the card says so in place of locking
+ * in an answer without it.
+ *
  * A card may be `instant`: it has one input, a single choice, and no lock-in button. Its choices
  * are buttons, and pressing one sends the card's state at once. Until the log shows it locked,
  * the card holds the choice and takes no second one; while it cannot be answered, its choices
@@ -35,7 +39,7 @@
  * set. The tree is keyed by each node's place in it, so a card re-read keeps its controls.
  * @module
  */
-import { useId, useMemo, useState } from 'react';
+import { useCallback, useId, useMemo, useState } from 'react';
 import { isRecord } from '../../lib/narrow';
 import { changed, inputsOf, missing, startState, summarize, wordsOf } from './answer';
 import { CardContext, type Card, type UploadFile } from './context';
@@ -116,7 +120,18 @@ function ComponentsCard({ ui, locked, live, onSubmit, draft, onUpload }: UiCardP
   const [changes, setChanges] = useState<Record<string, unknown>>(() => draft ?? {});
   const files = useMemo(() => new Map(ui.media.map((file): [string, UiMedia] => [file.name, file])), [ui.media]);
   const [sounds] = useState(() => new Set<HTMLAudioElement>());
+  const [holds, setHolds] = useState<Readonly<Record<string, string>>>({});
   const [sending, send] = useSending();
+  // One function for the card's life, so an input can release its hold as it leaves the card.
+  const hold = useCallback((key: string, why: string | null) => {
+    setHolds((current) => {
+      if (why === null && !(key in current)) {
+        return current;
+      }
+      const rest = Object.fromEntries(Object.entries(current).filter(([held]) => held !== key));
+      return why === null ? rest : { ...rest, [key]: why };
+    });
+  }, []);
 
   const frozen = locked !== null;
   // Only a card of one input can lock on a choice: there is nothing else to set first.
@@ -143,6 +158,7 @@ function ComponentsCard({ ui, locked, live, onSubmit, draft, onUpload }: UiCardP
       frozen: frozen || (instant && (!live || sending)),
       instant,
       upload: onUpload ?? null,
+      hold,
       sounds,
       words: (id) => {
         const node = inputs.get(id);
@@ -150,7 +166,7 @@ function ComponentsCard({ ui, locked, live, onSubmit, draft, onUpload }: UiCardP
       },
       uid,
     }),
-    [state, frozen, instant, live, sending, send, onSubmit, onUpload, sounds, files, inputs, uid],
+    [state, frozen, instant, live, sending, send, onSubmit, onUpload, hold, sounds, files, inputs, uid],
   );
 
   if (root === null) {
@@ -167,7 +183,7 @@ function ComponentsCard({ ui, locked, live, onSubmit, draft, onUpload }: UiCardP
         instant={instant ? (sending ? 'sending' : 'open') : undefined}
         locked={frozen}
         live={live}
-        blocked={unchosen === null ? null : `Still to choose: ${unchosen}`}
+        blocked={unchosen === null ? (Object.values(holds)[0] ?? null) : `Still to choose: ${unchosen}`}
         summary={frozen ? summarize(root, inputs, state) : []}
         changed={!frozen && !instant && changed(inputs, state, start)}
         onDefault={() => {

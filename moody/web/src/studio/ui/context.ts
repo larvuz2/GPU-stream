@@ -54,6 +54,14 @@ export interface Card {
   instant: boolean;
   /** Takes a file from the person, or `null` where the page showing the card has no way to. */
   upload: UploadFile | null;
+  /**
+   * Keeps the card from being locked in while an input is at work on something its value depends
+   * on, such as a file on its way to the library, and releases it again.
+   *
+   * @param key What holds the card, unique to the input.
+   * @param why Why it cannot be locked in yet, as the card says it, or `null` to release it.
+   */
+  hold: (key: string, why: string | null) => void;
   /** The card's sounds, so that starting one pauses the others. */
   sounds: Set<HTMLAudioElement>;
   /** One input's value in words, for a text that shows it. */
