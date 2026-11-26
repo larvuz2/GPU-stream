@@ -563,9 +563,35 @@ the conversation itself.
 - **Every module of the right pane folds**, and so does each section inside
   Environment, by a quiet arrow that shows on hover and focus.
 
+- **Settings are the person's, and one place holds them.** The account menu
+  opens Settings: Profile (name, email), Billing (credits, buying more),
+  Agent (what a turn may spend and how many steps it may take), Video editing,
+  Connections (GitHub, Epic, Claude), and API keys. A setting that is a plain
+  switch or choice is data: `catalog.json`'s `settings` gives each its id, the
+  tab it sits on, its label and one line of help, its kind (`toggle` or
+  `choice`, with the options), and its default. The control plane keeps what a
+  person changed (`profiles.settings`) and refuses an id or a value the
+  catalog does not offer, so adding one is a catalog entry and the code that
+  reads it.
+- **HyperFrames is the other way to edit by code.** The `hyperframes` engine
+  runs HeyGen's open-source HyperFrames (Apache 2.0): a video written as HTML,
+  CSS, and seekable animation, rendered by a headless browser and FFmpeg, with
+  its live preview on the engine's Screen. It follows upstream: a machine
+  takes the newest release and that release's own skills as it starts, and
+  falls back on the ones its image was built with. Which engine the agent
+  reaches for when a video is edited by code is the person's setting
+  (`video_hyperframes`, a switch on the Video editing tab, off by default, so
+  the Cut Room unless they turn it on); the turn's state names the one that
+  applies.
+
 Additions to the API and the events:
 
 ```text
+GET    /v1/me                              also {name, settings: {id: value}}: every setting of the catalog
+                                           with the value that applies, the person's own or its default
+PATCH  /v1/me                              also {name?, settings?: {id: value | null}}: `null` puts a setting
+                                           back on its default; 400 for an id or a value the catalog does
+                                           not offer
 POST   /v1/projects                        {name?, discipline, format?, ...}: without a format, the project
                                            opens on the card that asks its kind
 ui               also {instant?, sets?: "format"}
