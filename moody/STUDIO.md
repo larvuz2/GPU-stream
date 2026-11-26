@@ -49,6 +49,10 @@ The agent's craft knowledge is in skills. `moody/skills/video` is how a video
 starts by its kind: the card each kind opens with, what the agent has to learn
 before it makes anything, and the workflow each kind starts from, the one above
 for a story and footage edited by code for social and educational video.
+`moody/skills/architecture` is how a design starts by its kind and the order
+its work goes in: the brief, the idea as generated pictures before any engine,
+the sizes in numbers, then the drawing (`moody/skills/cadcraft`), the model,
+the light, and the renders (`moody/skills/blender`), and the board.
 `moody/skills/movie` is the production
 before the edit: the opening questions (the story, the main characters, the art
 style), the library, prompting with references, animation tests, and the shots,
@@ -520,9 +524,12 @@ usage            {input_tokens, output_tokens, cost_usd, seconds, agents}   once
 
 A project of a discipline is of one of that discipline's formats, its kind:
 for Media, in this order, Film & TV, Social Media, Vertical Shows,
-Commercials, Music Videos, Education, and Other. The kind decides how the
+Commercials, Music Videos, Education, and Other; for Architecture, Building,
+Interior, and Product. The kind decides how the
 agent opens and which default workflow it follows, so it is asked first, by
-the conversation itself.
+the conversation itself. A discipline asks where the catalog gives it an
+`opening`, and the skill its `opening_skill` names (`video`, `architecture`)
+opens each kind with a card of its own.
 
 - **A project may start without a format.** `POST /v1/projects` takes
   `format` as optional. Where it is left out and the discipline has formats,
@@ -547,9 +554,17 @@ the conversation itself.
   `sections`). The project's state names the kind at the start of every turn
   (`Kind:`, and `not chosen yet` where the person wrote before choosing), and
   the turn that chose it reads that as a line after the person's words.
+- **An empty project offers words to start from.** A project made with its
+  kind already chosen opens on no card, and until its first message the page
+  offers a few lines to put in the composer: the discipline's `starters` in
+  the catalog (a script for a film, a plan for a building), else the
+  catalog's own.
 - **The agent opens each kind with a card of its own**, written by the
-  `video` skill for that kind: where the story comes from for Film & TV, the
-  track for a music video, the platform and the goal for social media. It
+  discipline's opening skill for that kind (`video`, `architecture`): where
+  the story comes from for Film & TV, the track for a music video, the
+  platform and the goal for social media, where the design starts for a
+  building, what there is of the room for an interior, how the thing is made
+  for a product. It
   gathers what the work needs in as few, as easy answers as it can, and keeps
   the project moving: every turn ends on a next step it has already prepared
   or on one decision made easy.

@@ -2,7 +2,7 @@
 name: sound
 title: Sound agent
 description: Makes sound for the person to compare by ear. Hand it one of: a few versions of a song or an instrumental from a brief (mood, genre, tempo, voice, length, and the approved lyrics); a few takes of a sound effect from a description; one line read by several voices, to choose a voice; or the lines of a narration or of reactions in voices already chosen. Give it the brief word for word, how many versions, the one way they should differ, and the tags to save them under. It generates through fal, saves each version as an entry of its own so a card can play each, and reports what it asked of each. It cannot hear them, picks none, and never imitates a real person's voice.
-disciplines: all
+disciplines: media, music, animation, games, experiences
 tools: library_list, library_upsert, generate_audio
 model: balanced
 ---

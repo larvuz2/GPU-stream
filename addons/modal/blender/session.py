@@ -79,13 +79,25 @@ def serve() -> float:
 
     An answer is written under another name and renamed, so its reader never
     sees half of one.
+
+    A sender that stops waiting takes its request back (`run-python.sh`), which
+    can happen before the request's turn or while it runs. Such a request is
+    skipped, or its answer removed, since nobody reads it. Neither may raise
+    here: Blender drops a timer whose function raises, and with it every later
+    request of the session and the scene `session.sh` keeps at its end.
     """
     for request in sorted(SPOOL.glob("*.py")):
-        answer = json.dumps(run(request.read_text()))
+        try:
+            source = request.read_text()
+        except FileNotFoundError:
+            continue
         partial = request.with_suffix(".partial")
-        partial.write_text(answer)
-        partial.rename(request.with_suffix(".json"))
-        request.unlink()
+        partial.write_text(json.dumps(run(source)))
+        answer = partial.rename(request.with_suffix(".json"))
+        try:
+            request.unlink()
+        except FileNotFoundError:
+            answer.unlink(missing_ok=True)
     return POLL_SECONDS
 
 

@@ -1467,10 +1467,17 @@ def test_every_card_any_skill_writes_out_passes_the_check():
                 raise AssertionError(
                     f"{path.name}, {example['title']!r}: {refused.problems}"
                 ) from refused
-    # Each kind of video opens on a card of its own, which waits for its answer
-    references = skills_directory() / "video" / "references"
-    for kind in PRODUCTS.disciplines["media"]["formats"]:
-        name = re.sub(r"[^a-z]+", "-", kind.lower()).strip("-")
-        examples = written.get(references / f"{name}.md")
-        assert examples, f"{kind} has no reference that writes out its opening card"
-        assert examples[0].get("waits") is True, kind
+    # Each kind of a discipline that asks its kind opens on a card of its own, which waits for its answer
+    asking = [
+        discipline
+        for discipline in PRODUCTS.disciplines.values()
+        if discipline.get("opening_skill")
+    ]
+    assert [discipline["id"] for discipline in asking] == ["media", "architecture"]
+    for discipline in asking:
+        references = skills_directory() / discipline["opening_skill"] / "references"
+        for kind in discipline["formats"]:
+            name = re.sub(r"[^a-z]+", "-", kind.lower()).strip("-")
+            examples = written.get(references / f"{name}.md")
+            assert examples, f"{kind} has no reference that writes out its opening card"
+            assert examples[0].get("waits") is True, kind

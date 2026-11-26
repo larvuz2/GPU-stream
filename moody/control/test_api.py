@@ -1519,7 +1519,7 @@ def test_a_project_made_without_its_kind_opens_on_the_card_that_asks_it_and_lock
 
 def test_every_discipline_that_asks_its_kind_has_a_card_the_page_renders_and_a_line_for_each_kind():
     asking = [discipline for discipline in CATALOG.disciplines.values() if discipline.get("opening")]
-    assert [discipline["id"] for discipline in asking] == ["media"]
+    assert [discipline["id"] for discipline in asking] == ["media", "architecture"]
     sessions = Sessions(config(), CATALOG, FakeStore(), FakeLauncher(), InlineJobs())
     for discipline in asking:
         card = sessions.opening_card(discipline)
@@ -3914,6 +3914,10 @@ def test_the_system_prompt_carries_no_skill_and_says_how_the_agent_works_with_en
     opened = " ".join(system_prompt(CATALOG, project, frozenset({"cpu"}), ["studio", "video"]).split())
     assert opened.count("open the `video` skill and show that kind's opening card from it, in place of questions in words") == 1
     assert "opening card" not in system_prompt(CATALOG, {**project, "discipline": "music"}, frozenset({"cpu"}), ["studio", "video"])
+    building = {**project, "discipline": "architecture", "format": "Building"}
+    designed = " ".join(system_prompt(CATALOG, building, frozenset({"cpu"}), ["studio", "architecture"]).split())
+    assert designed.count("open the `architecture` skill and show that kind's opening card from it") == 1
+    assert "Its kinds: Building, Interior, Product" in designed
 
 
 def test_subagents_are_read_from_files_offered_by_discipline_and_given_their_tools_skills_and_model(studio, tmp_path):
@@ -4271,6 +4275,20 @@ def test_the_real_definitions_offer_a_film_its_skills_its_subagents_and_an_agent
     film = {agent.name: agent for agent in agents_for(agents, derived, offered["media"], CATALOG, "media")}
     assert {"research", "story", "art-direction", "character-design", "production-design", "librarian", "animation", "review"} <= set(film)
     assert film["filmcraft"].title == "FilmCraft agent" and film["filmcraft"].skills == ("filmcraft",)
+    # A subagent is offered where its work exists: a design is offered no story and no sound
+    design_agents = {agent.name for agent in agents_for(agents, derived, skills_for(skills, CATALOG, "architecture"), CATALOG, "architecture")}
+    assert {"research", "art-direction", "production-design", "librarian", "review", "blender", "cadcraft"} <= design_agents
+    assert not design_agents & {"story", "sound", "character-design"}
+    # A design starts from its own skill, read by Architecture alone, which names only tools the agent has
+    design = {discipline: {skill.name for skill in skills_for(skills, CATALOG, discipline)} for discipline in CATALOG.disciplines}
+    assert [discipline for discipline, chosen in design.items() if "architecture" in chosen] == ["architecture"]
+    assert {"cadcraft", "photocraft", "unreal", "studio", "cards"} <= design["architecture"], "the skills its stages send the agent to"
+    guide = next(skill for skill in skills if skill.name == "architecture")
+    for kind, first in CATALOG.disciplines["architecture"]["kinds"].items():
+        assert {"Concepts", "Materials", "Views"} <= set(first["sections"]), kind
+        assert all(section in guide.body for section in first["sections"]), f"{kind} starts with a section the skill files nothing under"
+    called = set(re.findall(r"`((?:engine|library|generate|github|set|update|show|ask)_[a-z_]+|preview)`", guide.body))
+    assert {"show_ui", "generate_image", "library_upsert", "engine_start", "preview"} <= called and called <= set(TOOL_NAMES), called - set(TOOL_NAMES)
     for engine, title in (("cutroom", "Cut Room agent"), ("hyperframes", "HyperFrames agent")):
         assert [discipline for discipline, chosen in names.items() if engine in chosen] == ["media"], f"{engine} is a skill of video alone"
         assert (film[engine].title, film[engine].skills) == (title, (engine,)), "and its operator reads it"
@@ -4280,7 +4298,23 @@ def test_the_real_definitions_offer_a_film_its_skills_its_subagents_and_an_agent
         "asking the person and running engines stay with the agent itself"
     game = {agent.name: agent for agent in agents_for(agents, derived, offered["games"], CATALOG, "games")}
     assert {"unreal_projects", "unreal_assets", "unreal_open"} <= set(game["unreal"].tools), "the Unreal skill gives its operator its own tools"
-    assert game["blender"].title == "Blender agent" and game["blender"].skills == (), "an engine without a skill still has an operator"
+    assert game["blender"].title == "Blender agent" and game["blender"].skills == ("blender",), "Blender's operator reads the Blender skill"
+    assert film["nuke"].title == "Nuke agent" and film["nuke"].skills == (), "an engine without a skill still has an operator"
+
+
+def test_the_blender_skill_is_read_where_blender_is_an_engine_and_names_only_tools_the_agent_has():
+    skills = read_skills(skills_directory())
+    chosen = {discipline: [skill.name for skill in skills_for(skills, CATALOG, discipline)] for discipline in CATALOG.disciplines}
+    with_blender = [discipline for discipline, entry in CATALOG.disciplines.items() if "blender" in entry["engines"]]
+    assert with_blender and [discipline for discipline, names in chosen.items() if "blender" in names] == with_blender
+    blender = next(skill for skill in skills if skill.name == "blender")
+    references = sorted((blender.directory / "references").glob("*.md"))
+    linked = set(re.findall(r"\]\((references/[a-z-]+\.md)\)", blender.body))
+    assert linked == {f"references/{path.name}" for path in references}, "every reference is one the body sends the agent to"
+    text = "\n".join([blender.body, *(path.read_text() for path in references)])
+    named = set(re.findall(r"`((?:engine|unreal|github|library|generate)_[a-z_]+|ask_user|update_plan|show_ui|preview)[`(]", text))
+    assert {"engine_start", "engine_exec", "engine_files", "engine_send", "engine_import", "engine_show", "engine_stop", "preview"} <= named
+    assert named <= set(TOOL_NAMES), f"the skill names tools the agent does not have: {named - set(TOOL_NAMES)}"
 
 
 def test_the_environment_lists_what_a_projects_agent_can_use(studio):
