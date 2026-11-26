@@ -230,6 +230,11 @@ export interface Setting {
   options?: SettingOption[];
   /** The value that applies until the person changes it. */
   default: boolean | string;
+  /**
+   * For a setting that chooses between engines: the app each value stands for, a toggle's under
+   * `on` and `off` and a choice's under its options' values ({@link settingApp}).
+   */
+  apps?: Record<string, string>;
 }
 
 /** The shape of `catalog.json`. */
@@ -289,6 +294,19 @@ export const IDLE_SHUTDOWN_MINUTES = 10;
  */
 export function isAvailable(app: CatalogApp): boolean {
   return app.status === 'available';
+}
+
+/**
+ * The app a value of a setting stands for.
+ *
+ * @param setting The catalog's setting.
+ * @param value One of its values.
+ * @returns The app's identifier, or `undefined` where the setting chooses between no apps or names
+ *   none for the value.
+ */
+export function settingApp(setting: Setting, value: boolean | string): string | undefined {
+  const key = setting.kind === 'toggle' ? (value === true ? 'on' : 'off') : String(value);
+  return setting.apps !== undefined && Object.hasOwn(setting.apps, key) ? setting.apps[key] : undefined;
 }
 
 /**

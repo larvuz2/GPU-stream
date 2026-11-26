@@ -606,8 +606,12 @@ the conversation itself.
   person changed (`profiles.settings`) and refuses an id or a value the
   catalog does not offer, so adding one is a catalog entry and the code that
   reads it. An entry is `{id, tab, label, help, kind: "toggle" | "choice",
-  options?: [{value, label}], default}`: a toggle is `true` or `false`, a
-  choice one of its options' `value`. A value kept from before the catalog
+  options?: [{value, label}], default, apps?}`: a toggle is `true` or `false`,
+  a choice one of its options' `value`. A setting that chooses between
+  engines names the app each value stands for in `apps` (a toggle's under
+  `on` and `off`, a choice's under its options' values): the agent is told of
+  the one that applies, and the form that starts an engine by hand offers
+  only that one, so the choice is made in Settings and nowhere else. A value kept from before the catalog
   stopped offering it does not apply, and the default does. The name
   (`profiles.name`) is at most eighty characters, and `null` clears it. A
   change that is refused in any part changes nothing.
@@ -623,10 +627,11 @@ the conversation itself.
   reaches for when a video is edited by code is the person's setting
   (`video_hyperframes`, a switch on the Video editing tab, off by default, so
   the Cut Room unless they turn it on); the turn's state names the one that
-  applies, as `A video edited by code is made in: <App> (app `<id>`)`:
-  `hyperframes` where the person switched it on and the catalog has that app
-  as one that can be started, `cutroom` otherwise, and no line where the
-  catalog has neither to start.
+  applies, as `A video edited by code is made in: <App> (app `<id>`)`: the
+  app the person's value stands for in the setting's `apps` where the catalog
+  has it as one that can be started (`hyperframes`, switched on), the app the
+  default stands for otherwise (`cutroom`), and no line where the catalog has
+  neither to start.
 
 Additions to the API and the events:
 

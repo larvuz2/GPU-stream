@@ -220,6 +220,7 @@ from service import (
     clean_sections,
     normal_tag,
     safe_name,
+    setting_app,
 )
 from transcript import Transcript
 import unreal
@@ -234,10 +235,9 @@ READ_LIMIT = 100000
 IMAGE_SECONDS = 300
 VIDEO_SECONDS = 1200
 AUDIO_WAIT_SECONDS = 600
-# The setting by which a person chooses the engine their videos are edited by code in, and the two engines: the one
-# it switches on, then the one used otherwise
+# The setting by which a person chooses the engine their videos are edited by code in; the catalog's entry names the
+# app each of its values stands for (`apps`)
 CODE_EDITOR_SETTING = "video_hyperframes"
-CODE_EDITORS = ("hyperframes", "cutroom")
 # The longest label a preview's version carries
 VERSION_CHARACTERS = 40
 # What a generated sound is called, by its kind, where the page and the model are told how many were made
@@ -1531,17 +1531,20 @@ class Agent:
     def code_editor(self, settings: dict[str, Any]) -> str | None:
         """The engine a video is edited by code in for this person, as an app's id, or nothing where the catalog has none.
 
-        The one their setting switches on (`CODE_EDITOR_SETTING`) where they
-        switched it on and that app can be started, and the other otherwise.
-        Either is an app of the catalog or it is not named: a turn is told of
-        no engine it could not start.
+        The catalog's setting (`CODE_EDITOR_SETTING`) names the app each of
+        its values stands for (`setting_app`). The one the person's value
+        stands for where that app can be started, and the one the setting's
+        default stands for otherwise. Either is an app of the catalog or it is
+        not named: a turn is told of no engine it could not start.
         """
-        apps = self.sessions.catalog.apps
-        startable = [app for app in CODE_EDITORS if apps.get(app, {}).get("status") in STARTABLE]
-        chosen, default = CODE_EDITORS
-        if settings.get(CODE_EDITOR_SETTING) and chosen in startable:
-            return chosen
-        return default if default in startable else None
+        catalog = self.sessions.catalog
+        setting = catalog.settings.get(CODE_EDITOR_SETTING)
+        if setting is None:
+            return None
+        chosen = setting_app(setting, settings.get(CODE_EDITOR_SETTING, setting["default"]))
+        default = setting_app(setting, setting["default"])
+        startable = [app for app in (chosen, default) if app and catalog.apps.get(app, {}).get("status") in STARTABLE]
+        return startable[0] if startable else None
 
     def unreal_state(
         self, turn: Turn, engines: list[dict[str, Any]], history: Callable[[], list[dict[str, Any]]]

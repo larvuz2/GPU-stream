@@ -943,7 +943,11 @@
       "label": "Use HyperFrames for videos edited by code",
       "help": "The agent writes such a video as HTML and animation, and HyperFrames renders it. Off, it cuts in the Cut Room.",
       "kind": "toggle",
-      "default": false
+      "default": false,
+      "apps": {
+        "on": "hyperframes",
+        "off": "cutroom"
+      }
     }
   ],
   "regions": [

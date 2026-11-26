@@ -1024,8 +1024,9 @@ def test_settings_are_the_persons_each_one_of_the_catalogs_and_on_its_default_un
     (entry,) = CATALOG.data["settings"]
     assert entry == {
         "id": "video_hyperframes", "tab": "Video editing", "label": "Use HyperFrames for videos edited by code", "help": entry["help"],
-        "kind": "toggle", "default": False,
+        "kind": "toggle", "default": False, "apps": {"on": "hyperframes", "off": "cutroom"},
     } and "Cut Room" in entry["help"] and len(entry["help"]) < 140
+    assert set(entry["apps"].values()) <= set(CATALOG.apps), "the setting names the engine each of its values stands for"
     assert (mine()["name"], mine()["settings"]) == ("", {"video_hyperframes": False}), "everyone sees it, and it is off"
 
     changed = change(name="  Mara   Films ", settings={"video_hyperframes": True})

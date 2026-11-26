@@ -15,7 +15,9 @@
  * runs under its name, and its line counts the time since it was asked for ("Waiting for a
  * machine", then "Starting"), so nobody mistakes a machine being built for one that is ready,
  * whose light is lime. The start form offers the
- * discipline's engines first, then every other app; only an available app, a team one, which the
+ * discipline's engines first, then every other app, less the engines the person's settings set
+ * aside (`appsSetAside`: of two engines Settings chooses between, the one not chosen); only an
+ * available app, a team one, which the
  * control plane admits for the team's accounts alone, or one with a part on the person's own
  * license can be started, and the rest show their status. A tier the control plane does not list
  * as open is shown but cannot be chosen. Unreal Engine, whose editor runs on the person's Epic
@@ -92,7 +94,7 @@ import { GitHubMark, Menu } from './Menu';
 import { describeEndReason, describeError } from './messages';
 import { ErrorNotice, Notice } from './Notice';
 import { RepoList } from './RepoList';
-import { appStatusLabel, canStart } from './present';
+import { appStatusLabel, appsSetAside, canStart } from './present';
 import type { Epic, GitHub } from './useAccount';
 
 /** Props of {@link EngineSection}. */
@@ -639,15 +641,23 @@ function StartForm({ project, health, me, epic, onStart, onAddCredits }: StartFo
   const appId = useId();
   const tierId = useId();
   const discipline = findDiscipline(project.discipline);
+  const settings = me?.settings;
   const [first, rest] = useMemo(() => {
-    const own = (discipline?.engines ?? []).map(findApp).filter((app) => app !== undefined);
-    return [own, catalog.apps.filter((app) => !own.includes(app))];
-  }, [discipline]);
-  const [pickedApp, setPickedApp] = useState(() => [...first, ...rest].find(canStart)?.id ?? '');
+    const aside = appsSetAside(settings);
+    const own = (discipline?.engines ?? [])
+      .map(findApp)
+      .filter((app) => app !== undefined)
+      .filter((app) => !aside.has(app.id));
+    return [own, catalog.apps.filter((app) => !aside.has(app.id) && !own.includes(app))];
+  }, [discipline, settings]);
+  const [pickedApp, setPickedApp] = useState<string | null>(null);
   const openTiers = health?.tiers ?? null;
   const isOpen = (tier: Tier): boolean => openTiers === null || openTiers.includes(tier.id);
   const [pickedTier, setPickedTier] = useState<string | null>(null);
-  const app = findApp(pickedApp);
+  // The app picked while it is still offered, else the first that can be started: a change in Settings can take the
+  // picked one out of the list
+  const offered = [...first, ...rest];
+  const app = offered.find((candidate) => candidate.id === pickedApp) ?? offered.find(canStart);
   const usable = (candidate: Tier): boolean => isOpen(candidate) && (app === undefined || tierFits(candidate, app));
   const tier =
     catalog.tiers.find((candidate) => candidate.id === pickedTier && usable(candidate)) ??
@@ -702,7 +712,7 @@ function StartForm({ project, health, me, epic, onStart, onAddCredits }: StartFo
         <select
           id={appId}
           className="field field-sm"
-          value={pickedApp}
+          value={app?.id ?? ''}
           onChange={(event) => {
             setPickedApp(event.target.value);
           }}

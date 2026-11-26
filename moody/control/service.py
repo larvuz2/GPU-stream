@@ -680,6 +680,18 @@ def with_query(url: str, **params: str) -> str:
     return urlunsplit(parts._replace(query=urlencode(query)))
 
 
+def setting_app(setting: dict[str, Any], value: Any) -> str | None:
+    """The app a value of a catalog setting stands for, or nothing where the setting chooses between no apps.
+
+    A setting that chooses between engines names them in `apps`: a toggle's
+    under `on` and `off`, a choice's under its options' values. The agent is
+    told of the one that applies, and the page offers a person only that one
+    to start, so the choice is made in Settings and nowhere else.
+    """
+    key = ("on" if value else "off") if setting["kind"] == "toggle" else value
+    return setting.get("apps", {}).get(key)
+
+
 def default_sections(discipline: dict[str, Any], project_format: str) -> list[str]:
     """The library sections a project of a discipline and a kind starts with, as the catalog gives them.
 
