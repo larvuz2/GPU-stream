@@ -44,6 +44,11 @@
       "label": "Satisfied"
     }
   ],
+  "starters": [
+    "I have something to start from. Here it is:\n\n",
+    "Let\u2019s make it together. The idea is ",
+    "Surprise me with three directions to choose from."
+  ],
   "disciplines": [
     {
       "id": "media",
@@ -97,6 +102,11 @@
         "Characters",
         "Environments",
         "Props"
+      ],
+      "starters": [
+        "I have a script to share. Here it is:\n\n",
+        "Let\u2019s write it together. The idea is ",
+        "Surprise me with three directions to choose from."
       ],
       "blurb": "Films, series, ads, and social video, from script to final cut.",
       "engines": [
@@ -208,6 +218,50 @@
         "Building",
         "Interior",
         "Product"
+      ],
+      "opening": "What are we designing?",
+      "opening_skill": "architecture",
+      "kinds": {
+        "Building": {
+          "note": "A house, a studio, a pavilion: from the site to the render.",
+          "icon": "building",
+          "sections": [
+            "Site",
+            "Spaces",
+            "Materials",
+            "Views"
+          ]
+        },
+        "Interior": {
+          "note": "A room or a fit-out: the layout, the materials, the light.",
+          "icon": "interior",
+          "sections": [
+            "Room",
+            "Furniture",
+            "Materials",
+            "Views"
+          ]
+        },
+        "Product": {
+          "note": "Furniture, an object, a part: drawn, modeled, ready to make.",
+          "icon": "product",
+          "sections": [
+            "Concepts",
+            "Parts",
+            "Materials",
+            "Views"
+          ]
+        }
+      },
+      "sections": [
+        "References",
+        "Materials",
+        "Views"
+      ],
+      "starters": [
+        "I have a plan, a sketch, or photos to start from.",
+        "Let\u2019s design it together. The brief is ",
+        "Show me three directions to choose from."
       ],
       "blurb": "Buildings, interiors, and industrial design.",
       "engines": [
@@ -1083,6 +1137,48 @@
       "000000000000",
       "000000000000",
       "000000000000"
+    ],
+    "building": [
+      "000001100000",
+      "000011110000",
+      "000110011000",
+      "001100001100",
+      "011000000110",
+      "111111111111",
+      "010000000010",
+      "010110000010",
+      "010110011010",
+      "010000011010",
+      "010000011010",
+      "011111111110"
+    ],
+    "interior": [
+      "000000000000",
+      "001111111100",
+      "001111111100",
+      "001111111100",
+      "110111111011",
+      "110111111011",
+      "111111111111",
+      "111111111111",
+      "111111111111",
+      "011000000110",
+      "011000000110",
+      "000000000000"
+    ],
+    "product": [
+      "000001100000",
+      "000110011000",
+      "011000000110",
+      "110000000011",
+      "101100001101",
+      "100011110001",
+      "100001100001",
+      "100001100001",
+      "100001100001",
+      "011001100110",
+      "000111111000",
+      "000001100000"
     ]
   }
 }
