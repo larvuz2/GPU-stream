@@ -105,6 +105,79 @@ layer.current {"name": "A-WALL"}
 
 A part at 1:1 needs only the linetypes and layers; ISO-25 is already current.
 
+## Starting from a drawing the person brought
+
+Someone who already has a layout starts from it. Open theirs, read it back to them, and go on
+from there; a blank sheet would throw away their work. Every command below was run as written.
+
+1. **Where the file is.** A file given on a card or added in the Library panel is a library
+   entry: the card's answer carries its tag, and `library_list` lists every entry. Start the
+   engine and copy the entry into the project's folder:
+
+   ```text
+   engine_start("cadcraft", "cpu")
+   engine_import(engine_id, ["@plan"])     → {"folder": "…/library", "files": ["…/library/plan/01-house.dxf"]}
+   ```
+
+   An entry's files are numbered from the oldest, so the one just added has the highest number.
+   Commands take the path from the project's folder on: `library/plan/01-house.dxf`.
+
+2. **What kind of file it is decides how it comes in.**
+
+   | The file | How | What you get |
+   |---|---|---|
+   | DXF or DWG | `open {"path": "library/plan/01-house.dxf"}` → `{"entities", "index", "warnings"}` | The drawing as drawn: its layers, blocks, dimensions, and sheets. Read `warnings` |
+   | SVG | `open`, the same way | Outlines only: every shape a polyline on layer `0`, text as outlines, in the file's own units and not at real size. Bring it to size in step 4 |
+   | PDF | `open` refuses it (`unsupported file type`). Make a picture of its page with `engine_exec`, then treat it as a picture: `cd <the project's folder> && pdftoppm -png -r 100 -f 1 -l 1 -singlefile library/plan/01-plan.pdf library/plan/01-plan` writes `library/plan/01-plan.png` | A picture to draw over (step 5) |
+   | PNG or JPEG: a scan, a photo of a sketch, a screenshot | `imageattach`, into a saved drawing (step 5) | A picture to draw over |
+
+3. **Keep theirs, work on a copy.** Right after `open`, `saveas {"path": "house.dxf"}`: the open
+   drawing is now the working file in the project's folder, and the file in `library/` stays as
+   they gave it. A DWG is saved on as DXF the same way, the format CADCraft keeps in full.
+
+4. **Read it before you touch it**, and tell the person in three lines what you found.
+   - `drawing.inspect {"entities": false}`: counts by type, `extents`, the layers, and what
+     reading the file left out (`skipped`, `readNotes`).
+   - `getvar {"name": "INSUNITS"}`: 4 is millimeters, 6 meters, 1 inches.
+   - `usage {"type": "layers"}`: what each layer holds. Their layer names stay theirs; do not
+     rename them to yours unless they ask.
+   - `shapes {}`: which outlines are closed, with their areas. Rooms and walls that are not
+     closed give no area and no solid later.
+   - **Check one size with the person.** Ask for one they know ("How long is the wall with the
+     window?"), measure it (`dist {"p1": [0, 0], "p2": [4.6, 0]}` → `distance`), and compare. A
+     match settles the units. Off by 1000, 25.4, or 304.8, the drawing is in other units than
+     you work in: bring it across, then measure again.
+
+     ```text
+     select {"window": [[-1, -1], [10, 10]]}            a window around the extents → {"handles", "selected"}
+     scale {"base": [0, 0], "factor": 1000}             acts on the selection
+     setvar {"name": "INSUNITS", "value": 4}
+     dist {"p1": [0, 0], "p2": [4600, 0]}               → 4600
+     ```
+
+     As run, a 4.6 by 4.0 rectangle drawn in meters became 4600 by 4000, and `shapes` gave its
+     area as 18,400,000.
+5. **A picture to draw over** goes under a saved drawing, on a layer of its own that neither
+   plots nor moves. An image's path is relative to the drawing's folder, so `new` and `saveas`
+   first where there is no drawing yet.
+
+   ```text
+   layer.new {"name": "X-TRACE", "color": 8}
+   imageattach {"path": "library/plan/01-sketch.png", "at": [0, 0], "width": 4600}    → {"handle", "pixels": [2400, 1600], "size": [4600, 3066.7]}
+   properties.set {"handles": ["100"], "layer": "X-TRACE"}
+   layer.set {"name": "X-TRACE", "plot": false, "locked": true}
+   ```
+
+   `width` is the real width the whole picture covers, in drawing units, and one known size
+   gives it: a wall known to be 4600 long that spans six tenths of the picture's width makes
+   the width 4600 / 0.6. `library_look` shows you the picture to judge that share by. It is an
+   estimate: draw the plan from the sizes the person states, with the picture as the guide to
+   what sits where. A length traced off a picture is never a dimension.
+6. **Show it and agree where to go.** Render what you opened (`ui.render`, then `preview`) with
+   what you read: its overall size, its rooms and their areas, what is missing or did not come
+   through. Then one question: develop it, check it, draw it up on sheets, or see it in three
+   dimensions. From here the stages of the skill apply as for a drawing you started.
+
 ## The brief, as you save it
 
 ```markdown

@@ -662,9 +662,16 @@ def normal_tag(value: str | None) -> str | None:
 
 
 def media_kind(content_type: str) -> str:
-    """What a file is to the library, by its content type."""
-    kind = content_type.split("/", 1)[0]
-    return kind if kind in ("image", "video", "audio") else "file"
+    """What a file is to the library, by its content type: a picture, a video, or a sound, and a file otherwise.
+
+    A vendor's own format is a file whatever family its type is registered
+    under. A DXF drawing is `image/vnd.dxf`, a DWG `image/vnd.dwg`, and a
+    Photoshop document `image/vnd.adobe.photoshop`, and none of them is a
+    picture a page can show, the agent can look at, or an image model can take
+    as a reference: each is opened by the engine that reads it.
+    """
+    kind, _, subtype = content_type.partition("/")
+    return kind if kind in ("image", "video", "audio") and not subtype.startswith("vnd.") else "file"
 
 
 def safe_name(name: str) -> str:

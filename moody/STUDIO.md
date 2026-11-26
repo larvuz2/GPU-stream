@@ -247,7 +247,11 @@ UnrealProject  {path, name, engine_association, version: "same" | "older" | "new
           lfs: true | false | string | null, size_bytes: number | null}: a .uproject
           in the engine's workspace, `opens` saying how this engine opens it
 Asset    {id, section, name, tag, description, metadata, created_at, updated_at,
-          media: [{kind: "image" | "video" | "audio" | "file", url, name}], thumbnail_url}
+          media: [{kind: "image" | "video" | "audio" | "file", url, name}], thumbnail_url}:
+          a file's kind is its content type's family, and `file` for everything else and
+          for a vendor's own format (a DXF or DWG drawing, which browsers send as
+          `image/vnd.…`): a drawing is opened by the engine that reads it, never shown as
+          a picture
 Event    {id, turn_id, kind, data, created_at}, kind one of
            user_message  {text}
            text          {text}            a piece of the agent's reply, in order
@@ -559,6 +563,11 @@ opens each kind with a card of its own.
   offers a few lines to put in the composer: the discipline's `starters` in
   the catalog (a script for a film, a plan for a building), else the
   catalog's own.
+- **A person who already has something starts from it.** Each kind's opening offers that way
+  in (a plan for a building or a room, a drawing for a product, a script, a track, footage),
+  the card that asks takes the file, and the agent starts from the file instead of proposing
+  its own. A file of any type goes into the library; the agent copies it to the engine that
+  reads it (`engine_import`) and works on a copy, so what the person gave stays as it was.
 - **The agent opens each kind with a card of its own**, written by the
   discipline's opening skill for that kind (`video`, `architecture`): where
   the story comes from for Film & TV, the track for a music video, the

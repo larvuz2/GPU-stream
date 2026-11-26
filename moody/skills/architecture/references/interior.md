@@ -37,7 +37,7 @@ panel.
 
 | The answer | What you have, and what you still need |
 |---|---|
-| `plan` | The shell, once one dimension on it is confirmed. A DXF or a DWG is opened in CADCraft at the drawing stage; a scan or a sketch is drawn over there. Ask which way is north and where the door is, if the plan does not say. |
+| `plan` | The shell, once one dimension on it is confirmed. Start from it: a DXF or a DWG is opened in CADCraft as drawn, and a PDF, a scan, or a photo of a sketch goes under a new drawing to draw over (the `cadcraft` skill, "Starting from a drawing the person brought"). Where the plan is already their layout and not only the empty room, read it back and develop it instead of proposing one. Ask which way is north and where the door is, if the plan does not say. |
 | `photos` | The feel of the room and where its windows are (`library_look` shows you a picture), but no sizes. Ask for the measurements on the card below. |
 | `measures` | Go to the card below. |
 | `nothing` | A room you propose: ask what it is for, and open the card below on a size that fits the use. |

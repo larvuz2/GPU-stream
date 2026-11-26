@@ -1401,19 +1401,22 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   }
 
   /**
-   * A media file's kind, by its type.
+   * A media file's kind, by its type, as the control plane tells an upload's (`media_kind` in
+   * `service.py`): a vendor's own format is a file whatever family its type is registered under,
+   * so a DXF drawing, which a browser reports as `image/vnd.dxf`, is not shown as a picture.
    *
    * @param file The file.
    * @returns Its kind.
    */
   function kindOf(file: File): Media['kind'] {
-    if (file.type.startsWith('image/')) {
-      return 'image';
+    const [family, subtype = ''] = file.type.split('/');
+    if (subtype.startsWith('vnd.')) {
+      return 'file';
     }
-    if (file.type.startsWith('video/')) {
-      return 'video';
+    if (family === 'image' || family === 'video') {
+      return family;
     }
-    return file.type.startsWith('audio/') ? 'audio' : 'file';
+    return family === 'audio' ? 'audio' : 'file';
   }
 
   /**
