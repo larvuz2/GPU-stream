@@ -4275,6 +4275,10 @@ def test_the_real_definitions_offer_a_film_its_skills_its_subagents_and_an_agent
     film = {agent.name: agent for agent in agents_for(agents, derived, offered["media"], CATALOG, "media")}
     assert {"research", "story", "art-direction", "character-design", "production-design", "librarian", "animation", "review"} <= set(film)
     assert film["filmcraft"].title == "FilmCraft agent" and film["filmcraft"].skills == ("filmcraft",)
+    # A subagent is offered where its work exists: a design is offered no story and no sound
+    design_agents = {agent.name for agent in agents_for(agents, derived, skills_for(skills, CATALOG, "architecture"), CATALOG, "architecture")}
+    assert {"research", "art-direction", "production-design", "librarian", "review", "blender", "cadcraft"} <= design_agents
+    assert not design_agents & {"story", "sound", "character-design"}
     # A design starts from its own skill, read by Architecture alone, which names only tools the agent has
     design = {discipline: {skill.name for skill in skills_for(skills, CATALOG, discipline)} for discipline in CATALOG.disciplines}
     assert [discipline for discipline, chosen in design.items() if "architecture" in chosen] == ["architecture"]
