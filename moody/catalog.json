@@ -227,7 +227,7 @@
           "icon": "building",
           "sections": [
             "Site",
-            "Spaces",
+            "Concepts",
             "Materials",
             "Views"
           ]
@@ -237,7 +237,7 @@
           "icon": "interior",
           "sections": [
             "Room",
-            "Furniture",
+            "Concepts",
             "Materials",
             "Views"
           ]
@@ -247,14 +247,13 @@
           "icon": "product",
           "sections": [
             "Concepts",
-            "Parts",
             "Materials",
             "Views"
           ]
         }
       },
       "sections": [
-        "References",
+        "Concepts",
         "Materials",
         "Views"
       ],

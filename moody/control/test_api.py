@@ -4284,6 +4284,9 @@ def test_the_real_definitions_offer_a_film_its_skills_its_subagents_and_an_agent
     assert [discipline for discipline, chosen in design.items() if "architecture" in chosen] == ["architecture"]
     assert {"cadcraft", "photocraft", "unreal", "studio", "cards"} <= design["architecture"], "the skills its stages send the agent to"
     guide = next(skill for skill in skills if skill.name == "architecture")
+    for kind, first in CATALOG.disciplines["architecture"]["kinds"].items():
+        assert {"Concepts", "Materials", "Views"} <= set(first["sections"]), kind
+        assert all(section in guide.body for section in first["sections"]), f"{kind} starts with a section the skill files nothing under"
     called = set(re.findall(r"`((?:engine|library|generate|github|set|update|show|ask)_[a-z_]+|preview)`", guide.body))
     assert {"show_ui", "generate_image", "library_upsert", "engine_start", "preview"} <= called and called <= set(TOOL_NAMES), called - set(TOOL_NAMES)
     for engine, title in (("cutroom", "Cut Room agent"), ("hyperframes", "HyperFrames agent")):
