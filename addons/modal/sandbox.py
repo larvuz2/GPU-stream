@@ -100,6 +100,26 @@ CRAFT_RELEASES = {
     "vectorcraft": (VECTORCRAFT_VERSION, VECTORCRAFT_SHA256),
     "lightcraft": (LIGHTCRAFT_VERSION, LIGHTCRAFT_SHA256),
 }
+# The Cut Room's parts beside the base image's FFmpeg (`cutroom_image`, `cutroom/install.sh`). Its Python
+# packages are pinned, each wheel by its hash, in `cutroom/python.lock`.
+# Inter's release archive of github.com/rsms/inter and its SHA-256; SIL Open Font License 1.1
+CUTROOM_INTER_VERSION = "4.1"
+CUTROOM_INTER_SHA256 = "9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e"
+# Archivo Black as github.com/google/fonts has it at one commit (ofl/archivoblack), with the SHA-256 of
+# ArchivoBlack-Regular.ttf and of the license beside it; SIL Open Font License 1.1
+CUTROOM_ARCHIVO_BLACK_COMMIT = "6ebe737e44fd64ee736bbc6feed6136a6dbfd222"
+CUTROOM_ARCHIVO_BLACK_SHA256 = "dd9a89a019b4849f66ab75455fe7bdf931311042cbb0f0f97acc061539703180"
+CUTROOM_ARCHIVO_BLACK_LICENSE_SHA256 = "3173acd82f8c6159b5b1037b539fcbd4edff68e65c2ea8b9412b5a5ca97b08ff"
+# The speech models the scripts load, huggingface.co/Systran/faster-whisper-<name>: the revision and the
+# SHA-256 of its weights (model.bin); MIT
+CUTROOM_WHISPER = {
+    "small": ("536b0662742c02347bc0e980a01041f333bce120", "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671"),
+    "medium": ("08e178d48790749d25932bbc082711ddcfdfbc4f", "9b45e1009dcc4ab601eff815b61d80e60ce3fd8c74c1a14f4a282258286b51ae"),
+}
+# The face detector the webcam finder runs, huggingface.co/opencv/face_detection_yunet: the revision and the
+# SHA-256 of face_detection_yunet_2023mar.onnx; MIT
+CUTROOM_YUNET_REVISION = "3cc26e7f1014a5ee5d74a42acee58bafc9d0a310"
+CUTROOM_YUNET_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
 # The Unreal session's GitHub client: Desktop Plus, a fork of GitHub Desktop kept current with it
 # that publishes Linux packages; its Debian package and the SHA-256 its GitHub release lists for it
 DESKTOP_PLUS_VERSION = "3.6.12.0"
@@ -138,6 +158,10 @@ VECTORCRAFT_READY_FILE = "/tmp/selkies-modal/vectorcraft-ready"
 
 # LightCraft's, loopback only as theirs are, and the port its own documentation uses
 LIGHTCRAFT_CONTROL_PORT = 7980
+
+# Where the Cut Room is installed in its image, and the log of its commands a session shows on its screen
+CUTROOM_ROOT = "/opt/cutroom"
+CUTROOM_LOG = "/tmp/selkies-modal/cutroom.log"
 
 # What the session is, whoever starts it. Modal terminates TLS and its connect
 # token guards the address, so Selkies serves plain HTTP with no login of its
@@ -241,6 +265,11 @@ APP_ENV = {
         # GPU, and on a GPU machine LightCraft's kernels fail to build on NVIDIA's OpenGL.
         "WGPU_BACKEND": "vulkan",
     },
+    "cutroom": {
+        "SELKIES_MODAL_APP": "cutroom",
+        # Where every `cutroom` command writes what it ran, which the session's screen shows (cutroom/autostart)
+        "CUTROOM_LOG": CUTROOM_LOG,
+    },
 }
 APPS = tuple(APP_ENV)
 
@@ -291,9 +320,12 @@ def session_image(app: str = "blender") -> modal.Image:
     control channel (`filmcraft/control.sh`, `soundcraft/control.sh`). Unreal's
     is the desktop its editor runs beside, without the editor
     (`unreal_desktop`); `unreal_image` is the same desktop with the editor.
+    The Cut Room's has no application at all (`cutroom_image`).
     """
     if app == "unreal":
         return with_session(unreal_desktop(modal.Image.from_registry(BASE_IMAGE)), app)
+    if app == "cutroom":
+        return with_session(cutroom_image(), app)
     if app in CRAFT_RELEASES:
         version, sha256 = CRAFT_RELEASES[app]
         image = (
@@ -359,6 +391,76 @@ def with_session(image: modal.Image, app: str) -> modal.Image:
         .add_local_file(HERE / "job.sh", "/usr/local/bin/selkies-modal-job", copy=True)
         .env({**SESSION_ENV, **APP_ENV[app]})
         .entrypoint([])
+    )
+
+
+def cutroom_image() -> modal.Image:
+    """The Cut Room's image: the base container with what editing video by code takes, and no application.
+
+    A Cut Room session is a machine an agent drives with shell commands, so
+    the image is its tools at fixed paths (`cutroom/install.sh` documents each
+    step):
+
+    - **FFmpeg** is the base image's own, pinned by the base's digest. The
+      build fails unless it has every filter and encoder the scripts call:
+      libass's `subtitles`, Rubber Band, `loudnorm`, and x264 among them.
+    - **Python.** A virtual environment at `CUTROOM_ROOT/venv` with the wheels
+      `cutroom/python.lock` names, each checked against its hash: faster-whisper,
+      NumPy, OpenCV, Pedalboard, Pillow, yt-dlp, and what the scripts import
+      beside them. The lock is compiled from `cutroom/python.in` for the base
+      image's Python.
+    - **Fonts.** Inter and Archivo Black, each from its upstream at a pinned
+      version and checksum, with the SIL Open Font License beside it.
+    - **Models.** The two Whisper conversions the scripts load and the face
+      detector, at pinned revisions and checksums, so a session fetches none.
+    - **The scripts,** `cutroom/scripts`, at `CUTROOM_ROOT/scripts`, each run
+      as `cutroom NAME` from any directory (`cutroom/run.sh`).
+
+    The session's screen is a terminal on the log of those commands
+    (`cutroom/autostart`). The layers are ordered by how often they change:
+    the tools (`cutroom_tools`), then the small files and the scripts, so a
+    changed script rebuilds a layer of kilobytes.
+    """
+    cutroom = HERE / "cutroom"
+    return (
+        cutroom_tools()
+        .add_local_file(HERE / "craft" / "project.sh", "/usr/local/bin/selkies-modal-project", copy=True)
+        .add_local_file(cutroom / "autostart", "/etc/xdg/openbox/autostart", copy=True)
+        .add_local_file(cutroom / "run.sh", "/usr/local/bin/cutroom", copy=True)
+        .add_local_dir(cutroom / "scripts", f"{CUTROOM_ROOT}/scripts", copy=True, ignore=["**/__pycache__"])
+    )
+
+
+def cutroom_fonts() -> str:
+    """The Dockerfile step that installs Inter and Archivo Black, pinned and checked (`cutroom/install.sh fonts`)."""
+    return (
+        f"RUN sh {SHARE}/cutroom/install.sh fonts {CUTROOM_INTER_VERSION} {CUTROOM_INTER_SHA256} "
+        f"{CUTROOM_ARCHIVO_BLACK_COMMIT} {CUTROOM_ARCHIVO_BLACK_SHA256} {CUTROOM_ARCHIVO_BLACK_LICENSE_SHA256}"
+    )
+
+
+def cutroom_tools() -> modal.Image:
+    """The base container with the Cut Room's packages, Python environment, fonts, and models: the heavy layers.
+
+    They change only when a pin moves, so they are an image of their own
+    under the scripts, and the last step proves them: it fails the build
+    unless FFmpeg has what the scripts call and every package and model
+    loads.
+    """
+    cutroom = HERE / "cutroom"
+    install = f"sh {SHARE}/cutroom/install.sh"
+    return (
+        modal.Image.from_registry(BASE_IMAGE)
+        .add_local_file(cutroom / "install.sh", f"{SHARE}/cutroom/install.sh", copy=True)
+        .dockerfile_commands(f"RUN selkies-privileged-files run {install} packages")
+        .add_local_file(cutroom / "python.lock", f"{SHARE}/cutroom/python.lock", copy=True)
+        .dockerfile_commands(
+            f"RUN {install} python {SHARE}/cutroom/python.lock",
+            cutroom_fonts(),
+            *(f"RUN {install} whisper {name} {revision} {sha256}" for name, (revision, sha256) in CUTROOM_WHISPER.items()),
+            f"RUN {install} yunet {CUTROOM_YUNET_REVISION} {CUTROOM_YUNET_SHA256}",
+            f"RUN {install} verify",
+        )
     )
 
 
