@@ -175,11 +175,11 @@ cd "$SELKIES_MODAL_WORKSPACE/${SELKIES_MODAL_PROJECT:-projects/default}" && blen
 The line it prints, here from the `t4` engine with `--device OPTIX --samples 128`:
 
 ```text
-RENDER {"file": "house.blend", "camera": "Exterior south-east", "engine": "CYCLES", "device": ["OPTIX: Tesla T4"], "samples": 128, "size": [1920, 1080], "frames": 1, "seconds": 10.6, "first": "previews/t4/exterior-final-optix.png", "brightness": {"mean": 0.602, "clipped": 0.0, "black": 0.0}, "gpu_peak": {"gpu_percent": 99, "gpu_mib": 1624}}
+RENDER {"file": "house.blend", "camera": "Exterior south-east", "engine": "CYCLES", "device": ["OPTIX: Tesla T4"], "samples": 128, "size": [1920, 1080], "frames": 1, "seconds": 11.2, "first": "previews/exterior-final.png", "brightness": {"mean": 0.602, "clipped": 0.0, "black": 0.0}, "gpu_peak": {"gpu_percent": 99, "gpu_mib": 892}}
 ```
 
 - `device` is what Cycles was set to use, by name. `gpu_peak` is what the graphics driver
-  reported while the picture rendered: 99 percent busy and 1.6 GB in use. That pair is the
+  reported while the picture rendered: 99 percent busy and 0.9 GB in use. That pair is the
   proof of where a render ran; report it with the time. A GPU render whose `gpu_percent` is 0
   ran somewhere else.
 - `brightness` is read from the written file: the `mean` of its pixels from 0 to 1, and the
@@ -203,6 +203,11 @@ RENDER {"file": "house.blend", "camera": "Exterior south-east", "engine": "CYCLE
   `CUDA`, and 114 s on that machine's own processor: without `--device`, a GPU engine renders
   on its CPU and you pay three times the price for the slow road. The script also denoises on
   the GPU.
+- **Blender's preferences remember machines.** They are kept in the workspace, and their device
+  list still named the `Tesla T4`, switched on, on a `cpu` engine started after the GPU one. A
+  script that trusted that list reported a GPU render that ran on the processor, with
+  `gpu_peak` at 0. So the script asks Cycles what is here now (`get_devices_for_type`), and you
+  read `gpu_peak`.
 - **Two `cpu` engines are not the same machine.** The same product draft took 24 s on one start
   and 15 s on another. Quote a final from a draft on the engine you have: four times the draft
   for full size, twice for 128 samples.
@@ -317,7 +322,7 @@ measured or a long render use `render.py`: it leaves the person's Blender free.
 (SKILL.md, recipe 3), say how long you expect it to take, and ask again:
 
 ```text
-selkies-modal-job status NAME                    NAME  running | done | failed (exit N)  started <time>  <command>
+selkies-modal-job status NAME                    NAME  running, then done  started <time>  <command>
 selkies-modal-job log NAME | grep "^RENDER"      the RENDER line, once the job is done
 ```
 

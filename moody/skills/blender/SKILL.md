@@ -169,7 +169,7 @@ Blender, and a job all run the same files.
 - **A save drops what nothing uses.** A material or a world no object holds is gone from the
   file: set `use_fake_user = True` on one you want kept.
 - **Undo.** End a script with `bpy.ops.ed.undo_push(message="Building shell")`: its changes are
-  then one step, which `bpy.ops.ed.undo()` takes back, as the person's Ctrl+Z does.
+  then one step, which `bpy.ops.ed.undo()` takes back and `bpy.ops.ed.redo()` restores.
 - **Scripts are run again.** Make each one replace what it made last time (remove the object of
   the same name first), so a changed number is a second run, not a second copy.
 
@@ -195,10 +195,11 @@ P="$SELKIES_MODAL_WORKSPACE/${SELKIES_MODAL_PROJECT:-projects/default}"; selkies
 ```
 
 ```text
-selkies-modal-job status interior-01                     interior-01  running | done | failed (exit 1)  started <time>  <command>
+selkies-modal-job status interior-01                     interior-01  running, then done  started <time>  <command>
 selkies-modal-job log interior-01 | grep "^RENDER"       its RENDER line, once it is done
-selkies-modal-job stop interior-01
 ```
+
+A status that is neither means it did not finish: read `selkies-modal-job log interior-01`.
 
 To let the person watch a render fill in, start it in their Blender instead:
 `bpy.ops.render.render("INVOKE_DEFAULT", write_still=True)` returns at once and the bridge stays
