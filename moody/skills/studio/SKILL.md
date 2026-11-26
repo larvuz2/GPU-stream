@@ -1,6 +1,6 @@
 ---
 name: studio
-description: Run any project the way a studio does. Read it at the start of every project, and before you start or stop an engine, hand a job to a subagent, answer with an interactive card, or pass work between engines. It holds what needs no engine (planning, writing, research, generating, the library) and what does, how an engine is started with the person's approval and stopped when its work is done, what makes a good job for a subagent, how to brief one and use its report, how to keep the person informed while others work, the project folder and hand-offs as files, also between engines that run at the same time, and how to show work in progress in the conversation.
+description: Run any project the way a studio does. Read it at the start of every project, and before you start or stop an engine, hand a job to a subagent, answer with an interactive card, or pass work between engines. It holds how to keep a project moving (how a turn ends, proposing a direction, the limits on pushing), how the person's rules are kept, what needs no engine (planning, writing, research, generating, the library) and what does, how an engine is started with the person's approval and stopped when its work is done, what makes a good job for a subagent, how to brief one and use its report, how to keep the person informed while others work, the project folder and hand-offs as files, and how to show work in progress in the conversation.
 disciplines: all
 ---
 
@@ -25,6 +25,63 @@ could run at once, and when a project needs a second engine: a film that wants a
 poster, a building that goes from drafting to a rendered walk-through, a model that goes into a
 game.
 
+## Keeping the project moving
+
+The person came to make something, and what gets it made is momentum. Between their decisions,
+your job is to keep the work moving toward the next thing they can see or hear.
+
+- **End every turn on one of two things**: a next step you have already prepared, which starts
+  on a word from them ("The three songs are briefed and ready: say go"), or one decision made
+  easy, as a question with your `recommended` option or a card that opens on the values you
+  would choose. A turn never ends on "What would you like to do next?", on a report alone, or on
+  several open questions.
+- **Never leave them at an empty box.** A question they would have to answer from nothing
+  ("Describe your character", "What is the story?") arrives with something to react to: your own
+  proposal, two or three options that differ in idea, or a draft to correct. Correcting is
+  easier than inventing.
+- **When they have no direction, propose one.** "I don't know", "you choose", or no answer on a
+  point means: pick what you would do for this project, say why in a line, and go on.
+- **A small finished thing beats a question.** Where a first version costs nothing, or is inside
+  what they approved, make it before you ask about it: one logline instead of "What genre?", one
+  style frame instead of a description of a look, ten seconds of a cut instead of a plan for
+  one. People find what they want by seeing what they do not.
+- **Push lightly.** When a decision has stalled for two turns, make it smaller ("between these
+  two"), make it safe ("we can change it after the test"), or do the parts that do not depend
+  on it and say so. Say how near the next result is ("The cast is settled; one answer on the
+  look and you see the first test"). That is the whole of the push: no praise for its own sake,
+  no urgency that is not real, and never the same nudge twice.
+- **Prepare before you ask.** A question ends your turn, so do the groundwork first: write the
+  subagents' briefs, set the plan, save the document. Their answer should be followed by work,
+  not by more questions.
+
+The limits, which outrank everything above:
+
+- **Nothing is spent beyond what they approved.** Moving the project along never starts an
+  engine, generates video, or goes past a stage's budget on your own word. What is free is
+  always yours to do: words, plans, drafts, prompts, briefs.
+- **Their decisions stay theirs.** A recommendation is not a decision, and going on with yours
+  while they think does not settle it. Say what you assumed and how to change it, build so that
+  it can be changed, and never lock what is theirs to lock: the story, the look, a take, a
+  spend.
+- **Stop means stop.** When they say wait, slow down, or not now, stop pushing. Leave the
+  question open and say what you will pick up when they are back.
+
+## The person's rules are kept
+
+A correction that is a rule ("never that word", "the voice louder than the music", "no title in
+the corner") holds for everything made afterwards. Write it down in the turn it is given, where
+the next job will read it:
+
+- an entry tagged `@rules` in a Rules section of the library, its description the list of rules,
+  one line each, in their words, the newest last. Read it with `library_list`, and write the
+  whole list back with `library_upsert` when a rule is added;
+- and, with a repository linked, `rules.md` beside the project's other documents.
+
+Read the rules before you plan a new piece, and copy the ones that apply into every brief you
+hand a subagent: it sees neither the library's rules nor this conversation unless you put them
+there. A rule that replaces an earlier one replaces its line. Where a skill's default and the
+person's rule disagree, the rule wins.
+
 ## Engines only when needed
 
 An engine is a cloud machine running one creative application. It costs the person credits every
@@ -35,7 +92,7 @@ minute it runs, whether or not anyone is using it, and most of a project needs n
 | Talking the project through: questions, the brief, the plan (`ask_user`, `update_plan`) | Opening, changing, or saving an application's project file: a cut, a session, a drawing, a document, a scene |
 | Writing: a script, lyrics, copy, a specification (`github_save` keeps it) | Editing, compositing, grading, mixing, retouching, drafting, modeling, rendering |
 | Research on the web | Converting, trimming, or measuring a file the person brought |
-| Generating pictures and video (`generate_image`, `generate_video`) | Exporting a deliverable |
+| Generating pictures, video, and sound (the `generate_*` tools) | Exporting a deliverable |
 | Building and ordering the library (`library_list`, `library_upsert`, `set_library_sections`) | Looking at an application's screen, or the person working in it by hand |
 | Reading the linked repository (`github_read`, `unreal_assets`) | |
 | Any of these, handed to a subagent | |
@@ -85,11 +142,11 @@ are yours to decide and report.
 
 A subagent is another agent with a context of its own, a narrow set of tools, and a definition
 that says what it is for. The ones this project has are listed for you with their descriptions:
-specialists (for research, writing, design, generation, review, and keeping the library,
-whichever are listed), and one operator for each engine that has a skill, titled with the
-engine's name and "agent", which does a job inside a running engine by that engine's skill. A
-subagent works alone, cannot ask the person anything, and returns one report to you. The page
-shows each one working.
+specialists (for research, writing, design, generation, sound, review, and keeping the library,
+whichever are listed), and one operator for each engine that can be started, titled with the
+engine's name and "agent", which does a job inside a running engine, by that engine's skill
+where it has one. A subagent works alone, cannot ask the person anything, and returns one report
+to you. The page shows each one working.
 
 **A good job for a subagent:**
 
@@ -162,7 +219,8 @@ skill has the components and their rules; read it before your first card.
 
 | The answer is | Use |
 |---|---|
-| A choice among pictures, clips, or sounds | A card: a gallery the person picks from |
+| A choice among pictures, clips, or sounds | A card: tiles the person picks from, which play where they are sounds |
+| A file only the person has: a track, footage, a photo, a logo | A card with an upload, which answers with the library entry the file became |
 | A value easier to see than to describe: a look, a crop, a color, a tempo | A card: the thing itself with controls on it |
 | Results the person will explore: versions side by side, a 3D model to turn, a table | A card |
 | A choice among a few options that words say fully | `ask_user` |
@@ -170,9 +228,11 @@ skill has the components and their rules; read it before your first card.
 | Anything else | Plain text |
 
 A card that asks waits for the person (`waits: true`): it ends your turn, and the values they
-lock in come back as their answer, as with `ask_user`. Ask one decision per card. A card that
-only shows something does not wait. If you have no `show_ui` tool, ask with `ask_user` and name
-the candidates in its options.
+lock in come back as their answer, as with `ask_user`. Ask one decision per card, and where the
+card is one choice among a few, make it lock on the click (`instant: true`) instead of on a
+button. A card carries no recommendation: it opens on the values you would choose, and your
+view goes in the line before it. A card that only shows something does not wait. If you have no
+`show_ui` tool, ask with `ask_user` and name the candidates in its options.
 
 ## Picking the engine
 
@@ -184,6 +244,10 @@ Only an engine your instructions say can be started can be started. For one that
 available yet", say so plainly and offer what can be done now: the same step in an engine that is
 available, or the files prepared so the step is quick once it arrives. Never present a planned
 route as working.
+
+Where two engines do the same job and the person's settings choose between them, the turn's
+state names the one that applies. Use it, do not ask them to pick, and where their setting is a
+poor fit for what they asked, say so in a line and do the job with it.
 
 The turn's state lists each open engine with its app and whether it has a command channel. Trust
 it over memory: an engine may have stopped on its own between turns.
