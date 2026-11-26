@@ -29,12 +29,14 @@
  * `version`), so the Latest module has something to play, and on a card that asks what comes
  * next. The openings are keyed by the catalog's names of the kinds; one the catalog renames is
  * opened as any other kind is. They start no engine and generate nothing: the files are the
- * demo's own (`public/media`).
+ * demo's own (`public/media`), and the tiles' pixel icons are the catalog's for the kinds and the
+ * card gallery's for the rest (`ui/gallery/icons.ts`).
  * @module
  */
 import type { PreviewItem, Project, TurnId, UiData, UiMedia } from '../lib/api';
 import { asksKind, catalog, type Discipline } from '../lib/catalog';
 import { SECOND, type Scheduled, type Script } from './demoKit';
+import { BULB, PAGE, SPARK, TRAY, WAVE } from './ui/gallery/icons';
 
 /** What of a project the card that asks its kind sets, which is also the id of the card's one input. */
 export const KIND_FIELD = 'format';
@@ -105,96 +107,6 @@ function answerTo(value: unknown, id: string): unknown {
   const held: Record<string, unknown> = { ...value };
   return held[id];
 }
-
-/**
- * Writes a pixel icon as the rows a card takes, from rows drawn with `#` for a lit cell.
- *
- * @param rows The icon, a square of `#` and `.`.
- * @returns The same rows as `1` and `0`.
- */
-function icon(...rows: string[]): string[] {
-  return rows.map((row) => row.replaceAll('#', '1').replaceAll('.', '0'));
-}
-
-/** A page of a script. */
-const PAGE = icon(
-  '............',
-  '..#######...',
-  '..#.....##..',
-  '..#.###..#..',
-  '..#......#..',
-  '..#.####.#..',
-  '..#......#..',
-  '..#.####.#..',
-  '..#......#..',
-  '..#.###..#..',
-  '..########..',
-  '............',
-);
-
-/** A light bulb, for an idea. */
-const BULB = icon(
-  '............',
-  '....####....',
-  '...#....#...',
-  '..#......#..',
-  '..#......#..',
-  '..#......#..',
-  '...#....#...',
-  '....#..#....',
-  '....####....',
-  '....####....',
-  '.....##.....',
-  '............',
-);
-
-/** A plus, for starting with nothing. */
-const PLUS = icon(
-  '............',
-  '.....##.....',
-  '.....##.....',
-  '.....##.....',
-  '.....##.....',
-  '.##########.',
-  '.##########.',
-  '.....##.....',
-  '.....##.....',
-  '.....##.....',
-  '.....##.....',
-  '............',
-);
-
-/** An arrow up out of a tray, for a file to bring. */
-const BRING = icon(
-  '............',
-  '.....##.....',
-  '....####....',
-  '...######...',
-  '..########..',
-  '.....##.....',
-  '.....##.....',
-  '.....##.....',
-  '.#........#.',
-  '.#........#.',
-  '.##########.',
-  '............',
-);
-
-/** Two beamed notes, for music to write. */
-const NOTES = icon(
-  '............',
-  '....#######.',
-  '....#######.',
-  '....#.....#.',
-  '....#.....#.',
-  '....#.....#.',
-  '....#.....#.',
-  '..###...###.',
-  '.####..####.',
-  '.####..####.',
-  '..##....##..',
-  '............',
-);
 
 /** A card the agent asks with, before it has its identifier and its files' addresses. */
 interface Card {
@@ -332,7 +244,7 @@ const FIRST: Readonly<Record<string, Step>> = {
         options: [
           { value: 'script', label: 'I have a script', note: 'Bring the pages. I break them into scenes and shots.', icon: PAGE },
           { value: 'idea', label: 'I have an idea', note: 'A premise, a character, an image. We grow it.', icon: BULB },
-          { value: 'scratch', label: 'From scratch', note: 'Nothing yet. I put three directions on the table.', icon: PLUS },
+          { value: 'scratch', label: 'From scratch', note: 'Nothing yet. I put three directions on the table.', icon: SPARK },
         ],
       },
       submit: null,
@@ -348,8 +260,8 @@ const FIRST: Readonly<Record<string, Step>> = {
         id: 'track',
         columns: 2,
         options: [
-          { value: 'upload', label: 'I have the track', note: 'Upload it, and I cut to its beat.', icon: BRING },
-          { value: 'make', label: 'Make one together', note: 'Tell me the feel, and I write a few to compare.', icon: NOTES },
+          { value: 'upload', label: 'I have the track', note: 'Upload it, and I cut to its beat.', icon: TRAY },
+          { value: 'make', label: 'Make one together', note: 'Tell me the feel, and I write a few to compare.', icon: WAVE },
         ],
       },
       submit: null,

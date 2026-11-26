@@ -34,18 +34,20 @@ import { Layers, ListChecks, PanelRightClose, PanelRightOpen, Play, Plus, Server
 import { ALWAYS, isActive, type ControlPlane, type Project, type Session, type TurnLimit } from '../lib/api';
 import { AUTO_REGION } from '../lib/catalog';
 import { Composer } from './Composer';
-import { Conversation, type CardUpload } from './Conversation';
+import { Conversation } from './Conversation';
 import { AgentEnvironment } from './EnvironmentAgent';
 import { EngineSection, GitHubSection, type EpicReturn, type GitHubReturn } from './EnvironmentPanel';
 import { GitHubMark } from './Menu';
 import { FoldsContext, useFolds } from './folds';
 import { LatestBody } from './LatestPanel';
 import { LibraryBody } from './LibraryPanel';
+import { describeError } from './messages';
 import { Panel } from './Panel';
 import { PlanBody } from './PlanPanel';
 import { DisciplineIcon } from '../components/DisciplineIcon';
 import { disciplineName, normalizeTag, planProgress } from './present';
 import { describeAnswer } from './ui/answer';
+import type { Uploaded } from './ui/context';
 import { Stage, type StreamStandIn } from './Stage';
 import { buildTranscript, openQuestion, processMedia, versions, type Reveal } from './transcript';
 import { connected, type Account, type Epic, type GitHub, type Projects } from './useAccount';
@@ -273,26 +275,33 @@ export function Workspace(props: WorkspaceProps) {
   /**
    * Takes a file a card's upload input was given into the library: a new entry named after the
    * file, with it as the entry's first file, in the section the card names or, where it names
-   * none, the library's first one.
+   * none, the library's first one. Its tag is made from the file's name, numbered where an entry
+   * already has that tag, as when the same file is given twice.
    *
    * @param file The file.
    * @param into Where the card wants it.
    * @returns The entry as the card is answered with it.
-   * @throws ApiError When the entry could not be made or the file could not be stored.
+   * @throws Error When the entry could not be made or the file could not be stored, with the
+   *   reason as the card shows it.
    */
-  async function upload(file: File, into: { section: string | null }): Promise<CardUpload> {
+  async function upload(file: File, into: { section: string | null }): Promise<Uploaded> {
     const name = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Upload';
-    const tag = normalizeTag(name);
-    const made = await data.createAsset(
-      {
-        section: into.section ?? data.library?.sections[0] ?? 'Uploads',
-        name,
-        ...(tag === '' ? {} : { tag }),
-      },
-      file,
-    );
-    const stored = made.media.at(-1);
-    return { tag: made.tag ?? '', name: made.name, kind: stored?.kind ?? 'file', url: stored?.url ?? '' };
+    const taken = new Set((data.library?.assets ?? []).map((asset) => asset.tag?.replace(/^@/, '') ?? ''));
+    const stem = normalizeTag(name);
+    let tag = stem;
+    for (let copy = 2; tag !== '' && taken.has(tag); copy += 1) {
+      tag = `${stem}-${copy}`;
+    }
+    try {
+      const made = await data.createAsset(
+        { section: into.section ?? data.sections[0] ?? 'Uploads', name, ...(tag === '' ? {} : { tag }) },
+        file,
+      );
+      const stored = made.media.at(-1);
+      return { tag: made.tag ?? '', name: made.name, kind: stored?.kind ?? 'file', url: stored?.url ?? '' };
+    } catch (failure) {
+      throw new Error(describeError(failure), { cause: failure });
+    }
   }
 
   const toggle = (name: Module) => () => {

@@ -1521,6 +1521,25 @@ def test_every_discipline_that_asks_its_kind_has_a_card_the_page_renders_and_a_l
     assert sessions.opening_card(CATALOG.disciplines["music"]) is None
 
 
+def test_every_kind_names_an_icon_the_catalog_has_and_the_card_that_asks_the_kind_draws_it():
+    icons = CATALOG.data["icons"]
+    sessions = Sessions(config(), CATALOG, FakeStore(), FakeLauncher(), InlineJobs())
+    named = 0
+    for discipline in CATALOG.disciplines.values():
+        kinds = discipline.get("kinds", {})
+        missing = {name: kind["icon"] for name, kind in kinds.items() if kind["icon"] not in icons}
+        assert not missing, f"{discipline['id']} names icons the catalog's icons do not have: {missing}"
+        named += len(kinds)
+        if discipline.get("opening"):
+            # Building the card checks each icon as the cards' catalog asks: a square of 0 and 1, of an allowed side
+            options = sessions.opening_card(discipline)["spec"]["options"]
+            assert [option["icon"] for option in options] == [icons[kinds[name]["icon"]] for name in discipline["formats"]]
+    assert named, "the catalog has kinds to draw"
+    # An icon no kind names yet is still one a card would take
+    spec = {"type": "pick", "id": "icon", "options": [{"value": name, "icon": rows} for name, rows in icons.items()]}
+    genui.card(genui.catalog(), "icons", "Every icon of the catalog", spec, None, None, True, None, {}, instant=True)
+
+
 def test_the_library_keeps_entries_and_hands_out_their_files_as_signed_links(studio):
     client, store = studio.client, studio.store
     film = new_project(client)
