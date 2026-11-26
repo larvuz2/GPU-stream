@@ -13,7 +13,8 @@
  * opening another project starts its data afresh. Each region knows how to lead to the others: a
  * tag in the agent's prose opens its asset in the library, a started engine goes on the screen,
  * and the screen's empty state leads to the Environment panel, unfolding the panel and, on a
- * narrow screen, switching to its tab.
+ * narrow screen, switching to its tab. Every module of the right column folds, and so does each
+ * section inside Environment; what is folded is remembered per project (`folds.ts`).
  *
  * What the screen shows, the engine and which of its pictures (an Unreal engine's Desktop or
  * Unreal), is chosen here, by whoever chose last: the person, with the screen's toggle, its keys,
@@ -32,13 +33,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { Layers, ListChecks, PanelRightClose, PanelRightOpen, Plus, Server } from 'lucide-react';
 import { ALWAYS, isActive, type ControlPlane, type Project, type Session, type TurnLimit } from '../lib/api';
 import { AUTO_REGION } from '../lib/catalog';
-import { isBoolean, isRecord, type Guard } from '../lib/narrow';
 import { Composer } from './Composer';
 import { Conversation, type CardUpload } from './Conversation';
 import { AgentEnvironment } from './EnvironmentAgent';
 import { EngineSection, GitHubSection, type EpicReturn, type GitHubReturn } from './EnvironmentPanel';
 import { GitHubMark } from './Menu';
-import { usePreference } from './hooks';
+import { FoldsContext, useFolds } from './folds';
 import { LibraryBody } from './LibraryPanel';
 import { Panel } from './Panel';
 import { PlanBody } from './PlanPanel';
@@ -53,28 +53,8 @@ import { useProject } from './useProject';
 /** The tabs a narrow screen shows the studio's regions under. */
 export type MobileTab = 'projects' | 'chat' | 'screen' | 'workspace';
 
-/** The panels of the right column, each folded or not. */
-interface PanelState {
-  /** Whether the Screen is unfolded. */
-  screen: boolean;
-  /** Whether Environment is unfolded. */
-  environment: boolean;
-  /** Whether the Plan is unfolded. */
-  plan: boolean;
-  /** Whether the Library is unfolded. */
-  library: boolean;
-}
-
-/** Checks a stored value into a {@link PanelState}. */
-const isPanelState: Guard<PanelState> = (value): value is PanelState =>
-  isRecord(value) &&
-  isBoolean(value.screen) &&
-  isBoolean(value.environment) &&
-  isBoolean(value.plan) &&
-  isBoolean(value.library);
-
-/** Every panel unfolded, as a new viewer sees them. */
-const ALL_OPEN: PanelState = { screen: true, environment: true, plan: true, library: true };
+/** A module of the right column, by the id it folds under. */
+type Module = 'screen' | 'environment' | 'plan' | 'library';
 
 /** A picture of an engine, as the person or the agent put it on screen. */
 interface Picked {
@@ -147,7 +127,8 @@ export function Workspace(props: WorkspaceProps) {
       showEngine(request.engineId, false);
     },
   });
-  const [panels, setPanels] = usePreference<PanelState>('panels', ALL_OPEN, isPanelState);
+  const folds = useFolds(project.id);
+  const unfolded = (module: Module): boolean => !folds.folded.has(module);
   // A first message for a project that opened on the card asking its kind waits here, since the
   // kind is answered first.
   const [draft, setDraft] = useState(() =>
@@ -221,10 +202,8 @@ export function Workspace(props: WorkspaceProps) {
    * @param name The panel.
    * @param ref Its element.
    */
-  function reveal(name: keyof PanelState, ref: RefObject<HTMLDivElement | null>): void {
-    if (!panels[name]) {
-      setPanels({ ...panels, [name]: true });
-    }
+  function reveal(name: Module, ref: RefObject<HTMLDivElement | null>): void {
+    folds.unfold(name);
     if (props.paneCollapsed) {
       props.onPaneCollapsed(false);
     }
@@ -268,9 +247,7 @@ export function Workspace(props: WorkspaceProps) {
    */
   function showEngine(id: string, switchTab = true): void {
     setScreenId(id);
-    if (!panels.screen) {
-      setPanels({ ...panels, screen: true });
-    }
+    folds.unfold('screen');
     if (props.paneCollapsed && !focus) {
       props.onPaneCollapsed(false);
     }
@@ -315,13 +292,13 @@ export function Workspace(props: WorkspaceProps) {
     return { tag: made.tag ?? '', name: made.name, kind: stored?.kind ?? 'file', url: stored?.url ?? '' };
   }
 
-  const toggle = (name: keyof PanelState) => () => {
-    setPanels({ ...panels, [name]: !panels[name] });
+  const toggle = (name: Module) => () => {
+    folds.toggle(name);
   };
   const plan = data.plan;
 
   return (
-    <>
+    <FoldsContext value={folds}>
       <main className="studio-center" aria-label={project.name} data-mobile-hidden={narrow && tab !== 'chat'}>
         <header className="flex min-h-14 items-center gap-3 border-b border-[var(--studio-line)] px-4 py-2 sm:px-5">
           <span className="icon-tile size-8 rounded-lg">
@@ -433,7 +410,7 @@ export function Workspace(props: WorkspaceProps) {
         onStream={chooseStream}
         focus={focus}
         onFocus={onFocus}
-        open={panels.screen}
+        open={unfolded('screen')}
         onToggle={toggle('screen')}
         link={data.link}
         onStartEngine={() => {
@@ -453,7 +430,7 @@ export function Workspace(props: WorkspaceProps) {
           <Panel
             title="Environment"
             icon={Server}
-            open={panels.environment}
+            open={unfolded('environment')}
             onToggle={toggle('environment')}
             badge={countRunning(data.engines)}
           >
@@ -507,7 +484,13 @@ export function Workspace(props: WorkspaceProps) {
           </Panel>
         </div>
         <div ref={planRef} className="border-t border-[var(--studio-line)]">
-          <Panel title="Plan" icon={ListChecks} open={panels.plan} onToggle={toggle('plan')} badge={planProgress(plan)}>
+          <Panel
+            title="Plan"
+            icon={ListChecks}
+            open={unfolded('plan')}
+            onToggle={toggle('plan')}
+            badge={planProgress(plan)}
+          >
             <PlanBody items={plan} />
           </Panel>
         </div>
@@ -515,7 +498,7 @@ export function Workspace(props: WorkspaceProps) {
           <Panel
             title="Library"
             icon={Layers}
-            open={panels.library}
+            open={unfolded('library')}
             onToggle={toggle('library')}
             badge={data.library === null ? undefined : String(data.library.assets.length)}
             actions={
@@ -547,7 +530,7 @@ export function Workspace(props: WorkspaceProps) {
           </Panel>
         </div>
       </aside>
-    </>
+    </FoldsContext>
   );
 }
 

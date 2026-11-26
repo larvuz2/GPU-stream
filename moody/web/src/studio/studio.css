@@ -617,11 +617,62 @@
     height: 0.9rem;
     flex: none;
     color: var(--color-faint);
-    transition: transform 0.18s ease;
   }
 
   .panel[data-open='false'] .panel-chevron {
     transform: rotate(-90deg);
+  }
+
+  /* The heading of a section that folds inside a panel: the whole of it is the control. */
+  .fold-head {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 0.35rem;
+    text-align: left;
+    text-transform: inherit;
+  }
+
+  .fold-arrow {
+    width: 0.8rem;
+    height: 0.8rem;
+    flex: none;
+  }
+
+  .fold-head[aria-expanded='false'] .fold-arrow {
+    transform: rotate(-90deg);
+  }
+
+  /*
+   * The arrow that folds a module or a section is quiet. It shows while the pointer is on its
+   * heading or the keyboard is, and stays faintly while its part is folded, when it is the one
+   * sign that there is more. A screen with no hover cannot call it up, so there it stays faintly.
+   */
+  .panel-chevron,
+  .fold-arrow {
+    opacity: 0;
+    transition:
+      opacity 0.15s ease,
+      transform 0.18s ease;
+  }
+
+  .panel-toggle[aria-expanded='false'] .panel-chevron,
+  .fold-head[aria-expanded='false'] .fold-arrow {
+    opacity: 0.55;
+  }
+
+  .panel-header:hover .panel-chevron,
+  .panel-toggle:is(:hover, :focus-visible) .panel-chevron,
+  .fold-head:is(:hover, :focus-visible) .fold-arrow {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .panel-chevron,
+    .fold-arrow {
+      opacity: 0.55;
+    }
   }
 
   .panel-body {
