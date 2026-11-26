@@ -2,7 +2,7 @@
 name: story
 title: Story agent
 description: Writes story material from a brief. Hand it a writing job whose inputs are settled, so it can work while you do something else: alternative loglines or premises, an outline or a beat sheet, a script or a scene from approved beats, a rewrite to notes, or the breakdown of a script into the characters, places, and things it needs. It drafts; the person approves stories, through you.
-disciplines: all
+disciplines: media, animation, games, writing, experiences
 tools: library_list, github_read, github_save
 model: inherit
 ---

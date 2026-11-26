@@ -62,7 +62,7 @@ import { ArrowDown, Check, ChevronRight, CircleAlert, ListChecks, Lock, MonitorP
 import { MoodyFace } from '../components/Moody';
 import { MoodyEyes } from '../components/MoodyEyes';
 import type { ApprovalDecision, Asset, PlanItem, Project, Session, TurnLimit, UiData } from '../lib/api';
-import { findApp, findTier } from '../lib/catalog';
+import { findApp, findTier, startersFor } from '../lib/catalog';
 import { cx } from '../lib/cx';
 import { midSentence, price, spanText, tokenCount } from '../lib/format';
 import { showActivity } from './activity';
@@ -541,13 +541,6 @@ interface WelcomeProps {
   onSuggest: (text: string) => void;
 }
 
-/** The openings a new project offers, each put in the composer to finish and send. */
-const OPENINGS = [
-  'I have a script to share. Here it is:\n\n',
-  'Let’s write it together. The idea is ',
-  'Surprise me with three directions to choose from.',
-];
-
 /**
  * Renders the opening of a project with no conversation yet.
  *
@@ -569,7 +562,7 @@ function Welcome({ project, canSend, onSuggest }: WelcomeProps) {
         idea, and the agent builds it with you, asking at every decision that is yours.
       </p>
       <ul className="mt-7 grid grid-cols-1 w-full max-w-md gap-2">
-        {OPENINGS.map((opening) => (
+        {startersFor(project.discipline).map((opening) => (
           <li key={opening}>
             <button
               type="button"

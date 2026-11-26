@@ -1,6 +1,6 @@
 ---
 name: cadcraft
-description: Design and draft buildings, interiors, parts, and products with the person as the designer, in CADCraft, an open-source 2D CAD application driven through its command channel. Start a project with the questions that decide it (units, scale, standard, constraints, deliverable), draw to real size on named layers, dimension and tolerance it, lay it out on sheets with a title block, check it (clearances, dimensions that close, manufacturability, printability), and deliver PDF, DXF, DWG, SVG, or PNG. Hand the drawing to Blender for a 3D model, a render, or an STL, and on to Unreal Engine. Use for every Architecture and Industrial Design project in Moody Studio, and whenever someone wants a floor plan, a drawing set, a part drawing, a laser-cut or 3D-print file, or a DXF or DWG opened, checked, or changed.
+description: Design and draft buildings, interiors, parts, and products with the person as the designer, in CADCraft, an open-source 2D CAD application driven through its command channel. Start a project with the questions that decide it (units, scale, standard, constraints, deliverable), draw to real size on named layers, dimension and tolerance it, lay it out on sheets with a title block, check it (clearances, dimensions that close, manufacturability, printability), and deliver PDF, DXF, DWG, SVG, or PNG. Hand the drawing to Blender for a 3D model, a render, or an STL, and on to Unreal Engine. Use for the drawing stage of every Architecture project (a building, an interior, or a product), and whenever someone wants a floor plan, a drawing set, a part drawing, a laser-cut or 3D-print file, or a DXF or DWG opened, checked, or changed.
 ---
 
 <!--
@@ -56,9 +56,11 @@ you can call with JSON. Say these limits plainly, at the start, when the work to
 
 ## When this applies
 
-The project's discipline is Architecture (a building, an interior, a concept) or Industrial
-Design (a part, a product, furniture), or the person asks for a plan, an elevation, a detail, a
-part drawing, a cutting file, or to open and change a DXF or DWG. Visualization (materials,
+An Architecture project (a Building, an Interior, or a Product: a part, a piece of furniture)
+has reached its drawing, or the person asks for a plan, an elevation, a detail, a
+part drawing, a cutting file, or to open and change a DXF or DWG. How such a project opens, and
+what is settled before the first line (the brief, the direction, the sizes), is the
+`architecture` skill's job. Visualization (materials,
 light, camera, render) is Blender's job, and a walkable scene is Unreal's: open those engines on
 the same project when the work calls for them, and come back here when the design changes,
 because the drawing is the source and the model follows it.
@@ -99,7 +101,12 @@ intent (constraints), Dimensions and tolerances, Sheet, Check, Cutting or printi
 
 ## Starting a project
 
-Open with what the drawing is for, because the deliverable decides everything else:
+In a project the `architecture` skill opened, the brief, the direction, and the sizes are
+already agreed and written down: do not ask them again. Start from the first point below that
+the brief left open, which is usually the units and the sheet.
+
+Where there is no such brief (someone asks for one drawing, or brings a file), open with what
+the drawing is for, because the deliverable decides everything else:
 
 > What are we making, and what do you need at the end: a drawing set to build or price from, a
 > 3D model or render to show, or a file to cut or print?

@@ -23,11 +23,17 @@
  * - **Music Videos** asks whether there is a track: one to upload, or one to make together, for
  *   which it asks the feel and then plays three takes as tiles to compare by ear.
  * - **Social Media** asks in one card for the footage, where the clip goes, and what it is for.
+ * - **Building** asks where the design starts (a site, an existing building, or an idea), takes
+ *   the site and the program on one card and the size on the next, then shows three directions as
+ *   pictures and, for the one chosen, the sizes it would draw.
+ * - **Interior** asks what there is of the room, with a file where there is one, then its
+ *   measurements; **Product** asks how the thing is made, then what it is. Each ends on the
+ *   pictures it would make next.
  * - Any other kind is asked what it is about, in one field.
  *
- * Each of the three ends on a turn that shows a version of the piece (a `preview` with a
- * `version`), so the Latest module has something to play, and on a card that asks what comes
- * next. The openings are keyed by the catalog's names of the kinds; one the catalog renames is
+ * Each of the three video openings ends on a turn that shows a version of the piece (a `preview`
+ * with a `version`), so the Latest module has something to play, and on a card that asks what
+ * comes next. An Architecture opening ends before its first engine, as the agent's does. The openings are keyed by the catalog's names of the kinds; one the catalog renames is
  * opened as any other kind is. They start no engine and generate nothing: the files are the
  * demo's own (`public/media`), and the tiles' pixel icons are the catalog's for the kinds and the
  * card gallery's for the rest (`ui/gallery/icons.ts`).
@@ -36,7 +42,7 @@
 import type { PreviewItem, Project, TurnId, UiData, UiMedia } from '../lib/api';
 import { asksKind, catalog, type Discipline } from '../lib/catalog';
 import { SECOND, type Scheduled, type Script } from './demoKit';
-import { BULB, PAGE, SPARK, TRAY, WAVE } from './ui/gallery/icons';
+import { BULB, EXTEND, HAMMER, LAYERS, PAGE, PHOTO, PIN, RULER, SHEET, SPARK, TRAY, WAVE } from './ui/gallery/icons';
 
 /** What of a project the card that asks its kind sets, which is also the id of the card's one input. */
 export const KIND_FIELD = 'format';
@@ -304,7 +310,120 @@ const FIRST: Readonly<Record<string, Step>> = {
       submit: 'Cut the first one',
     },
   },
+  Building: {
+    says: 'A building, then. One thing decides how we start.',
+    card: {
+      step: 'start',
+      title: 'Where does it start?',
+      spec: {
+        type: 'pick',
+        id: 'start',
+        columns: 3,
+        options: [
+          { value: 'site', label: 'I have a site', note: 'A plot, photos, or a survey', icon: PIN },
+          { value: 'existing', label: 'An existing building', note: 'To extend, convert, or rework', icon: EXTEND },
+          { value: 'idea', label: 'Just an idea', note: 'No site yet. We choose a setting', icon: BULB },
+        ],
+      },
+      submit: null,
+    },
+  },
+  Interior: {
+    says: 'An interior, then. First, what do we have of the room?',
+    card: {
+      step: 'room',
+      title: 'What do we have of the room?',
+      spec: {
+        type: 'stack',
+        children: [
+          {
+            type: 'pick',
+            id: 'have',
+            columns: 2,
+            options: [
+              { value: 'plan', label: 'A plan or a drawing', note: 'A file, a scan, or a sketch with sizes', icon: PAGE },
+              { value: 'photos', label: 'Photos', note: 'And a few measurements', icon: PHOTO },
+              { value: 'measures', label: 'Only the measurements', note: 'Length, width, height', icon: RULER },
+              { value: 'nothing', label: 'Nothing yet', note: 'A room I imagine', icon: SPARK },
+            ],
+          },
+          {
+            type: 'upload',
+            id: 'file',
+            label: 'Drop it here',
+            accept: 'any',
+            section: 'Room',
+            when: { have: ['plan', 'photos'] },
+          },
+        ],
+      },
+      submit: 'Start',
+    },
+  },
+  Product: {
+    says: 'A product, then. How it is made decides its form.',
+    card: {
+      step: 'made',
+      title: 'How will it be made?',
+      spec: {
+        type: 'pick',
+        id: 'made',
+        columns: 2,
+        options: [
+          { value: 'print', label: '3D printed', note: 'On a printer you can reach', icon: LAYERS },
+          { value: 'cut', label: 'Cut from sheet', note: 'Laser, router, or by hand', icon: SHEET },
+          { value: 'workshop', label: 'Built in a workshop', note: 'Wood, metal, upholstery', icon: HAMMER },
+          { value: 'open', label: 'Not decided', note: 'Show me the object first', icon: SPARK },
+        ],
+      },
+      submit: null,
+    },
+  },
 };
+
+/** The demo's three directions for a building, as the files of the card that compares them. */
+const DIRECTIONS: readonly { value: string; label: string; note: string; file: UiMedia; sizes: string }[] = [
+  {
+    value: '@idea-court',
+    label: 'The court',
+    note: 'One floor around a sheltered garden',
+    file: { name: 'idea-court', kind: 'image', url: '/media/concept-court.webp' },
+    sizes: 'living and kitchen 36 m², bedroom 14 m², study 9 m², bath 6 m², around a court of 5 by 5 m: 11 by 11 m overall',
+  },
+  {
+    value: '@idea-bar',
+    label: 'The long bar',
+    note: 'A narrow house along the slope, every room to the view',
+    file: { name: 'idea-bar', kind: 'image', url: '/media/concept-bar.webp' },
+    sizes: 'living and kitchen 40 m², bedroom 16 m², study 10 m², bath 6 m², in a row: 20 by 4.5 m, with a terrace 2.4 m deep',
+  },
+  {
+    value: '@idea-tower',
+    label: 'The small tower',
+    note: 'Three small floors, a tiny footprint',
+    file: { name: 'idea-tower', kind: 'image', url: '/media/concept-tower.webp' },
+    sizes: 'three floors of 30 m², 5.5 by 5.5 m: kitchen and living below, study in the middle, bedroom and bath on top',
+  },
+];
+
+/** The card an Architecture opening ends on: the next stage, prepared, and the ways to change course. */
+function designNext(first: string, change: string): Card {
+  return {
+    step: 'design-next',
+    title: 'What next?',
+    spec: {
+      type: 'pick',
+      id: 'next',
+      columns: 3,
+      options: [
+        { value: 'on', label: first },
+        { value: 'change', label: change },
+        { value: 'other', label: 'Something else', note: 'Tell me what you have in mind.' },
+      ],
+    },
+    submit: null,
+  };
+}
 
 /** What the agent opens any other kind with. */
 const FIRST_OTHER: Step = {
@@ -500,6 +619,213 @@ const AFTER: Readonly<Record<string, (value: unknown) => Step>> = {
     },
     says: 'That is the rhythm of the cut against your track. The pictures are stand-ins.',
     card: NEXT,
+  }),
+  start: (value) => {
+    const start = answerTo(value, 'start');
+    const about = {
+      type: 'field',
+      id: 'about',
+      label: start === 'existing' ? 'What should change, and why?' : 'What should stand there, and for whom?',
+      placeholder:
+        start === 'existing'
+          ? 'A second floor, a kitchen opened to the garden, an attic made into rooms'
+          : 'A cabin for two, a studio in the garden, a house for a family of five',
+      lines: 2,
+      required: true,
+    };
+    if (start === 'idea') {
+      return {
+        says: 'Then we choose where it stands. A setting gives the design something to answer.',
+        card: {
+          step: 'site',
+          title: 'The idea',
+          spec: {
+            type: 'stack',
+            children: [
+              about,
+              {
+                type: 'select',
+                id: 'setting',
+                label: 'Where would it stand?',
+                options: ['In a city street', 'In a suburb', 'In open country', 'On a coast', 'In mountains', 'In a forest'],
+                value: 'In a forest',
+              },
+            ],
+          },
+          submit: 'Start from here',
+        },
+      };
+    }
+    return {
+      says:
+        start === 'existing'
+          ? 'Good. Show me the building as it is, and say what should change.'
+          : 'Good. Show me the site, and say what should stand there.',
+      card: {
+        step: 'site',
+        title: start === 'existing' ? 'The building as it is' : 'The site',
+        spec: {
+          type: 'stack',
+          children: [
+            {
+              type: 'upload',
+              id: 'site',
+              label: start === 'existing' ? 'A plan or photos of it' : 'A photo, a survey, or a plan of the plot',
+              accept: 'any',
+              section: 'Site',
+            },
+            { type: 'field', id: 'place', label: 'Where is it?', placeholder: 'A town or a region is enough' },
+            about,
+          ],
+        },
+        submit: 'Start from here',
+      },
+    };
+  },
+  site: () => ({
+    says: 'A house for two there needs about 90 m²: a room to live and cook in, a bedroom, a study, a bath. Set the size, and what I may spend on pictures.',
+    card: {
+      step: 'size',
+      title: 'The size of it',
+      spec: {
+        type: 'stack',
+        children: [
+          { type: 'slider', id: 'area', label: 'Floor area', min: 15, max: 400, step: 5, value: 90, unit: 'm²' },
+          {
+            type: 'segmented',
+            id: 'floors',
+            label: 'Floors',
+            options: [
+              { value: 1, label: 'One' },
+              { value: 2, label: 'Two' },
+              { value: 3, label: 'Three' },
+            ],
+            value: 1,
+          },
+          {
+            type: 'segmented',
+            id: 'roof',
+            label: 'Roof',
+            options: [
+              { value: 'flat', label: 'Flat' },
+              { value: 'pitched', label: 'Pitched' },
+              { value: 'open', label: 'You propose' },
+            ],
+            value: 'open',
+          },
+          { type: 'slider', id: 'pictures', label: 'Budget for pictures', min: 1, max: 30, step: 1, value: 5, unit: '$' },
+        ],
+      },
+      submit: 'Set the size',
+    },
+  }),
+  size: () => ({
+    work: [{ tool: 'generate_image', title: 'Three directions for the house', summary: '3 pictures, about $0.10', seconds: 4 }],
+    says: 'Three ideas for it. They differ in how the house sits on the slope, not in color. A picture is an idea, not yet a design: the sizes come next, in numbers.',
+    card: {
+      step: 'concept',
+      title: 'Three directions',
+      spec: {
+        type: 'pick',
+        id: 'direction',
+        columns: 3,
+        options: DIRECTIONS.map((direction) => ({
+          value: direction.value,
+          label: direction.label,
+          note: direction.note,
+          image: direction.file.name,
+        })),
+      },
+      submit: 'Develop this one',
+      media: DIRECTIONS.map((direction) => direction.file),
+    },
+  }),
+  concept: (value) => {
+    const chosen = DIRECTIONS.find((direction) => direction.value === answerTo(value, 'direction')) ?? DIRECTIONS[0];
+    return {
+      says:
+        chosen === undefined
+          ? 'Then the sizes come next, in numbers.'
+          : `${chosen.label} it is. These are the sizes I would draw: ${chosen.sizes}. The plan is drawn in CADCraft, about ten minutes at 1 credit a minute.`,
+      card: designNext('Draw these', 'Change a room'),
+    };
+  },
+  room: () => ({
+    says: 'Then the measurements. A layout drawn in a room of the wrong size helps nobody.',
+    card: {
+      step: 'measure',
+      title: 'The room',
+      spec: {
+        type: 'stack',
+        children: [
+          {
+            type: 'row',
+            children: [
+              { type: 'number', id: 'length', label: 'Length', min: 1, max: 50, step: 0.05, value: 5.2, unit: 'm' },
+              { type: 'number', id: 'width', label: 'Width', min: 1, max: 50, step: 0.05, value: 3.8, unit: 'm' },
+              { type: 'number', id: 'height', label: 'Ceiling', min: 2, max: 10, step: 0.05, value: 2.6, unit: 'm' },
+            ],
+          },
+          {
+            type: 'segmented',
+            id: 'windows',
+            label: 'Windows are on',
+            options: [
+              { value: 'long', label: 'A long wall' },
+              { value: 'short', label: 'A short wall' },
+              { value: 'two', label: 'Two walls' },
+              { value: 'none', label: 'No windows' },
+            ],
+            value: 'long',
+          },
+          {
+            type: 'field',
+            id: 'fixed',
+            label: 'What has to stay?',
+            placeholder: 'The radiator under the window, the kitchen’s water point, the piano',
+          },
+        ],
+      },
+      submit: 'This is the room',
+    },
+  }),
+  measure: () => ({
+    says: 'That is the room. Three looks for it come next, seen from the doorway: about ten cents of pictures.',
+    card: designNext('Show me three looks', 'First, what it is for'),
+  }),
+  made: () => ({
+    says: 'Good. Now the object itself.',
+    card: {
+      step: 'object',
+      title: 'The object',
+      spec: {
+        type: 'stack',
+        children: [
+          {
+            type: 'field',
+            id: 'what',
+            label: 'What is it, and what does it have to do?',
+            placeholder: 'A stool that stacks, a wall hook for a bicycle, a lamp for a desk',
+            lines: 2,
+            required: true,
+          },
+          { type: 'number', id: 'size', label: 'Its largest dimension', min: 1, max: 300, step: 1, value: 45, unit: 'cm' },
+          {
+            type: 'select',
+            id: 'material',
+            label: 'Material',
+            options: ['Plywood', 'Solid wood', 'Steel', 'Aluminum', 'Acrylic', 'PLA', 'PETG', 'You propose'],
+            value: 'You propose',
+          },
+          { type: 'slider', id: 'pictures', label: 'Budget for pictures', min: 1, max: 20, step: 1, value: 3, unit: '$' },
+        ],
+      },
+      submit: 'Start',
+    },
+  }),
+  object: () => ({
+    says: 'Three concepts come next, the same view of each on a plain backdrop: about ten cents of pictures.',
+    card: designNext('Show me three concepts', 'First, what it must fit'),
   }),
   brief: () => ({
     shown: {

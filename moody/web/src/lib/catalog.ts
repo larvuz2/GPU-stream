@@ -91,12 +91,20 @@ export interface Discipline {
    * the card that asks its kind. A discipline without one asks nothing.
    */
   opening?: string;
-  /** What that card says of each format, by the format's name. */
-  kinds?: Record<string, Kind>;
+  /**
+   * What that card says of each format, by the format's name. A name another discipline's kinds
+   * use reads as `undefined` here, which is how the catalog's file types them together.
+   */
+  kinds?: Record<string, Kind | undefined>;
   /** The agent's skill that opens a project of each kind with a card of its own. */
   opening_skill?: string;
   /** The library's first sections for a project of the discipline. */
   sections?: string[];
+  /**
+   * What an empty project of the discipline offers to start from, each a line put in the composer
+   * to finish and send; the catalog's own where left out ({@link startersFor}).
+   */
+  starters?: string[];
 }
 
 /** One card of what a shortcut will offer: a tool that may come, and what it is for. */
@@ -249,6 +257,8 @@ export interface Catalog {
   activities: Activity[];
   /** The twelve top-level disciplines, in the order they are shown. */
   disciplines: Discipline[];
+  /** What an empty project offers to start from, in a discipline that names no starters of its own. */
+  starters: string[];
   /** The shortcuts into a new project, in the order the sidebar lists them. */
   shortcuts: Shortcut[];
   /** The finer categories, each under a discipline. */
@@ -415,6 +425,17 @@ export function activityLabel(id: string): string | undefined {
  */
 export function findDiscipline(id: string): Discipline | undefined {
   return catalog.disciplines.find((discipline) => discipline.id === id);
+}
+
+/**
+ * What an empty project offers to start from: the words of its discipline where the catalog gives
+ * them (a script for a film, a plan for a building), and the catalog's general ones otherwise.
+ *
+ * @param disciplineId The project's discipline.
+ * @returns The lines, each put in the composer to finish and send.
+ */
+export function startersFor(disciplineId: string): string[] {
+  return findDiscipline(disciplineId)?.starters ?? catalog.starters;
 }
 
 /**
