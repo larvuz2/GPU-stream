@@ -121,7 +121,7 @@ outside the studio; it is an offer, never a step the work waits for.
 | The plan, then elevations or a section where wanted, on sheets | You with the `cadcraft` skill, or the CADCraft agent | CADCraft, when the sizes are agreed |
 | Massing without materials, from the drawing | The Blender agent, with the `blender` skill | Blender, when the plan is approved |
 | Sun, sky, and materials from the chosen direction | The Blender agent | The same engine |
-| The final exterior and interior frames, and an orbit as a clip | The Blender agent | The same engine, on the tier its skill names for final renders |
+| The final exterior and interior frames, and an orbit as a clip | The Blender agent | Blender on the tier its skill names for the step |
 | The board | You with the `photocraft` skill | PhotoCraft |
 
 While CADCraft draws, nothing else has to wait: hand `research` what the place asks of a

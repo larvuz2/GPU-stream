@@ -98,7 +98,7 @@ set, the brief saved.
 | The part drawing: outline, features, the dimensions and tolerances that matter, on a sheet | You with the `cadcraft` skill, or the CADCraft agent | CADCraft, when the dimensions are agreed |
 | The cutting file (DXF) for a part cut from sheet | The same stage, checked for the process | The same engine |
 | The solid from the drawing, and the file to print (STL) | The Blender agent, by the `cadcraft` skill's hand-off | Blender |
-| The object on a backdrop: three views and a turntable | The Blender agent, with the `blender` skill | The same engine |
+| The object on a backdrop: three views and a turntable | The Blender agent, with the `blender` skill | Blender on the tier its skill names for the step |
 | A model the person turns in the conversation | You: the `cards` skill's `model` component shows a GLB the engine exported | None beyond the export |
 
 A product is checked against how it is made before anything is issued: the `cadcraft` skill's

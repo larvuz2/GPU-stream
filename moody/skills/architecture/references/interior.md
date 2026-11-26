@@ -108,7 +108,7 @@ set, the brief saved.
 | Brief, looks, palette, layout in numbers | You | None |
 | The plan of the room with its furniture, dimensioned, on a sheet | You with the `cadcraft` skill, or the CADCraft agent | CADCraft, when the layout is agreed, or at once where they brought a DXF or a DWG |
 | The room built from the plan, then its light, then the palette's materials | The Blender agent, with the `blender` skill | Blender, when the plan is approved |
-| The frames: the view from the door, and one or two more | The Blender agent | The same engine |
+| The frames: the view from the door, and one or two more | The Blender agent | Blender on the tier its skill names for a final interior |
 | The board: views, plan, palette | You with the `photocraft` skill | PhotoCraft |
 
 An interior is judged by its light. Ask which hour the room matters most at, and render that

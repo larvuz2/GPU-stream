@@ -78,6 +78,11 @@ the stage that cannot be done without it.
 - **The drawing is the source of every size.** Once a drawing exists, a dimension changes there
   first and the model follows it, by the hand-off the `cadcraft` skill describes. A model edited
   on its own stops agreeing with the sheets someone will build from.
+- **A tier is fixed when an engine starts.** The model, its light, its materials, and draft
+  renders run on the tier without a GPU; the `blender` skill says which steps want a GPU tier
+  (final interiors, clips). Moving there is saving, `engine_stop`, and `engine_start` on the
+  other tier, where the project's folder waits. Starting and stopping are yours: an engine's
+  agent drives the engine it is given and cannot change it.
 - **One stage, one result, one decision.** End each stage on something the person can see (a
   picture, a sheet, a frame) and the one decision it needs. The `studio` skill ("Keeping the
   project moving") has the rule and its limits.

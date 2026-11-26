@@ -4298,7 +4298,23 @@ def test_the_real_definitions_offer_a_film_its_skills_its_subagents_and_an_agent
         "asking the person and running engines stay with the agent itself"
     game = {agent.name: agent for agent in agents_for(agents, derived, offered["games"], CATALOG, "games")}
     assert {"unreal_projects", "unreal_assets", "unreal_open"} <= set(game["unreal"].tools), "the Unreal skill gives its operator its own tools"
-    assert game["blender"].title == "Blender agent" and game["blender"].skills == (), "an engine without a skill still has an operator"
+    assert game["blender"].title == "Blender agent" and game["blender"].skills == ("blender",), "Blender's operator reads the Blender skill"
+    assert film["nuke"].title == "Nuke agent" and film["nuke"].skills == (), "an engine without a skill still has an operator"
+
+
+def test_the_blender_skill_is_read_where_blender_is_an_engine_and_names_only_tools_the_agent_has():
+    skills = read_skills(skills_directory())
+    chosen = {discipline: [skill.name for skill in skills_for(skills, CATALOG, discipline)] for discipline in CATALOG.disciplines}
+    with_blender = [discipline for discipline, entry in CATALOG.disciplines.items() if "blender" in entry["engines"]]
+    assert with_blender and [discipline for discipline, names in chosen.items() if "blender" in names] == with_blender
+    blender = next(skill for skill in skills if skill.name == "blender")
+    references = sorted((blender.directory / "references").glob("*.md"))
+    linked = set(re.findall(r"\]\((references/[a-z-]+\.md)\)", blender.body))
+    assert linked == {f"references/{path.name}" for path in references}, "every reference is one the body sends the agent to"
+    text = "\n".join([blender.body, *(path.read_text() for path in references)])
+    named = set(re.findall(r"`((?:engine|unreal|github|library|generate)_[a-z_]+|ask_user|update_plan|show_ui|preview)[`(]", text))
+    assert {"engine_start", "engine_exec", "engine_files", "engine_send", "engine_import", "engine_show", "engine_stop", "preview"} <= named
+    assert named <= set(TOOL_NAMES), f"the skill names tools the agent does not have: {named - set(TOOL_NAMES)}"
 
 
 def test_the_environment_lists_what_a_projects_agent_can_use(studio):

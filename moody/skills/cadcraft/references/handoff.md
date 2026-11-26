@@ -65,15 +65,21 @@ the person the heights you are about to use and ask for the ones the brief lacks
 
 ### 2. Start Blender, then confirm the file
 
-`engine_start("blender", "t4")` for a render (a GPU renders Cycles; `cpu` is enough to build
-and look), then `engine_files(blender_id, "handoff/cadcraft-to-blender")`.
+`engine_start("blender", "cpu")` builds the model and renders drafts; the `blender` skill says
+which later steps want a GPU tier. Then `engine_files(blender_id, "handoff/cadcraft-to-blender")`.
+
+Before the import, make sure Blender has this project's scene open, or an empty one (the
+`blender` skill, "The engine, the folder, where Blender stands"). A Blender engine opens the
+scene the workspace's last Blender closed with, whichever project that was, and the import
+adds to whatever is open and saves it under this drawing's name.
 
 ### 3. Import
 
 Blender has no command channel: it runs Python handed to `selkies-modal-blender` on standard
 input. With `engine_exec(blender_id, command)`, write the script into the hand-off folder and
 run it (the number is the seconds to wait for Blender, which also covers the first install of
-`ezdxf`, about 12 s):
+`ezdxf`, about 12 s, and in each later session its first use, about 45 s while its modules
+load from the workspace):
 
 ```bash
 P="$SELKIES_MODAL_WORKSPACE/${SELKIES_MODAL_PROJECT:-projects/default}"
@@ -256,9 +262,13 @@ CADCraft (checking.md).
 
 ## Blender back to CADCraft
 
-There is no verified road yet. Blender writes no DXF in this build; a top view can come back
-as a rendered image attached under the drawing (`imageattach` with a known `width` in drawing
-units) for tracing. If the design changed in Blender, measure it there and redraw it here.
+Blender has no DXF exporter in this build, but a model's outline comes back as a drawing: the
+`blender` skill's hand-off reference has a script that cuts the model at a height and writes
+the cut as closed polylines in millimeters into `handoff/blender-to-cadcraft/`. Opened here
+(`open`), those were closed polylines whose areas `shapes` measured. Use it to bring a changed
+footprint back as a layer to draw over; the drawing stays the source, so the change is then
+made here, dimensioned, and sent out again. A top view can also come back as a rendered image
+attached under the drawing (`imageattach` with a known `width` in drawing units) for tracing.
 
 ## On to Unreal Engine
 
