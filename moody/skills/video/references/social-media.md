@@ -129,9 +129,10 @@ from them, and replace any of them with the rule your person gives.
 | 9. Post | The person posts it. You record it | The person | When and where |
 | 10. Learn | Their numbers, read back at set times | You | What to test next |
 
-The engine's own skill has every command of steps 2, 3, 6, and 7. Hand them to the engine's
-operator as one job per clip, or one job for a batch of clips from one source, with the choices
-already made: the moment's times, the hook, the lines, the language.
+The engine's own skill (`cutroom` or `hyperframes`, whichever the state names) has every
+command of steps 2, 3, 6, and 7. Hand them to the engine's operator as one job per clip, or one
+job for a batch of clips from one source, with the choices already made: the moment's times,
+the hook, the lines, the language.
 
 ### Picking moments
 
@@ -300,7 +301,10 @@ minutes.
 
 ## The two engines
 
-The Cut Room is built for this workflow: it cuts existing footage. HyperFrames composes a video
-from HTML, CSS, and animation with footage as a layer, which suits a post that is mostly type
-and motion and suits a long recording less. Use the one the turn's state names, and where it is
-the poor fit, say so in a line and name the setting (Settings, Video editing).
+Which engine edits by code is the person's setting, and the turn's state names it. Use that
+one, by its own skill (`cutroom` or `hyperframes`), and do not ask them to choose. The two
+differ in what they are good at: the Cut Room cuts existing footage with FFmpeg, which is what
+a clip mined from a recording needs; HyperFrames composes a video from HTML, CSS, and animation
+with footage as one of its layers, which is what a post of type and motion needs. Where the
+engine the state names is the poor fit for what they asked, say so in a line, name the setting
+(Settings, Video editing), and do the job with it.

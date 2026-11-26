@@ -121,7 +121,8 @@ from them, and replace any of them with the rule your person gives.
 | 7. Show | `preview` with a `version`, the words to post beside it, and what to judge by ear | You | Approval of the horizontal cut, and what to change |
 | 8. Vertical | The approved cut reframed to 9:16 | The operator | Approval |
 
-The engine's own skill has the commands of steps 2 and 4 to 8.
+The engine's own skill (`cutroom` or `hyperframes`, whichever the state names) has the commands
+of steps 2 and 4 to 8.
 
 ### The outline and the script
 
@@ -193,8 +194,10 @@ Stop the engine when a video is shown and the person is listening.
 
 ## The two engines
 
-The Cut Room cuts a recording to a voice with FFmpeg, which is this workflow. HyperFrames
-composes a video from HTML, CSS, and animation with footage as a layer, which suits an explainer
-made of type, diagrams, and motion with little or no recording. Use the one the turn's state
-names, and where it is the poor fit, say so in a line and name the setting (Settings, Video
-editing).
+Which engine edits by code is the person's setting, and the turn's state names it. Use that
+one, by its own skill (`cutroom` or `hyperframes`), and do not ask them to choose. The two
+differ in what they are good at: the Cut Room cuts existing footage with FFmpeg, which is what
+a recording fitted to a narration needs; HyperFrames composes a video from HTML, CSS, and
+animation with footage as one of its layers, which is what an explainer of type, diagrams, and
+motion needs. Where the engine the state names is the poor fit for what they asked, say so in a
+line, name the setting (Settings, Video editing), and do the job with it.
