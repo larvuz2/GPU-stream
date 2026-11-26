@@ -5,18 +5,14 @@
  */
 
 /**
- * A card's answer: the state its inputs start with, what still has to be chosen before it can be
- * locked in, how it stands against the agent's recommendation, and the answer in words.
+ * A card's answer: the state its inputs start with, whether the person has changed it since,
+ * what still has to be chosen before it can be locked in, and the answer in words.
  *
  * The answer the agent receives is the card's state, `{id: value}` for a `components` card and
  * whatever the document reported for an `html` one. A person reads it as words: on a locked card
  * as a line per input ({@link summarize}), and in the message that carries it as one sentence
  * ({@link describeAnswer}), which the conversation can send as the message's text beside the
  * value.
- *
- * The state a card starts with is the agent's recommendation (`values.ts`), so comparing the
- * state with it ({@link departures}) is what tells the person that locking in is agreeing, what
- * they changed, and what they would return to.
  * @module
  */
 import { isRecord } from '../../lib/narrow';
@@ -95,6 +91,18 @@ export function wordsOf(node: UiNode, value: unknown): string {
 }
 
 /**
+ * Whether a card's values differ from the ones it opened with.
+ *
+ * @param inputs The card's inputs.
+ * @param state The card's values.
+ * @param opened The state the card started with.
+ * @returns `true` once any input holds something else.
+ */
+export function changed(inputs: ReadonlyMap<string, UiNode>, state: UiState, opened: UiState): boolean {
+  return [...inputs.keys()].some((id) => !sameValue(state[id], opened[id]));
+}
+
+/**
  * The inputs in view: those whose own condition holds, and that of everything they are inside.
  *
  * @param root The card's tree.
@@ -136,34 +144,6 @@ export function missing(root: UiNode, inputs: ReadonlyMap<string, UiNode>, state
 }
 
 /**
- * Whether an input holds what the agent recommended for it.
- *
- * @param node The input.
- * @param value Its value.
- * @param recommended What it started as.
- * @returns Whether the two are the same answer, by the component's own reading of its value.
- */
-export function keeps(node: UiNode, value: unknown, recommended: unknown): boolean {
-  return (COMPONENTS[node.type].same ?? sameValue)(value, recommended);
-}
-
-/**
- * Where a card departs from the agent's recommendation.
- *
- * @param inputs The card's inputs.
- * @param state The card's values.
- * @param recommended The state the card started with.
- * @returns The names of the inputs that hold something else, in the order of the card.
- */
-export function departures(
-  inputs: ReadonlyMap<string, UiNode>,
-  state: UiState,
-  recommended: UiState,
-): string[] {
-  return [...inputs].flatMap(([id, node]) => (keeps(node, state[id], recommended[id]) ? [] : [nameOf(id, node)]));
-}
-
-/**
  * A card's answer as a line per input.
  *
  * @param inputs The card's inputs.
@@ -172,22 +152,6 @@ export function departures(
  */
 export function summarize(inputs: ReadonlyMap<string, UiNode>, state: UiState): AnswerLine[] {
   return [...inputs].map(([id, node]) => ({ id, label: nameOf(id, node), words: wordsOf(node, state[id]) }));
-}
-
-/**
- * Where a value of an `html` card departs from the one its document opened on.
- *
- * @param value What the document last reported.
- * @param recommended What it opened on.
- * @returns The fields that differ, as the words a person reads, where both are objects; nothing
- *   where the difference has no name.
- */
-export function departuresOfValue(value: unknown, recommended: unknown): string[] {
-  if (!isRecord(value) || !isRecord(recommended)) {
-    return [];
-  }
-  const keys = [...new Set([...Object.keys(recommended), ...Object.keys(value)])];
-  return keys.filter((key) => !sameValue(value[key], recommended[key])).map(asWords);
 }
 
 /**

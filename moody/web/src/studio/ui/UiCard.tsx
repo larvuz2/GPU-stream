@@ -16,15 +16,11 @@
  * (`context.ts`). An `html` card is a document of the agent's own, run in a sandboxed frame
  * (`HtmlCard.tsx`).
  *
- * A card that asks for an answer opens on the agent's recommendation: its starting state is what
- * the card's inputs state as recommended (`values.ts`), each input marks it and offers the way
- * back to it (`Recommend.tsx`), and the foot says whether the card still stands as recommended,
- * so pressing the lock-in button untouched is agreeing (`LockBar.tsx`).
- *
  * A card has three states, and says which it is in:
  *
  * - **Open and live**: the controls change the card, and the lock-in button sends its state to
- *   `onSubmit`. A required choice not yet made holds the button and names what is missing.
+ *   `onSubmit`. A required choice not yet made holds the button and names what is missing. Once
+ *   anything differs from how the card opened, the foot offers the way back to that.
  * - **Open but not live**: the controls still work, so the card can be explored, but it cannot be
  *   answered now (the agent is working, or the conversation moved past it), and it says so.
  * - **Locked**: the controls show what was locked in and take no change, and the card lists it.
@@ -36,7 +32,7 @@
  */
 import { useId, useMemo, useState } from 'react';
 import { isRecord } from '../../lib/narrow';
-import { departures, inputsOf, keeps, missing, startState, summarize, wordsOf } from './answer';
+import { changed, inputsOf, missing, startState, summarize, wordsOf } from './answer';
 import { CardContext, type Card } from './context';
 import { HtmlCard } from './HtmlCard';
 import { LockBar } from './LockBar';
@@ -56,8 +52,8 @@ export interface UiCardProps {
   onSubmit: (value: unknown) => void;
   /**
    * What the person had already changed on a `components` card, by input id, where whoever draws
-   * the card kept it: the card opens with these in place of the recommended values, and still
-   * knows what was recommended. The gallery shows a card in the middle of a decision with it.
+   * the card kept it: the card shows these in place of the values it opens with, and still knows
+   * how it opened. The gallery shows a card in the middle of a decision with it.
    */
   draft?: Record<string, unknown>;
 }
@@ -109,8 +105,6 @@ function ComponentsCard({ ui, locked, live, onSubmit, draft }: UiCardProps) {
   const files = useMemo(() => new Map(ui.media.map((file): [string, UiMedia] => [file.name, file])), [ui.media]);
 
   const frozen = locked !== null;
-  // Only a card that sends an answer back puts a decision to the person, so only it recommends.
-  const answers = ui.submit !== null;
   const state = useMemo(
     () => ({ ...start, ...(locked === null ? changes : isRecord(locked.value) ? locked.value : {}) }),
     [start, changes, locked],
@@ -129,29 +123,15 @@ function ComponentsCard({ ui, locked, live, onSubmit, draft }: UiCardProps) {
         const node = inputs.get(id);
         return node === undefined ? '' : wordsOf(node, state[id]);
       },
-      advice: (id) => {
-        const node = inputs.get(id);
-        if (!answers || node === undefined) {
-          return null;
-        }
-        return { value: start[id], words: wordsOf(node, start[id]), kept: keeps(node, state[id], start[id]) };
-      },
-      reset: (id) => {
-        if (!frozen) {
-          setChanges((current) => Object.fromEntries(Object.entries(current).filter(([changed]) => changed !== id)));
-        }
-      },
       uid,
     }),
-    [state, start, answers, frozen, files, inputs, uid],
+    [state, frozen, files, inputs, uid],
   );
 
   if (root === null) {
     return <p className="ui-text-muted">This card cannot be shown here.</p>;
   }
   const unchosen = missing(root, inputs, state);
-  const changed = answers ? departures(inputs, state, start) : null;
-  const standing = changed === null ? null : { kept: changed.length === 0, changed };
   return (
     <CardContext value={card}>
       <div className="ui-body">
@@ -163,8 +143,8 @@ function ComponentsCard({ ui, locked, live, onSubmit, draft }: UiCardProps) {
         live={live}
         blocked={unchosen === null ? null : `Still to choose: ${unchosen}`}
         summary={frozen ? summarize(inputs, state) : []}
-        advice={standing}
-        onReturn={() => {
+        changed={!frozen && changed(inputs, state, start)}
+        onDefault={() => {
           setChanges({});
         }}
         onLock={() => {

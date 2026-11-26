@@ -39,20 +39,6 @@ misspelled. A card with several problems is refused with all of them, up to
 `limits.problems`, so it is fixed in one more call rather than one per
 mistake.
 
-A card that sends an answer back (one with a `submit` label) is a decision
-put to the person, and the agent recommends an answer to every decision
-("The agent recommends" in `moody/STUDIO.md`). The catalog names, in each
-answering component's `start`, the properties that state that answer: the
-option an input that chooses would choose (`recommended`), and the value an
-input that sets one starts at. The check refuses an answering card whose
-input leaves one unstated, a recommendation that is not among what can be
-chosen, and a required input in view that opens empty, since the card opens
-on the recommendation and agreeing has to be one press of the lock-in button.
-An `html` card says its recommendation through the bridge
-(`moody.recommend`), which the check asks its document to call. A card with
-nothing to send back decides nothing, so it needs none of this; there
-`recommended` only says where an input opens.
-
 A card names the files it shows in `media`, each by a library tag or by a
 file an engine wrote in the project's folder (`media_requests`); the
 components refer to them by name, and the check knows each one's kind before
@@ -84,13 +70,6 @@ COLOR = re.compile(r"#[0-9a-fA-F]{6}")
 COMPARISONS = ("not", "gt", "lt", "has")
 # What an `html` card's document calls to report or lock in its value
 BRIDGE_CALLS = ("moody.setState", "moody.submit")
-# What it calls to say which value it opened on: the agent's recommendation
-RECOMMEND_CALL = "moody.recommend"
-# Why an answering card states a recommendation, said with the first problem of the kind
-RECOMMEND_REASON = (
-    "A card with a submit label opens on the answer you recommend, so the person can agree in one click, "
-    "see it marked (recommended), and come back to it after trying something else."
-)
 # The longest value of an option or a cell
 VALUE_CHARS = 200
 SCALARS = (str, int, float, bool)
@@ -151,19 +130,12 @@ class UiCatalog:
             "file",
         )
 
-    def signature(
-        self, properties: dict[str, dict[str, Any]], start: tuple[str, ...] = ()
-    ) -> str:
-        """Properties as one line.
-
-        `*` follows a required one, `~` one that can follow an input, `!` one
-        that states the recommendation (`start`), and `=` leads a default.
-        """
+    def signature(self, properties: dict[str, dict[str, Any]]) -> str:
+        """Properties as one line: `*` after a required one, `~` after one that can follow an input, `=` a default."""
         return ", ".join(
             name
             + ("*" if spec.get("required") else "")
             + ("~" if spec.get("bind") else "")
-            + ("!" if name in start else "")
             + (
                 f"={json.dumps(spec['default'])}"
                 if "default" in spec and not spec.get("required")
@@ -177,11 +149,8 @@ class UiCatalog:
         lines = [
             'A card is one component: {"type": name, ...properties}, with others in `children`. An input has an `id`, '
             'and the card\'s answer is {id: value}. Marks: * required, ~ also takes "$id" to follow that input live, '
-            "= the default, ! your recommendation. In a card with `submit`, every input has to state its ! properties: "
-            "`recommended` is the option you would choose (by its value; a list where the answer is one), and a value "
-            'is where the input starts. The card opens on them, the page marks them "(recommended)", and the person '
-            "agrees in one click or changes them and can always come back. A text shows an input's value as {id}. "
-            "Every component also takes `when`: " + self.data["common"]["when"]["doc"],
+            "= the default. A text shows an input's value as {id}. Every component also takes `when`: "
+            + self.data["common"]["when"]["doc"],
         ]
         for group in dict.fromkeys(
             entry["group"] for entry in self.components.values()
@@ -190,10 +159,9 @@ class UiCatalog:
             for name, entry in self.components.items():
                 if entry["group"] == group:
                     answer = f" Answer: {entry['input']}." if "input" in entry else ""
-                    signature = self.signature(
-                        entry["props"], tuple(entry.get("start", ()))
+                    lines.append(
+                        f"- {name}({self.signature(entry['props'])}): {entry['doc']}{answer}"
                     )
-                    lines.append(f"- {name}({signature}): {entry['doc']}{answer}")
         lines.append("List items:")
         for name, shape in self.shapes.items():
             lines.append(
@@ -256,37 +224,16 @@ def key(value: Any) -> str:
     return json.dumps(value, sort_keys=True)
 
 
-@dataclass(frozen=True)
-class Choices:
-    """What an input chooses among: the values it may answer with, and whether it answers with several."""
-
-    values: list[Any]
-    # What the values are of, as a problem names them: options, rows, tabs
-    what: str
-    many: bool
-
-    @property
-    def listed(self) -> str:
-        """The values as a problem lists them."""
-        return ", ".join(map(key, self.values))
-
-
 class Check:
     """One walk of a card's tree against the catalog, collecting what is wrong with it (`problems`).
 
     `media` is the card's files by name, each with its kind; `inputs` ends as
-    the component of each id. `answers` says the card sends an answer back,
-    which is when every input has to state the agent's recommendation.
+    the component of each id.
     """
 
-    def __init__(
-        self, catalog: UiCatalog, media: dict[str, str], answers: bool = False
-    ) -> None:
+    def __init__(self, catalog: UiCatalog, media: dict[str, str]) -> None:
         self.catalog = catalog
         self.media = media
-        self.answers = answers
-        # Whether a problem has already said why a recommendation is asked for
-        self.reasoned = False
         self.problems: list[str] = []
         self.inputs: dict[str, str] = {}
         # Where each id was defined, to name it when another component takes the same one
@@ -313,19 +260,8 @@ class Check:
 
     # The tree
 
-    def node(
-        self,
-        value: Any,
-        where: str,
-        depth: int,
-        parent: str | None,
-        conditional: bool = False,
-    ) -> None:
-        """Check one component and everything under it.
-
-        `conditional` says something above it is shown only on a condition,
-        so it may be out of view as the card opens.
-        """
+    def node(self, value: Any, where: str, depth: int, parent: str | None) -> None:
+        """Check one component and everything under it."""
         components = self.catalog.components
         if not isinstance(value, dict) or not isinstance(value.get("type"), str):
             self.problem(
@@ -354,7 +290,6 @@ class Check:
             )
         properties = self.catalog.properties(name)
         self.define(value, here, name)
-        conditional = conditional or "when" in value
         for given in value:
             if given != "type" and given not in properties:
                 self.unknown(here, given, list(properties))
@@ -366,15 +301,10 @@ class Check:
                         + (f": {spec['doc']}" if "doc" in spec else ".")
                     )
             elif spec["kind"] == "nodes":
-                self.children(
-                    spec, value[prop], f"{where}.{prop}", depth, name, conditional
-                )
+                self.children(spec, value[prop], f"{where}.{prop}", depth, name)
             else:
                 self.prop(spec, value[prop], f"{here}.{prop}")
-        choices = self.consistent(properties, value, here)
-        given = value.get("id")
-        if self.answers and isinstance(given, str) and ID.fullmatch(given):
-            self.recommends(entry, properties, value, here, choices, conditional)
+        self.consistent(properties, value, here)
 
     def define(self, value: dict[str, Any], here: str, component: str) -> None:
         """Note a component's id as an input's, refusing one another component took."""
@@ -389,53 +319,8 @@ class Check:
             self.defined[given] = here
             self.inputs[given] = component
 
-    def recommends(
-        self,
-        entry: dict[str, Any],
-        properties: dict[str, dict[str, Any]],
-        value: dict[str, Any],
-        here: str,
-        choices: Choices | None,
-        conditional: bool,
-    ) -> None:
-        """Check that an input of a card that answers states the recommendation it opens on.
-
-        The properties that state it are the component's `start` in the
-        catalog. One left out is a problem that says what to give, with what
-        can be chosen where it is a choice. A required input in view whose
-        recommendation is nothing is one too: the card could not be locked in
-        as it opens, and agreeing would not be one click.
-        """
-        required = value.get("required", properties.get("required", {}).get("default"))
-        for prop in entry.get("start", ()):
-            spec = properties[prop]
-            if prop not in value:
-                # A required property left out was reported as missing
-                if not spec.get("required"):
-                    among = (
-                        f" It can be {'any of' if choices.many else 'one of'}: {choices.listed}."
-                        if prop == "recommended" and choices is not None
-                        else ""
-                    )
-                    reason = "" if self.reasoned else f" {RECOMMEND_REASON}"
-                    self.reasoned = True
-                    self.problem(
-                        f'{here} has no "{prop}". {spec["doc"]}{among}{reason}'
-                    )
-            elif required is True and not conditional and value[prop] in ("", []):
-                self.problem(
-                    f'{here} is required, but its "{prop}" is empty, so the card could not be locked in as it opens. '
-                    'State what you would answer, or set "required" to false.'
-                )
-
     def children(
-        self,
-        spec: dict[str, Any],
-        value: Any,
-        where: str,
-        depth: int,
-        parent: str,
-        conditional: bool = False,
+        self, spec: dict[str, Any], value: Any, where: str, depth: int, parent: str
     ) -> None:
         """Check a component's children, which may be limited to some components (`only`)."""
         if not isinstance(value, list) or not value:
@@ -453,7 +338,7 @@ class Check:
                     f"{where}[{index}] ({child['type']}): a {parent} holds only {' or '.join(only)} components; put this inside one."
                 )
             else:
-                self.node(child, f"{where}[{index}]", depth + 1, parent, conditional)
+                self.node(child, f"{where}[{index}]", depth + 1, parent)
 
     # A property, by its kind
 
@@ -661,13 +546,8 @@ class Check:
 
     def consistent(
         self, properties: dict[str, dict[str, Any]], value: dict[str, Any], here: str
-    ) -> Choices | None:
-        """Check what a component's properties have to agree on.
-
-        Returns:
-            What the component chooses among, for one that takes a
-            recommendation of its options, rows, or tabs; `None` for any other.
-        """
+    ) -> None:
+        """Check what a component's properties have to agree on."""
 
         def number(prop: str) -> float | None:
             given = value.get(prop, properties.get(prop, {}).get("default"))
@@ -698,16 +578,6 @@ class Check:
         if step is not None and step <= 0:
             self.problem(f"{here}: step should be above 0; it is {step}.")
         allowed: list[Any] | None = None
-        what = "options"
-        tabs = (
-            [
-                child
-                for child in value.get("children", [])
-                if isinstance(child, dict) and child.get("type") == "tab"
-            ]
-            if isinstance(value.get("children"), list)
-            else []
-        )
         if isinstance(value.get("options"), list):
             options = [
                 option.get("value") if isinstance(option, dict) else option
@@ -718,7 +588,6 @@ class Check:
         elif isinstance(value.get("rows"), list) and isinstance(
             value.get("columns"), list
         ):
-            what = "rows, each named by its first cell"
             rows = [row for row in value["rows"] if isinstance(row, list)]
             for index, row in enumerate(rows):
                 if len(row) != len(value["columns"]):
@@ -732,39 +601,38 @@ class Check:
                     f"{here}.rows",
                     "first cells, which are what a picked row answers with",
                 )
-        elif tabs:
-            what = "tabs, each named by its value, or by its label where it has none"
-            allowed = [
-                named
-                for tab in tabs
-                if isinstance(named := tab.get("value", tab.get("label")), SCALARS)
-            ]
-            if "id" in value:
-                self.distinct(allowed, f"{here}.children", "tab values")
-        if allowed is None or "recommended" not in properties:
-            return None
-        listed = properties["recommended"]["kind"] == "list"
-        choices = Choices(
-            allowed,
-            what,
-            listed or value.get("many") is True or value.get("pick") == "many",
-        )
-        if "recommended" in value:
-            chosen = value["recommended"]
-            if choices.many != isinstance(chosen, list):
-                # A recommendation that is always a list was already checked as one
+        if allowed is not None and "value" in value and "value" in properties:
+            listed = properties["value"]["kind"] == "list"
+            many = listed or value.get("many") is True or value.get("pick") == "many"
+            chosen = value["value"]
+            if many != isinstance(chosen, list):
+                # A value that is always a list was already checked as one
                 if not listed:
                     self.problem(
-                        f"{here}.recommended should be {'a list of the ones you would choose' if choices.many else 'one value, not a list'}."
+                        f"{here}.value should be {'a list of the values chosen at first' if many else 'one value, not a list'}."
                     )
             elif any(
                 key(one) not in map(key, allowed)
-                for one in (chosen if choices.many else [chosen])
+                for one in (chosen if many else [chosen])
             ):
                 self.problem(
-                    f"{here}.recommended should be {'among' if choices.many else 'one of'} its {what}: {choices.listed}."
+                    f"{here}.value should be {'among' if many else 'one of'} its {'options' if 'options' in value else 'rows'}: {', '.join(map(key, allowed))}."
                 )
-        return choices
+        tabs = (
+            [
+                child
+                for child in value.get("children", [])
+                if isinstance(child, dict) and child.get("type") == "tab"
+            ]
+            if isinstance(value.get("children"), list)
+            else []
+        )
+        if tabs and "id" in value:
+            self.distinct(
+                [tab.get("value", tab.get("label")) for tab in tabs],
+                f"{here}.children",
+                "tab values",
+            )
 
     def distinct(self, values: list[Any], where: str, what: str) -> None:
         """Refuse values that repeat where each has to tell one choice from another."""
@@ -962,7 +830,7 @@ def card(
         "waits": bool(waits),
     }
     if html is None:
-        check = Check(catalog, media, answers=submit is not None)
+        check = Check(catalog, media)
         check.run(components)
         return {**data, "spec": components}, check.inputs
     if not isinstance(html, str) or not html.strip():
@@ -979,19 +847,13 @@ def card(
                 "what it draws in script rather than writing it out, and carry pictures and sound as `media`, not inline."
             ]
         )
-    unsaid: list[str] = []
     if submit is not None and not any(call in html for call in BRIDGE_CALLS):
-        unsaid.append(
-            f"The card has a submit label, but its document never calls {' or '.join(BRIDGE_CALLS)}, so there would be "
-            "nothing to send back. Call moody.setState(value) whenever the person changes something."
+        raise Invalid(
+            [
+                f"The card has a submit label, but its document never calls {' or '.join(BRIDGE_CALLS)}, so there would be "
+                "nothing to send back. Call moody.setState(value) whenever the person changes something."
+            ]
         )
-    if submit is not None and RECOMMEND_CALL not in html:
-        unsaid.append(
-            f"The card has a submit label, but its document never calls {RECOMMEND_CALL}. Draw the document on the answer "
-            f"you recommend and call {RECOMMEND_CALL}(value) with it before anything else. {RECOMMEND_REASON}"
-        )
-    if unsaid:
-        raise Invalid(unsaid)
     if height is not None and (
         isinstance(height, bool)
         or not isinstance(height, int)
@@ -1010,28 +872,21 @@ DESCRIPTION = (
     "prose or a list of options would make them imagine it. Give `components`, a tree of the catalog's components "
     "(which covers most cards with no code), or `html`, a document of your own run in a sandboxed frame (for what the "
     "catalog cannot express). With `submit`, the card has a lock-in button of that label, and pressing it sends the "
-    "card's values back to you as the person's next message; `waits: true` also ends your turn until they do. A card "
-    "with `submit` is a decision you put to the person, so it carries the answer you would give, chosen for the brief "
-    'and the project\'s taste: it opens on your recommendation, the page marks it "(recommended)" and keeps the way '
-    "back to it one click away, and locking it in untouched is agreeing with you. Say why in a line of the card "
-    "where the reason matters. A card that is not valid is not shown, and the result says what to fix."
+    "card's values back to you as the person's next message; `waits: true` also ends your turn until they do. A "
+    "card that is not valid is not shown, and the result says what to fix."
 )
 HTML_REFERENCE = (
     "The card's document, or a fragment of one, with its style and script inline; it runs in a sandboxed frame with no "
-    "network, no storage, and no access to the page. `window.moody` is there before your script runs: "
-    f"`{RECOMMEND_CALL}(value)` (with `submit`, call it first, with the answer you recommend, and draw the document "
-    "on it: the page then says the card is as you recommend, and once the person changes it offers the way back, "
-    "which starts your document again), `moody.state` (your recommendation after that call; the value last set, or "
-    "locked in, when the card is shown again, so draw from it), `moody.locked` (true once locked in: show the value "
-    "and change nothing), `moody.media.<name>` (an address for an img, audio, or video element), "
+    "network, no storage, and no access to the page. `window.moody` is there before your script runs: `moody.state` "
+    "(null at first; the value last set, or locked in, when the card is shown again), `moody.locked` (true once locked "
+    "in: show the value and change nothing), `moody.media.<name>` (an address for an img, audio, or video element), "
     "`await moody.load(name)` (the file's bytes as an ArrayBuffer, for decoding sound or reading pixels), "
     "`moody.setState(value)` (call it whenever the person changes something: the lock-in button sends the last value), "
     "and `moody.submit(value)` (locks in at once, for a card whose own gesture is the answer). Values are JSON. The "
     "frame's height follows the document. Use the theme's CSS variables so it looks like the conversation: "
     "--moody-bg, --moody-surface, --moody-line, --moody-fg, --moody-muted, --moody-lime (the person's action or "
     "selection), --moody-lavender (yours), --moody-font, --moody-mono; buttons, sliders, selects, and text inputs are "
-    'already styled, and class="moody-recommended" is the quiet tone for the words "(recommended)" after the option '
-    "you would choose."
+    "already styled."
 )
 
 
@@ -1047,8 +902,7 @@ def properties(catalog: UiCatalog) -> dict[str, Any]:
         "html": {"type": "string", "description": HTML_REFERENCE},
         "submit": {
             "type": "string",
-            "description": "The lock-in button's label, such as Lock in this look. With it, every input states your "
-            "recommendation. Left out: the card sends nothing back and decides nothing.",
+            "description": "The lock-in button's label, such as Lock in this look. Left out: the card sends nothing back.",
         },
         "waits": {
             "type": "boolean",

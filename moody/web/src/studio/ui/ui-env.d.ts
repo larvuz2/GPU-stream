@@ -15,8 +15,6 @@ declare module 'react' {
     /** Where the lit part of a slider's track starts and ends, as percentages of the track. */
     '--ui-from'?: string;
     '--ui-to'?: string;
-    /** Where on a slider's track the agent's recommended value is, as a number of percent. */
-    '--ui-advised'?: string;
     /** How a layer of a composite blends with the layers under it: one of the catalog's `blends`. */
     '--ui-blend'?: string;
   }

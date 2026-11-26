@@ -31,9 +31,8 @@
  *
  * The frame is made to look like the conversation: the site's design tokens are read from the
  * page as it is styled now and given to the document as `--moody-*` variables
- * ({@link THEME}), over a small sheet that sets the page's type, gives buttons, fields, and
- * sliders the conversation's look, and offers the quiet tone of the words "(recommended)" as a
- * class (`moody-recommended`), and the page's own font file is handed in as a `data:`
+ * ({@link THEME}), over a small sheet that sets the page's type and gives buttons, fields, and
+ * sliders the conversation's look, and the page's own font file is handed in as a `data:`
  * address, since the frame could not fetch it. The document's background is left clear, so the
  * card's own surface shows through and the frame has no edge.
  * @module
@@ -82,7 +81,6 @@ button:disabled{opacity:.5;cursor:default}
 input:not([type]),input[type=text],input[type=number],select,textarea{height:2.1rem;padding:0 .6rem;border:1px solid var(--moody-line-strong);border-radius:.5rem;background:var(--moody-surface);color:var(--moody-fg);font:inherit}
 textarea{height:auto;padding:.5rem .6rem}
 label{color:var(--moody-soft);font-size:.8125rem}
-.moody-recommended{color:color-mix(in oklab,var(--moody-lavender) 72%,transparent);font-family:var(--moody-font);font-size:.6875rem;font-weight:400;letter-spacing:0;white-space:nowrap}
 input[type=checkbox],input[type=radio]{accent-color:var(--moody-lime)}
 input[type=range]{width:100%;height:1.25rem;margin:0;background:transparent;cursor:pointer;-webkit-appearance:none;appearance:none}
 input[type=range]::-webkit-slider-runnable-track{height:.25rem;background:linear-gradient(to right,var(--moody-lime) var(--moody-fill,0%),var(--moody-line-strong) var(--moody-fill,0%))}

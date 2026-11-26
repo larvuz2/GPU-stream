@@ -14,17 +14,10 @@
  * by its label, or by its id as words where the card gave none. A control writes its value to the
  * card's state (`context.ts`) on every change, which is what lets a picture follow a slider as it
  * is dragged; on a locked card the controls are disabled and show what was chosen.
- *
- * On a card that asks for an answer, each input shows what the agent recommends (`Recommend.tsx`).
- * One that chooses marks the recommended option after its label. One that sets a value carries
- * the mark after its own label while it holds the recommended value, and the way back to it once
- * it does not; a slider also keeps a tick on its track where the recommendation is.
  * @module
  */
 import type { ReactNode } from 'react';
 import { isBoolean, isNumber, isString } from '../../../lib/narrow';
-import { isRecommended } from '../context';
-import { Advised, Recommended, WayBack } from '../Recommend';
 import { number, options, text, type Scalar } from '../tree';
 import { clamp, range, withUnit } from '../values';
 import { useInput, type InputBinding, type ViewProps } from '../view';
@@ -35,35 +28,28 @@ interface LabeledProps {
   input: InputBinding;
   /** What sits at the end of the label's line, such as a slider's value. */
   readout?: ReactNode;
-  /**
-   * What follows the label about the agent's recommendation, where that is not the mark or the
-   * way back every value takes; `null` for an input that shows it another way.
-   */
-  advised?: ReactNode;
   /** The control. */
   children: ReactNode;
 }
 
 /**
- * Renders a control under its label, the agent's recommendation after it.
+ * Renders a control under its label.
  *
  * @param props The component's props.
  * @returns The labeled control.
  */
-function Labeled({ input, readout, advised, children }: LabeledProps) {
-  const mark = advised === undefined ? <Advised input={input} /> : advised;
+function Labeled({ input, readout, children }: LabeledProps) {
   return (
     <div className="ui-input">
-      {input.labeled || readout !== undefined || (input.advice !== null && mark !== null) ? (
+      {input.labeled || readout !== undefined ? (
         <div className="ui-input-head">
-          <span className="ui-label-line">
-            {input.labeled ? (
-              <label htmlFor={input.domId} className="ui-label">
-                {input.label}
-              </label>
-            ) : null}
-            {mark}
-          </span>
+          {input.labeled ? (
+            <label htmlFor={input.domId} className="ui-label">
+              {input.label}
+            </label>
+          ) : (
+            <span />
+          )}
           {readout}
         </div>
       ) : null}
@@ -89,7 +75,6 @@ export function Slider({ node }: ViewProps) {
   // range spans it, so a slider of -100 to 100 reads as a push either way, else from its least.
   const rest = share(0);
   const at = share(value);
-  const advice = input.advice;
   return (
     <Labeled
       input={input}
@@ -99,29 +84,22 @@ export function Slider({ node }: ViewProps) {
         </output>
       }
     >
-      <div
-        className="ui-range-wrap"
-        // The tick stays where the agent's value is, so it is in sight while the thumb is elsewhere.
-        data-advised={advice !== null && isNumber(advice.value) ? 'true' : undefined}
-        style={advice !== null && isNumber(advice.value) ? { '--ui-advised': `${share(advice.value)}` } : undefined}
-      >
-        <input
-          id={input.domId}
-          type="range"
-          className="ui-range"
-          min={low}
-          max={high}
-          step={step}
-          value={value}
-          disabled={input.frozen}
-          aria-label={input.labeled ? undefined : input.label}
-          aria-valuetext={advice?.kept === true ? `${withUnit(node, value)} (recommended)` : withUnit(node, value)}
-          style={{ '--ui-from': `${Math.min(rest, at)}%`, '--ui-to': `${Math.max(rest, at)}%` }}
-          onChange={(event) => {
-            input.set(event.target.valueAsNumber);
-          }}
-        />
-      </div>
+      <input
+        id={input.domId}
+        type="range"
+        className="ui-range"
+        min={low}
+        max={high}
+        step={step}
+        value={value}
+        disabled={input.frozen}
+        aria-label={input.labeled ? undefined : input.label}
+        aria-valuetext={withUnit(node, value)}
+        style={{ '--ui-from': `${Math.min(rest, at)}%`, '--ui-to': `${Math.max(rest, at)}%` }}
+        onChange={(event) => {
+          input.set(event.target.valueAsNumber);
+        }}
+      />
     </Labeled>
   );
 }
@@ -178,8 +156,7 @@ export function Select({ node }: ViewProps) {
   const choices = options(node);
   const chosen = choices.findIndex((choice) => choice.value === input.value);
   return (
-    // The closed dropdown reads as recommended by its own option's words, so only the way back follows the label.
-    <Labeled input={input} advised={input.advice?.kept === true ? null : undefined}>
+    <Labeled input={input}>
       <select
         id={input.domId}
         className="ui-field ui-select"
@@ -197,7 +174,7 @@ export function Select({ node }: ViewProps) {
         {chosen === -1 ? <option value="">Choose…</option> : null}
         {choices.map((choice, index) => (
           <option key={String(choice.value)} value={String(index)}>
-            {isRecommended(input.advice, choice.value) ? `${choice.label} (recommended)` : choice.label}
+            {choice.label}
           </option>
         ))}
       </select>
@@ -211,8 +188,6 @@ interface GroupProps {
   input: InputBinding;
   /** The classes of the frame that holds the choices. */
   className: string;
-  /** What follows the choices, such as the way back to the ones recommended. */
-  foot?: ReactNode;
   /** The choices. */
   children: ReactNode;
 }
@@ -223,12 +198,11 @@ interface GroupProps {
  * @param props The component's props.
  * @returns The fieldset.
  */
-function Group({ input, className, foot, children }: GroupProps) {
+function Group({ input, className, children }: GroupProps) {
   return (
     <fieldset className="ui-input" disabled={input.frozen} aria-label={input.labeled ? undefined : input.label}>
       {input.labeled ? <legend className="ui-label">{input.label}</legend> : null}
       <div className={className}>{children}</div>
-      {foot}
     </fieldset>
   );
 }
@@ -254,15 +228,7 @@ export function Segmented({ node }: ViewProps) {
               input.set(choice.value);
             }}
           />
-          <span>
-            {choice.label}
-            {isRecommended(input.advice, choice.value) ? (
-              <>
-                {' '}
-                <Recommended />
-              </>
-            ) : null}
-          </span>
+          <span>{choice.label}</span>
         </label>
       ))}
     </Group>
@@ -278,25 +244,21 @@ export function Segmented({ node }: ViewProps) {
 export function Toggle({ node }: ViewProps) {
   const input = useInput(node);
   return (
-    <div className="ui-toggle-line">
-      <label className="ui-toggle">
-        <input
-          id={input.domId}
-          type="checkbox"
-          role="switch"
-          className="sr-only"
-          checked={isBoolean(input.value) ? input.value : false}
-          disabled={input.frozen}
-          onChange={(event) => {
-            input.set(event.target.checked);
-          }}
-        />
-        <span className="ui-switch" aria-hidden="true" />
-        <span className="ui-label">{input.label}</span>
-      </label>
-      {/* A switch shows no word for its state, so the mark says which state is recommended. */}
-      <Advised input={input} shown={false} />
-    </div>
+    <label className="ui-toggle">
+      <input
+        id={input.domId}
+        type="checkbox"
+        role="switch"
+        className="sr-only"
+        checked={isBoolean(input.value) ? input.value : false}
+        disabled={input.frozen}
+        onChange={(event) => {
+          input.set(event.target.checked);
+        }}
+      />
+      <span className="ui-switch" aria-hidden="true" />
+      <span className="ui-label">{input.label}</span>
+    </label>
   );
 }
 
@@ -311,11 +273,7 @@ export function Checkboxes({ node }: ViewProps) {
   const chosen: unknown[] = Array.isArray(input.value) ? input.value : [];
   const choices = options(node);
   return (
-    <Group
-      input={input}
-      className="ui-checks"
-      foot={input.advice === null || input.advice.kept || input.frozen ? null : <WayBack input={input} />}
-    >
+    <Group input={input} className="ui-checks">
       {choices.map((choice) => (
         <label key={String(choice.value)} className="ui-check">
           <input
@@ -331,15 +289,7 @@ export function Checkboxes({ node }: ViewProps) {
             }}
           />
           <span className="ui-check-mark" aria-hidden="true" />
-          <span>
-            {choice.label}
-            {isRecommended(input.advice, choice.value) ? (
-              <>
-                {' '}
-                <Recommended />
-              </>
-            ) : null}
-          </span>
+          <span>{choice.label}</span>
         </label>
       ))}
     </Group>
@@ -364,8 +314,7 @@ export function Field({ node }: ViewProps) {
     'aria-label': input.labeled ? undefined : input.label,
   };
   return (
-    // A field the agent would leave empty recommends no words, so there is nothing to mark or return to.
-    <Labeled input={input} advised={input.advice?.value === '' ? null : undefined}>
+    <Labeled input={input}>
       {lines > 1 ? (
         <textarea
           {...shared}

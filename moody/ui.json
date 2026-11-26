@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "The catalog of the interactive cards Moody's agent shows in a conversation (`show_ui`). The control plane builds the tool's reference from it and checks every card against it (moody/control/genui.py); the app renders from it (moody/web/src/studio/ui). A component is an entry here plus its renderer there. A component that answers names in `start` the properties that state the agent's recommendation, which a card that sends an answer back has to give.",
+  "about": "The catalog of the interactive cards Moody's agent shows in a conversation (`show_ui`). The control plane builds the tool's reference from it and checks every card against it (moody/control/genui.py); the app renders from it (moody/web/src/studio/ui). A component is an entry here plus its renderer there.",
   "limits": {
     "title_chars": 120,
     "submit_chars": 40,
@@ -124,10 +124,8 @@
       "doc": "One tab of children in view at a time. With an id, the open tab is an answer.",
       "input": "the open tab's value",
       "optional_id": true,
-      "start": ["recommended"],
       "props": {
         "id": { "kind": "id" },
-        "recommended": { "kind": "value", "doc": "The tab you would open, by its value; the card opens on it." },
         "children": { "kind": "nodes", "only": ["tab"], "required": true }
       }
     },
@@ -206,13 +204,12 @@
       "doc": "Rows under column headings. With an id, the person picks rows, and the answer is each picked row's first cell.",
       "input": "the picked row's first cell, or a list of them with pick: many",
       "optional_id": true,
-      "start": ["recommended"],
       "props": {
         "id": { "kind": "id" },
         "columns": { "kind": "list", "of": { "kind": "string" }, "required": true },
         "rows": { "kind": "list", "of": { "kind": "list", "of": { "kind": "value" } }, "required": true },
         "pick": { "kind": "enum", "values": ["one", "many"], "default": "one" },
-        "recommended": { "kind": "any", "doc": "The row you would pick, by its first cell; with pick: many, a list of them, which may be empty." }
+        "value": { "kind": "any", "doc": "The rows picked at first." }
       }
     },
     "chart": {
@@ -228,15 +225,14 @@
     },
     "model": {
       "group": "content",
-      "doc": "A 3D model the person orbits and zooms. With an id, the view they leave it at is an answer, and azimuth and elevation are the view you recommend.",
+      "doc": "A 3D model the person orbits and zooms. With an id, the view they leave it at is an answer.",
       "input": "{azimuth, elevation, zoom}: the view in degrees and a zoom factor",
       "optional_id": true,
-      "start": ["azimuth", "elevation"],
       "props": {
         "id": { "kind": "id" },
         "src": { "kind": "media", "kinds": ["model"], "required": true },
-        "azimuth": { "kind": "number", "min": -180, "max": 180, "default": 35, "doc": "Where the view starts, in degrees around the model: the view you recommend." },
-        "elevation": { "kind": "number", "min": -85, "max": 85, "default": 15, "doc": "Where the view starts, in degrees above the model: the view you recommend." },
+        "azimuth": { "kind": "number", "min": -180, "max": 180, "default": 35, "doc": "Where the view starts: degrees around the model." },
+        "elevation": { "kind": "number", "min": -85, "max": 85, "default": 15, "doc": "And degrees above it." },
         "finish": { "kind": "enum", "values": "finishes", "default": "original", "bind": true },
         "color": { "kind": "color", "bind": true, "doc": "The finish's color; the original finish ignores it." },
         "spin": { "kind": "boolean", "default": false, "bind": true, "doc": "Turn slowly until the person takes over." }
@@ -244,27 +240,25 @@
     },
     "layers": {
       "group": "content",
-      "doc": "Pictures composited as layers. With an id, the person picks a layer from a dropdown and sets its visibility and opacity; each layer's own visible and opacity are what you recommend.",
+      "doc": "Pictures composited as layers. With an id, the person picks a layer from a dropdown and sets its visibility and opacity.",
       "input": "{selected, layers: {name: {visible, opacity}}}",
       "optional_id": true,
-      "start": ["layers"],
       "props": {
         "id": { "kind": "id" },
-        "layers": { "kind": "list", "of": "layer", "required": true, "doc": "The layers, the first at the bottom, each with the visible and opacity you recommend." }
+        "layers": { "kind": "list", "of": "layer", "required": true }
       }
     },
     "slider": {
       "group": "input",
       "doc": "A number the person drags.",
       "input": "a number",
-      "start": ["value"],
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
         "min": { "kind": "number", "default": 0 },
         "max": { "kind": "number", "default": 100 },
         "step": { "kind": "number", "default": 1 },
-        "value": { "kind": "number", "doc": "Where it starts: the value you recommend." },
+        "value": { "kind": "number" },
         "unit": { "kind": "string" }
       }
     },
@@ -272,14 +266,13 @@
       "group": "input",
       "doc": "A number the person types.",
       "input": "a number",
-      "start": ["value"],
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
         "min": { "kind": "number" },
         "max": { "kind": "number" },
         "step": { "kind": "number", "default": 1 },
-        "value": { "kind": "number", "default": 0, "doc": "Where it starts: the value you recommend." },
+        "value": { "kind": "number", "default": 0 },
         "unit": { "kind": "string" }
       }
     },
@@ -287,47 +280,43 @@
       "group": "input",
       "doc": "One of many options, in a dropdown.",
       "input": "the option's value",
-      "start": ["recommended"],
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
         "options": { "kind": "list", "of": "option", "required": true },
-        "recommended": { "kind": "value", "doc": "The option you would choose, by its value; the card opens on it." }
+        "value": { "kind": "value" }
       }
     },
     "segmented": {
       "group": "input",
       "doc": "One of two to five options, all in view.",
       "input": "the option's value",
-      "start": ["recommended"],
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
         "options": { "kind": "list", "of": "option", "required": true, "min_items": 2, "max_items": 5 },
-        "recommended": { "kind": "value", "doc": "The option you would choose, by its value; the card opens on it." }
+        "value": { "kind": "value" }
       }
     },
     "toggle": {
       "group": "input",
       "doc": "On or off.",
       "input": "true or false",
-      "start": ["value"],
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string", "required": true },
-        "value": { "kind": "boolean", "default": false, "doc": "Whether it starts on: what you recommend." }
+        "value": { "kind": "boolean", "default": false }
       }
     },
     "checkboxes": {
       "group": "input",
       "doc": "Any of several options.",
       "input": "a list of option values",
-      "start": ["recommended"],
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
         "options": { "kind": "list", "of": "option", "required": true },
-        "recommended": { "kind": "list", "of": { "kind": "value" }, "doc": "The options you would tick, by their values; it may be none." },
+        "value": { "kind": "list", "of": { "kind": "value" } },
         "required": { "kind": "boolean", "default": false }
       }
     },
@@ -335,12 +324,11 @@
       "group": "input",
       "doc": "Words the person types: a note, a name, a line of dialogue.",
       "input": "a string",
-      "start": ["value"],
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
         "placeholder": { "kind": "string" },
-        "value": { "kind": "string", "default": "", "doc": "The words you recommend, or \"\" where you would leave it empty." },
+        "value": { "kind": "string", "default": "" },
         "lines": { "kind": "integer", "min": 1, "max": 8, "default": 1 },
         "required": { "kind": "boolean", "default": false }
       }
@@ -349,11 +337,10 @@
       "group": "input",
       "doc": "A color the person picks, from suggestions or any.",
       "input": "a #rrggbb color",
-      "start": ["value"],
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
-        "value": { "kind": "color", "default": "#808080", "doc": "Where it starts: the color you recommend." },
+        "value": { "kind": "color", "default": "#808080" },
         "suggest": { "kind": "list", "of": { "kind": "color" } }
       }
     },
@@ -361,26 +348,24 @@
       "group": "input",
       "doc": "One of several options shown as pictures; with many, any of them.",
       "input": "the option's value, or a list of them with many",
-      "start": ["recommended"],
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
         "options": { "kind": "list", "of": "option", "required": true },
         "many": { "kind": "boolean", "default": false },
         "columns": { "kind": "integer", "min": 1, "max": 4, "default": 3 },
-        "recommended": { "kind": "any", "doc": "The option you would choose, by its value; with many, a list of them." },
+        "value": { "kind": "any" },
         "required": { "kind": "boolean", "default": true }
       }
     },
     "reorder": {
       "group": "input",
-      "doc": "Items the person puts in order by dragging or with the arrow buttons. The order you write them in is the order you recommend.",
+      "doc": "Items the person puts in order by dragging or with the arrow buttons.",
       "input": "the options' values in the person's order",
-      "start": ["options"],
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
-        "options": { "kind": "list", "of": "option", "required": true, "doc": "The items, in the order you recommend." }
+        "options": { "kind": "list", "of": "option", "required": true }
       }
     }
   }
