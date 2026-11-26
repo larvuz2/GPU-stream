@@ -12,7 +12,8 @@
  * so what is seen here is what the product shows. The gallery stands in for the agent's loop:
  * locking a card in keeps the value it was handed, renders the card locked, and shows the message
  * the conversation would send, with the value as JSON beneath it. That is also what the
- * end-to-end checks read (`data-answer`).
+ * end-to-end checks read (`data-answer`). It stands in for the project's library too: a file
+ * given to a card is kept in the page (`standin.ts`).
  *
  * `?only=<id>` shows one card alone, for a screenshot or a check of that card, and
  * `#card=<a show_ui call>` shows the card that call would make (`try.ts`).
@@ -23,6 +24,7 @@ import { MoodyFace } from '../../../components/Moody';
 import { describeAnswer } from '../answer';
 import { UiCard } from '../UiCard';
 import { EXAMPLES, type Example } from './examples';
+import { keepInPage } from './standin';
 import { cardFromAddress } from './try';
 
 /** Props of {@link Exchange}. */
@@ -58,6 +60,7 @@ function Exchange({ example }: ExchangeProps) {
             locked={answer}
             live={example.idle !== true}
             draft={example.changed}
+            onUpload={example.takesNoFiles === true ? undefined : keepInPage}
             onSubmit={(value) => {
               setAnswer({ value });
             }}

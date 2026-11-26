@@ -10,7 +10,8 @@
  * `/app/cards/#card=<the call's JSON, URL-encoded>` draws the card that call would make, which
  * is how a card written into a skill is run before it is written down (`moody/skills/README.md`):
  * the examples of `moody/skills/cards` were each opened this way. The call is the tool's input as
- * the agent writes it: `title`, `components` or `html`, `submit`, `waits`, `height`, `media`.
+ * the agent writes it: `title`, `components` or `html`, `submit`, `instant`, `waits`, `height`,
+ * `media`.
  *
  * The gallery has no library and no engine, so a file named by a tag or an engine's path is
  * stood in for: by the site's picture of that name where there is one, else by a picture, a
@@ -39,10 +40,13 @@ const PICTURES = [
   'discipline-games.webp',
 ];
 
+/** The gallery's sounds that stand in for any sound, in turn, so that takes to compare differ. */
+const SOUNDS = ['card-sfx-bell.m4a', 'card-sfx-gong.m4a', 'card-sfx-knock.m4a', 'card-cue-market.m4a'];
+
 /** What stands in for a file that is not a picture, by the ending of its path. */
 const BY_ENDING: readonly (readonly [RegExp, string, string])[] = [
   [/\.glb$/i, 'model', 'card-robot.glb'],
-  [/\.(m4a|mp3|wav|ogg|flac|aac|opus)$/i, 'audio', 'card-cue-market.m4a'],
+  [/\.(m4a|mp3|wav|ogg|flac|aac|opus)$/i, 'audio', ''],
   [/\.(mp4|webm|m4v)$/i, 'video', 'preview-cut.mp4'],
 ];
 
@@ -57,6 +61,7 @@ function standIns(media: unknown): UiMedia[] {
     return [];
   }
   let pictures = 0;
+  let sounds = 0;
   return media.filter(isRecord).map((item): UiMedia => {
     const tag = isString(item.tag) ? item.tag.replace(/^@/, '').toLowerCase() : null;
     const path = isString(item.path) ? item.path : '';
@@ -66,6 +71,10 @@ function standIns(media: unknown): UiMedia[] {
       return { name, kind: isString(item.kind) ? item.kind : 'image', url: item.url };
     }
     const other = BY_ENDING.find(([ending]) => ending.test(path));
+    if (other?.[1] === 'audio') {
+      sounds += 1;
+      return { name, kind: 'audio', url: `/media/${SOUNDS[(sounds - 1) % SOUNDS.length] ?? ''}` };
+    }
     if (other !== undefined) {
       return { name, kind: other[1], url: `/media/${other[2]}` };
     }
@@ -109,6 +118,7 @@ export function cardFromAddress(): Example | null {
       height: isNumber(call.height) ? call.height : undefined,
       submit: isString(call.submit) ? call.submit : null,
       waits: isBoolean(call.waits) ? call.waits : false,
+      instant: call.instant === true,
       media: standIns(call.media),
     },
   };
