@@ -20,4 +20,4 @@ log="${CUTROOM_LOG:-/tmp/selkies-modal/cutroom.log}"
 mkdir -p "$(dirname "${log}")"
 [ -s "${log}" ] || printf 'Cut Room: video edited by code.\nProject folder: %s\nEach command the agent runs appears below.\n' "${folder}" > "${log}"
 
-exec xterm -T "Cut Room" -fa Hack -fs 12 -bg '#0d0d0f' -fg '#e8e8ea' -bc -e tail -n 200 -F "${log}"
+exec xterm -T "Cut Room" -fa Hack -fs 15 -bg '#0d0d0f' -fg '#e8e8ea' -bc -e tail -n 200 -F "${log}"

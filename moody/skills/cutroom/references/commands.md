@@ -46,8 +46,9 @@ Writes `sheets/<name>/sheet_01.jpg`, `sheet_02.jpg`, and `footage.json`; with `-
 a mean far below -40 dB is a recording in which nobody speaks. With `--at` it prints
 `sheets/<name>/frames.jpg (4x2)`, the grid's columns by rows.
 
-Fails with `ffmpeg failed: ...` and FFmpeg's words for a file it cannot read, which is also
-what a download that saved a web page instead of a video looks like.
+Fails with `command failed (1): ... ffprobe ...` and FFmpeg's words for a file it cannot
+read ("Invalid data found when processing input"), which is also what a download that saved a
+web page instead of a video looks like.
 
 ### `moments`: a transcript and the moments worth cutting
 
