@@ -28,8 +28,11 @@
  *   Anything else a subagent wrote (an asset in the library, an approval it waits on) is the
  *   conversation's.
  * - An `ask` is answered by the person's next message, whichever way it was sent: a choice button
- *   or the composer.
+ *   or the composer. The option it names as `recommended` is kept as the agent's recommendation
+ *   where it is one of the options offered.
  * - An `approval` is answered by its `approval_result`.
+ * - An `error` is a line of its own. One that names the `limit` of the person's the turn stopped
+ *   at keeps it, since that line is no failure and offers the setting.
  * - A `ui` card is locked in by a later `user_message` whose `ui` names it, with that message's
  *   value; one not locked in is `current` until the person sends anything else.
  * - A `preview` is a card of work in progress. Each one knows how many previews its turn showed
@@ -40,9 +43,10 @@
  * a tool call still running and a subagent still working were stopped, a block still being written
  * is as long as it got, and an approval nobody answered has expired.
  *
- * {@link agentActivity} reads from the fold what the agent is doing right now, and
+ * {@link agentActivity} reads from the fold what the agent is doing right now,
  * {@link processMedia} every picture, video, and sound the session showed, which the library
- * gathers under Process.
+ * gathers under Process, and {@link versions} the versions of the piece itself, which the Latest
+ * module plays.
  * @module
  */
 import type {
@@ -55,6 +59,7 @@ import type {
   Session,
   StudioEvent,
   TurnId,
+  TurnLimit,
   UiData,
 } from '../lib/api';
 import { cardMedia } from '../lib/api';
@@ -91,7 +96,16 @@ export type TranscriptItem =
       media: Media[];
       first: boolean;
     }
-  | { type: 'ask'; key: string; question: string; options: string[]; answer: string | null; first: boolean }
+  | {
+      type: 'ask';
+      key: string;
+      question: string;
+      options: string[];
+      /** The option the agent would choose, or `null` where it named none of them. */
+      recommended: string | null;
+      answer: string | null;
+      first: boolean;
+    }
   | {
       type: 'agents';
       key: string;
@@ -130,6 +144,8 @@ export type TranscriptItem =
       caption: string;
       files: PreviewItem[];
       compare: boolean;
+      /** What the agent called it, for a preview that shows a version of the piece itself; else `null`. */
+      version: string | null;
       /** How many previews the same turn showed after this one. */
       later: number;
       first: boolean;
@@ -146,7 +162,13 @@ export type TranscriptItem =
       costUsd: number;
       agents: number;
     }
-  | { type: 'error'; key: string; message: string };
+  | {
+      type: 'error';
+      key: string;
+      message: string;
+      /** The limit of the person's the turn stopped at, or `null` for any other error. */
+      limit: TurnLimit | null;
+    };
 
 /** What a subagent's card unfolds to: its own tool calls, notes, and reasoning. */
 export type SubagentEntry = Extract<TranscriptItem, { type: 'agent' | 'thinking' | 'tool' }>;
@@ -210,6 +232,18 @@ interface Prose {
   parts: Part[];
   /** The turn. */
   turn: TurnId | null;
+}
+
+/**
+ * Whether an answer is one of a question's options, as a person or the agent wrote it: letter
+ * case and the space around it do not tell two answers apart.
+ *
+ * @param option The option.
+ * @param answer The answer, or `undefined` for none.
+ * @returns `true` where they are the same answer.
+ */
+export function sameAnswer(option: string, answer: string | null | undefined): boolean {
+  return typeof answer === 'string' && answer.trim().toLowerCase() === option.trim().toLowerCase();
 }
 
 /**
@@ -464,6 +498,7 @@ function fold(events: readonly StudioEvent[], entriesOf: (agentId: string) => Su
           key,
           question: event.data.question,
           options: event.data.options,
+          recommended: event.data.options.find((option) => sameAnswer(option, event.data.recommended)) ?? null,
           answer: null,
           first: false,
         });
@@ -485,6 +520,7 @@ function fold(events: readonly StudioEvent[], entriesOf: (agentId: string) => Su
           caption: event.data.caption,
           files: event.data.items,
           compare: event.data.compare,
+          version: event.data.version ?? null,
           later: 0,
           first: false,
         });
@@ -514,7 +550,7 @@ function fold(events: readonly StudioEvent[], entriesOf: (agentId: string) => Su
         });
         break;
       case 'error':
-        items.push({ type: 'error', key, message: event.data.message });
+        items.push({ type: 'error', key, message: event.data.message, limit: event.data.limit ?? null });
         break;
       case 'turn_end':
         for (const [index, turn] of toolTurns) {
@@ -761,4 +797,54 @@ export function processMedia(items: readonly TranscriptItem[]): ProcessEntry[] {
     }
   }
   return entries.reverse();
+}
+
+/** A version of the piece the session showed, to play or to look at again. */
+export interface Version {
+  /** A key of its own among the versions. */
+  key: string;
+  /** The file to play: a video or a sound, or a picture for a version that holds nothing that plays. */
+  media: Media;
+  /** What the agent called the version, or `null` for a file that stands in where none was named. */
+  label: string | null;
+  /** What showed it, in the agent's words. */
+  caption: string;
+  /** The key of the conversation's entry it appeared in. */
+  itemKey: string;
+}
+
+/** The kinds of file a version is played by, the first a preview holds winning. */
+const PLAYED_BY: readonly Media['kind'][] = ['video', 'audio', 'image'];
+
+/**
+ * The versions of the piece the session has shown, the newest first.
+ *
+ * A version is a preview the agent called one (`version`), played by its first video, failing
+ * that its first sound, failing that its first picture. Where no preview names a version, the
+ * newest video or sound the session showed stands in as the only one, so there is something to
+ * play as soon as anything that plays has been shown.
+ *
+ * @param items The conversation.
+ * @returns The versions, or none while the session has shown nothing that plays.
+ */
+export function versions(items: readonly TranscriptItem[]): Version[] {
+  const named: Version[] = [];
+  for (const item of items) {
+    if (item.type !== 'preview' || item.version === null) {
+      continue;
+    }
+    const media = PLAYED_BY.map((kind) => item.files.find((file) => file.kind === kind)).find(
+      (file) => file !== undefined,
+    );
+    if (media !== undefined) {
+      named.push({ key: item.key, media, label: item.version, caption: item.caption, itemKey: item.key });
+    }
+  }
+  if (named.length > 0) {
+    return named.reverse();
+  }
+  const newest = processMedia(items).find((entry) => entry.media.kind === 'video' || entry.media.kind === 'audio');
+  return newest === undefined
+    ? []
+    : [{ key: newest.key, media: newest.media, label: null, caption: newest.caption, itemKey: newest.itemKey }];
 }

@@ -5,8 +5,8 @@
  */
 
 /**
- * A card's answer: the state its inputs start with, what still has to be chosen before it can be
- * locked in, and the answer in words.
+ * A card's answer: the state its inputs start with, whether the person has changed it since,
+ * what still has to be chosen before it can be locked in, and the answer in words.
  *
  * The answer the agent receives is the card's state, `{id: value}` for a `components` card and
  * whatever the document reported for an `html` one. A person reads it as words: on a locked card
@@ -17,8 +17,8 @@
  */
 import { isRecord } from '../../lib/narrow';
 import { COMPONENTS } from './registry';
-import { flag, holds, idOf, readTree, show, text, walk, type UiData, type UiNode, type UiState } from './tree';
-import { isEmpty } from './values';
+import { flag, holds, idOf, instantOf, readTree, show, text, walk, type UiData, type UiNode, type UiState } from './tree';
+import { isEmpty, sameValue } from './values';
 
 /** One input's value, in words. */
 export interface AnswerLine {
@@ -91,15 +91,52 @@ export function wordsOf(node: UiNode, value: unknown): string {
 }
 
 /**
+ * Whether a card's values differ from the ones it opened with.
+ *
+ * @param inputs The card's inputs.
+ * @param state The card's values.
+ * @param opened The state the card started with.
+ * @returns `true` once any input holds something else.
+ */
+export function changed(inputs: ReadonlyMap<string, UiNode>, state: UiState, opened: UiState): boolean {
+  return [...inputs.keys()].some((id) => !sameValue(state[id], opened[id]));
+}
+
+/**
+ * The inputs in view: those whose own condition holds, and that of everything they are inside.
+ *
+ * @param root The card's tree.
+ * @param state The card's values.
+ * @returns The ids of the inputs the person can see.
+ */
+function inView(root: UiNode, state: UiState): Set<string> {
+  const seen = new Set<string>();
+  const visit = (node: UiNode): void => {
+    if (!holds(node, state)) {
+      return;
+    }
+    const id = idOf(node);
+    if (id !== null) {
+      seen.add(id);
+    }
+    node.children.forEach(visit);
+  };
+  visit(root);
+  return seen;
+}
+
+/**
  * The first thing that still has to be chosen before a card can be locked in.
  *
+ * @param root The card's tree.
  * @param inputs The card's inputs.
  * @param state The card's values.
  * @returns The name of the first required input in view that holds nothing, or `null`.
  */
-export function missing(inputs: ReadonlyMap<string, UiNode>, state: UiState): string | null {
+export function missing(root: UiNode, inputs: ReadonlyMap<string, UiNode>, state: UiState): string | null {
+  const seen = inView(root, state);
   for (const [id, node] of inputs) {
-    if (flag(node, 'required') && holds(node, state) && isEmpty(state[id])) {
+    if (flag(node, 'required') && seen.has(id) && isEmpty(state[id])) {
       return nameOf(id, node);
     }
   }
@@ -107,14 +144,21 @@ export function missing(inputs: ReadonlyMap<string, UiNode>, state: UiState): st
 }
 
 /**
- * A card's answer as a line per input.
+ * A card's answer as a line per input the person was shown.
  *
+ * An input whose condition did not hold was never in view, so its value is no part of what the
+ * person answered, though the card's state still carries it for the agent.
+ *
+ * @param root The card's tree.
  * @param inputs The card's inputs.
  * @param state The values locked in.
  * @returns The lines, in the order of the card.
  */
-export function summarize(inputs: ReadonlyMap<string, UiNode>, state: UiState): AnswerLine[] {
-  return [...inputs].map(([id, node]) => ({ id, label: nameOf(id, node), words: wordsOf(node, state[id]) }));
+export function summarize(root: UiNode, inputs: ReadonlyMap<string, UiNode>, state: UiState): AnswerLine[] {
+  const seen = inView(root, state);
+  return [...inputs]
+    .filter(([id]) => seen.has(id))
+    .map(([id, node]) => ({ id, label: nameOf(id, node), words: wordsOf(node, state[id]) }));
 }
 
 /**
@@ -137,14 +181,22 @@ export function summarizeValue(value: unknown): AnswerLine[] {
 /**
  * A locked-in card as one sentence, for the message that carries its answer.
  *
+ * An instant card is a question answered by one press, so its sentence is the choice alone, as
+ * the person would have said it; naming the card and its input would repeat the question above.
+ *
  * @param ui The card.
  * @param value What was locked in.
- * @returns Words such as "Locked in The look of shot 3: Warmth 20, Grain 12."
+ * @returns Words such as "Locked in The look of shot 3: Warmth 20, Grain 12.", or "Film & TV." for
+ *   an instant card.
  */
 export function describeAnswer(ui: UiData, value: unknown): string {
   const root = ui.kind === 'components' ? readTree(ui.spec) : null;
   const lines =
-    root !== null && isRecord(value) ? summarize(inputsOf(root), value) : summarizeValue(value);
+    root !== null && isRecord(value) ? summarize(root, inputsOf(root), value) : summarizeValue(value);
+  const only = lines.length === 1 ? lines[0] : undefined;
+  if (instantOf(ui) && only !== undefined) {
+    return `${only.words}.`;
+  }
   const said = lines.map((line) => `${line.label} ${line.words}`).join(', ');
   return said === '' ? `Locked in ${ui.title}.` : `Locked in ${ui.title}: ${said}.`;
 }

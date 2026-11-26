@@ -6,12 +6,22 @@
 
 /**
  * How the studio presents what the catalog and the control plane name: a discipline's name, an
- * app's status, the plan's progress, how long ago something happened, what an interactive card
- * was locked in with, and opening a stream in a new tab.
+ * app's status, the plan's progress, a limit of a turn, a library tag, how long ago something
+ * happened, and opening a stream in a new tab.
  * @module
  */
-import type { PlanItem } from '../lib/api';
-import { brand, findDiscipline, isOwnLicense, ownLicenseLabel, type CatalogApp } from '../lib/catalog';
+import type { PlanItem, TurnLimit } from '../lib/api';
+import {
+  brand,
+  catalog,
+  findApp,
+  findDiscipline,
+  isOwnLicense,
+  ownLicenseLabel,
+  settingApp,
+  type CatalogApp,
+} from '../lib/catalog';
+import { creditCount, usd } from '../lib/format';
 
 /**
  * The name of a discipline.
@@ -33,6 +43,41 @@ export function disciplineName(id: string): string {
  */
 export function canStart(app: CatalogApp): boolean {
   return app.status === 'available' || app.status === 'team' || isOwnLicense(app);
+}
+
+/**
+ * The apps a person's settings set aside: of the engines a setting chooses between, every one but
+ * the one that applies.
+ *
+ * Which of two engines does a job is chosen in Settings and nowhere else, so the form that starts
+ * an engine by hand offers only the one that applies. That one is the app the person's value
+ * stands for where it can be started, and the one the setting's default stands for otherwise,
+ * which is the rule the control plane tells the agent by (`code_editor` in `agent.py`).
+ *
+ * @param values The person's settings, each with the value that applies, or `undefined` while
+ *   the account is not read, which sets aside as the defaults do.
+ * @returns The identifiers of the apps not to offer.
+ */
+export function appsSetAside(values: Readonly<Record<string, boolean | string>> | undefined): Set<string> {
+  const aside = new Set<string>();
+  for (const setting of catalog.settings) {
+    if (setting.apps === undefined) {
+      continue;
+    }
+    const startable = (id: string | undefined): string | undefined => {
+      const app = id === undefined ? undefined : findApp(id);
+      return app !== undefined && canStart(app) ? app.id : undefined;
+    };
+    const value = values !== undefined && Object.hasOwn(values, setting.id) ? values[setting.id] : undefined;
+    const applies =
+      startable(settingApp(setting, value ?? setting.default)) ?? startable(settingApp(setting, setting.default));
+    for (const id of Object.values(setting.apps)) {
+      if (id !== applies) {
+        aside.add(id);
+      }
+    }
+  }
+  return aside;
 }
 
 /**
@@ -64,6 +109,32 @@ export function appStatusLabel(app: CatalogApp): string {
  */
 export function planProgress(items: PlanItem[]): string | undefined {
   return items.length === 0 ? undefined : `${items.filter((item) => item.status === 'done').length} of ${items.length}`;
+}
+
+/**
+ * A limit of a turn, as a person reads it.
+ *
+ * @param limit Which limit it is.
+ * @param value Its value.
+ * @returns Text such as `$15` or `200 steps`.
+ */
+export function limitText(limit: TurnLimit, value: number): string {
+  return limit === 'budget' ? usd(value) : `${creditCount(value)} ${value === 1 ? 'step' : 'steps'}`;
+}
+
+/**
+ * Normalizes a tag as prompts name it: lowercase, without the `@`, words joined by hyphens.
+ *
+ * @param text The tag as typed.
+ * @returns The tag.
+ */
+export function normalizeTag(text: string): string {
+  return text
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}_-]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 const MINUTE = 60_000;

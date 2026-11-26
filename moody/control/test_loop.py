@@ -28,6 +28,9 @@ agent counts on.
 - A deploy that changes the prompt or a tool reaches the next turn of a
   session that began before it.
 - The pictures a tool hands over reach the model as pictures.
+- A turn stops at its person's own limit of steps or of spending, and says
+  which.
+- A project that was asked its kind begins its first turn knowing it.
 
 The tests are skipped, with the reason, where the bundled program is not
 there or does not start (an install of the SDK for another platform). Run as
@@ -562,6 +565,7 @@ def test_a_question_ends_the_turn_and_holds_no_process_and_the_answer_resumes_th
         "ask_user",
         question="Color or black and white?",
         options=["Color", "Black and white"],
+        recommended="Black and white",
     )
     model.script(AGENT, reply(say("One thing first."), question))
     began = time.monotonic()
@@ -585,6 +589,7 @@ def test_a_question_ends_the_turn_and_holds_no_process_and_the_answer_resumes_th
     assert next(e["data"] for e in log["events"] if e["kind"] == "ask") == {
         "question": "Color or black and white?",
         "options": ["Color", "Black and white"],
+        "recommended": "Black and white",
     }
     assert not any(e["kind"] == "error" for e in log["events"])
 
@@ -687,6 +692,41 @@ def test_the_pictures_the_agent_asks_to_look_at_reach_the_model_as_pictures(
     assert [jpeg_size(base64.b64decode(source["data"])) for source in pictures] == [
         (1280, 720)
     ] * 2
+
+
+def test_a_project_asked_its_kind_begins_its_first_turn_knowing_it(studio):
+    client, model = studio.client, studio.model
+    made = client.post(
+        "/v1/projects",
+        headers=auth("alice-token"),
+        json={"name": "Reel", "discipline": "media"},
+    ).json()["project"]
+    (card,) = [e["data"] for e in events(client, made["id"])["events"]]
+    assert (card["instant"], card["sets"]) == (True, "format") and model.requests == []
+    model.script(AGENT, reply(say("A social video. What is it about?")))
+    locked = client.post(
+        f"/v1/projects/{made['id']}/messages",
+        headers=auth("alice-token"),
+        json={
+            "text": "",
+            "ui": {"ui_id": card["ui_id"], "value": {"format": "Social Media"}},
+        },
+    )
+    assert locked.status_code == 202
+    body = model.asked(AGENT)[0]
+    assert messages(body) == [
+        '[The person chose this project\'s kind on the card "What kind of video are you making?": Social Media]'
+    ], "a message that is only the choice reaches the model as the line that says it"
+    assert "Kind: Social Media" in spoken(
+        body
+    ) and "Its kinds: Film & TV" in system_text(body)
+    assert kinds(client, made["id"]) == [
+        "ui",
+        "user_message",
+        "text",
+        "usage",
+        "turn_end",
+    ]
 
 
 def test_a_session_resumes_in_a_fresh_process_that_has_nothing_of_the_first_but_the_database(
@@ -820,19 +860,26 @@ def test_stopping_a_turn_interrupts_the_program_while_it_answers(studio):
     model.script(
         AGENT, Reply([{"type": "text", "text": long}, use("library_list")], delay=0.05)
     )
-    stopper = threading.Timer(
-        2.5,
-        lambda: client.post(
-            f"/v1/projects/{film['id']}/stop", headers=auth("alice-token")
-        ),
-    )
+
+    def stop_once_writing() -> None:
+        """Stop the turn as the person would once they see the answer being written: its first snapshot is in the log."""
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            rows = list(studio.store.tables["project_events"].values())
+            if any(
+                row["kind"] == "text" and row["project_id"] == film["id"]
+                for row in rows
+            ):
+                client.post(
+                    f"/v1/projects/{film['id']}/stop", headers=auth("alice-token")
+                )
+                return
+            time.sleep(0.01)
+
+    stopper = threading.Thread(target=stop_once_writing)
     stopper.start()
-    began = time.monotonic()
     message(client, film["id"], "Write the shot list")
     stopper.join()
-    assert time.monotonic() - began < 15, (
-        "the turn ended long before the answer would have"
-    )
     log = events(client, film["id"])
     assert log["running"] is False and len(model.asked(AGENT)) == 1 and children() == []
     assert [e["kind"] for e in log["events"]][-2:] == ["usage", "turn_end"] and not any(
@@ -973,13 +1020,51 @@ def test_a_turn_the_model_could_not_finish_says_so_and_holds_nothing(
         for e in events(client, film["id"])["events"]
     )
 
-    with_config(studio, turn_limit=2)
+
+def test_a_turn_stops_at_its_persons_own_limits_and_says_which(studio):
+    client, model = studio.client, studio.model
+    film = new_project(client)
+    limits = lambda **changes: client.patch(
+        "/v1/me", headers=auth("alice-token"), json=changes
+    )
+    wrong = lambda: [
+        e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "error"
+    ]
+
+    assert limits(turn_limit=2).status_code == 200
     model.script(AGENT, reply(use("library_list")), reply(use("library_list")))
     message(client, film["id"], "Loop")
+    assert wrong() == [
+        {
+            "message": "This turn reached your limit of 2 steps and stopped. You can change the limit in your "
+            "settings. Send a message to go on.",
+            "limit": "steps",
+        }
+    ]
     assert (
-        told()[-1] == "This turn reached its limit of steps. Send a message to go on."
-        and events(client, film["id"])["running"] is False
+        len(model.asked(AGENT)) == 2 and events(client, film["id"])["running"] is False
     )
+
+    assert limits(turn_limit=None, turn_budget_usd=0.0001).status_code == 200
+    model.script(AGENT, reply(say("Listing."), use("library_list")))
+    message(client, film["id"], "Spend")
+    assert wrong()[-1] == {
+        "message": "This turn reached your spending limit of $0.0001 and stopped. You can change the limit in your "
+        "settings. Send a message to go on.",
+        "limit": "budget",
+    }
+    log = events(client, film["id"])["events"]
+    assert len(model.asked(AGENT)) == 3, (
+        "the answer that reached the budget is the last one asked for"
+    )
+    assert [e["kind"] for e in log][-5:] == [
+        "tool_start",
+        "tool_end",
+        "error",
+        "usage",
+        "turn_end",
+    ], "its call still runs"
+    assert log[-2]["data"]["cost_usd"] > 0.0001
 
 
 def one_turn(phase: str, state: Path, root: Path, definitions: Path) -> dict[str, Any]:
@@ -994,7 +1079,12 @@ def one_turn(phase: str, state: Path, root: Path, definitions: Path) -> dict[str
                 AGENT,
                 reply(
                     say("I will remember HELIOTROPE."),
-                    use("ask_user", question="Which color?", options=["Blue", "Red"]),
+                    use(
+                        "ask_user",
+                        question="Which color?",
+                        options=["Blue", "Red"],
+                        recommended="Blue",
+                    ),
                 ),
             )
             message(client, film["id"], "Remember the word HELIOTROPE.")

@@ -1,6 +1,6 @@
 ---
 name: movie
-description: Make a movie, a commercial, an episode, or a vertical drama with the person as director, from the first idea to the cut. Read it before your first reply in a Media or Animation project, and whenever someone wants to write, design, generate, or test moving picture. It holds the opening questions (story, main characters, art style, then format, length, and audience), the library of characters, environments, props, and logos generated through fal, the first animation tests, the shot list and the shots, which subagent takes which job, where the person decides, what each step costs, and the point at which the first engine is started: assembly, or sooner only when the person asks for one or brings footage. Cutting, sound, color, titles, and export are the filmcraft skill.
+description: Make a film, an episode, a vertical show, a commercial, or the pictures of a music video with the person as director, from the first idea to the cut. Read it when the video skill's reference for the project's kind sends you here, before your first reply in an Animation project, and whenever someone wants to write, design, generate, or test moving picture. It holds the opening questions (story, main characters, art style, then length, audience, and budget), the library of characters, environments, props, and logos generated through fal, the first animation tests, the shot list and the shots, which subagent takes which job, where the person decides, what each step costs, and the point at which the first engine is started: assembly, or sooner only when the person asks for one or brings footage. Cutting, sound, color, titles, and export are the filmcraft skill.
 disciplines: media, animation
 ---
 
@@ -34,8 +34,13 @@ The detail a stage needs is in a reference. Read it before you start that stage:
 ## When this applies
 
 The project's discipline is Media or Animation, or the person asks in any project to write,
-storyboard, design, generate, or test moving picture: a film, an ad, an episode, a vertical drama,
+storyboard, design, generate, or test moving picture: a film, an ad, an episode, a vertical show,
 a trailer, a music video.
+
+In a Media project the `video` skill comes first. It opens the project by its kind, with that
+kind's card, and its reference says where this skill takes over and where the kind differs from
+a film: a vertical show's episodes, a commercial's product and exact length, a music video's
+track. Start from what the person answered there, and do not ask it again.
 
 Not here: the edit with its sound, color, titles, and export (the `filmcraft` skill); music, a
 poster, exact vector artwork, and 3D, which are other engines' work. Your instructions list the
@@ -86,10 +91,12 @@ one, what it costs, and when to stop it are in the `studio` skill.
 
 ## The loop: propose, decide, make, show, record
 
-1. **Propose.** Two to four options, your recommendation first and marked "(recommended)", each
+1. **Propose.** Two to four options, your recommendation first, each
    with one line of why. Say what it costs whenever it spends money.
-2. **Ask.** `ask_user(question, options)`, one decision per question, the last option a way out
-   ("Something else"). Where the choice is between pictures, or a setting is easier to see than
+2. **Ask.** `ask_user(question, options, recommended)`, one decision per question, the last
+   option a way out ("Something else"). `recommended` is the option you would choose, in its own
+   words: the page marks it, so no option's text says it is recommended. Where the choice is
+   between pictures, or a setting is easier to see than
    to describe, ask with an interactive card instead (`show_ui`; the `cards` skill has the
    components): a gallery to pick a character from, a frame with sliders to tune a look. With
    `waits: true` the person's choice comes back as their answer. Both end your turn. If you have
@@ -98,8 +105,10 @@ one, what it costs, and when to stop it are in the `studio` skill.
    report.
 3. **Make** exactly what was chosen, yourself or through a subagent
    ([Who does what](#who-does-what)).
-4. **Show.** Generated pictures and video appear in the conversation by themselves. Say in a line
-   what each is and what to look at.
+4. **Show.** Generated pictures, video, and sound appear in the conversation by themselves. Say
+   in a line what each is and what to look at or listen for. Where you have to judge a result
+   yourself before you describe it or build on it, generate it with `look: true`, or look at
+   library entries with `library_look`; do not look at what you only pass on.
 5. **Record.** The library (`library_upsert`), the plan, and the documents
    ([Saving the work](#saving-the-work)).
 
@@ -123,20 +132,23 @@ When someone says "let's make a movie", your first reply asks. It generates noth
 nothing. Ask these three in this order, one question per turn, each with your recommendation, and
 skip what they already told you:
 
-1. **The story.** "What is the story?" Options such as "I have a script or a treatment (I'll
-   paste it)", "I have an idea (I'll tell you in a line or two)", "Pitch me three ideas
-   (recommended when starting from nothing)", "Something else".
+1. **The story.** In a Media project the kind's opening card has asked where it comes from: go
+   on from its answer. Anywhere else, ask "What is the story?" with options such as "I have a
+   script or a treatment (I'll paste it)", "I have an idea (I'll tell you in a line or two)",
+   "Pitch me three ideas", "Something else". Recommend the pitch to someone who came with
+   nothing, and their own material to someone who mentioned any.
    - A script: read all of it and answer as story.md says, before anything else.
    - An idea: write it back as a logline (the form is in story.md) with two sharper variations,
      and ask which is the film.
    - Nothing yet: three loglines that differ in genre and tone, each one a film of this format.
 2. **The main characters.** Propose the cast the story needs, two to four people: for each a
    name, an age, one sentence of how they look, and what they want. Ask "Is this the cast?" with
-   "Yes, this cast (recommended)", "Change someone", "Add or remove a character", "Something
-   else". Each sentence becomes that character's description in the library, so settle it here.
-3. **The art style.** Offer to show it: "Show me three directions as pictures (recommended)",
-   with what the three style frames cost, "I know the style (I'll describe it or name
-   references)", "You choose and show me one", "Something else".
+   "Yes, this cast", "Change someone", "Add or remove a character", "Something else", and
+   recommend the cast you proposed. Each sentence becomes that character's description in the
+   library, so settle it here.
+3. **The art style.** Offer to show it: "Show me three directions as pictures", with what the
+   three style frames cost, "I know the style (I'll describe it or name references)", "You choose
+   and show me one", "Something else". Recommend the pictures.
    - Pictures: hand `art-direction` the story, the cast, the audience, and the format's aspect
      ratio, and present its style frames as a gallery card to pick from.
    - Words: write their style as one sentence and confirm it with one style frame.
@@ -147,23 +159,28 @@ skip what they already told you:
    The result is the film's **style line**: one sentence that every later prompt repeats word
    for word, kept in the library as `@look`. With it, stage 3 is done.
 
-Then settle what the format implies, asking only what is still open, one at a time, each with a
-recommendation:
+Then settle what the kind implies, asking only what is still open. Where a kind's reference in
+the `video` skill gives a card for these, use it: one card whose controls open on what you
+would choose settles them in one answer.
 
-4. **Format.** The project's `format` was chosen when it was made. Confirm it from the table
-   below; do not ask again.
-5. **Length.** Recommend the shortest length that tells this story, and say how many shots it is
+4. **The kind.** The project's format was chosen when it was made. Read its row in the table
+   below; do not ask it again. An Animation project's short is read as a short film and its
+   series as episodes.
+5. **Length.** Offer the shortest length that tells this story, and say how many shots it is
    and about what they cost (the table below, and [Cost and time](#cost-and-time)).
-6. **Audience and platform.** Recommend the platform this format is made for, and ask who
-   watches. Where it plays decides the aspect ratio and the pace.
-7. **The generation budget**, in dollars. Recommend one from the length and say what it covers.
+6. **Audience and platform.** Decide them where the story and the kind make them plain, and say
+   so. Ask who watches only where it is open. Where it plays decides the aspect ratio and the
+   pace.
+7. **The generation budget**, in dollars. Offer one computed from the length, and say what it
+   covers.
 
-| Format | Aspect ratio | Length | Average shot |
+| Kind | Aspect ratio | Length | Average shot |
 |---|---|---|---|
-| Movie (short) | 16:9, or 21:9 for a scope look | 2 to 20 min | 3 to 6 s |
-| Commercial | 16:9 hero, with 9:16 and 1:1 cutdowns | 15, 30, or 60 s | 1 to 2.5 s |
-| Episode | 16:9 | 5 to 25 min | 3 to 5 s |
-| Vertical drama | 9:16 | 60 to 120 s an episode | 1.5 to 3 s |
+| Film & TV, a short film | 16:9, or 21:9 for a scope look | 2 to 20 min | 3 to 6 s |
+| Film & TV, an episode | 16:9 | 5 to 25 min | 3 to 5 s |
+| Vertical Shows | 9:16 | 60 to 120 s an episode | 1.5 to 3 s |
+| Commercials | 16:9 hero, with 9:16 and 1:1 cutdowns | 15, 30, or 60 s, to the second | 1 to 2.5 s |
+| Music Videos | The frame of where it plays | The track's, or one part of it first | By the music: shorter as it gets faster |
 
 Close the brief by writing it back in six lines or fewer (story, cast, style line, format and
 length, audience, budget), then set the plan and the library's sections, and save the brief
@@ -217,6 +234,7 @@ one named here is not listed, do that job yourself the same way.
 | The style line is approved and entries are to be designed | `character-design`, one per character; `production-design`, one per environment, prop, or logo | The entry's tag, name, and description, the style line, the aspect ratio, the stage (candidates, or sheets from the pick), how many images | Each other |
 | A batch of entries has landed, and before the shot list is locked | `librarian` | The conventions in library.md, and what changed | Anything that does not write to the library |
 | Approved entries are to be tested in motion, or a scene's shots are to be generated | `animation`, one per test set or per scene | The reference tags, the shot rows or the test's purpose, the style line, the aspect ratio, the model and resolution, the takes allowed | Other scenes |
+| The film needs a song, a voice-over, or a sound effect, as versions to choose between | `sound` | What the sound is for, the brief word for word, approved lyrics or lines, how many versions and the one way they differ, the tags | Design and shots |
 | Before the shot list is locked, or a batch of shots is paid for | `review` | The work, the brief it answers, and the standard (shots.md, "Before the lock") | Nothing: wait for its report |
 | Assembly, once an editor engine runs and the takes are selected | The editor's operator (its title is the engine's name and "agent") | The engine's id, the tags of the selected takes in order, the sequence size, what to preview | Generating the scenes still missing |
 
@@ -250,8 +268,10 @@ quote from it.
 | `generate_video`, `model: "fast"` | $0.1345 a second at 480p, $0.3024 at 720p |
 
 A model choice the tool offers that is not in this table has no price here: quote it from the
-`cost_usd` of its first result. With a video among the references, the seconds of that video are
-billed with the seconds generated. 1 credit is $0.01 where the studio bills in credits.
+`cost_usd` of its first result. That holds for all of `generate_audio`: a song, a sound effect,
+and a spoken line each report what they cost, and this skill states none. With a video among the
+references, the seconds of that video are billed with the seconds generated. 1 credit is $0.01
+where the studio bills in credits.
 
 - **Quote before you spend**: what is made, how many, and the total. A 6-second 720p shot is
   $2.84; a 4-second 480p test is $0.88; a 60-second film of 14 shots averaging 5 seconds at 720p
@@ -313,24 +333,28 @@ Never call a picture good that you were not shown.
 
 ## What is not possible yet
 
-- **You may not see what you generate.** A generation's result gives you the model, the seed, and
-  the cost, and the person sees the picture. Where a result also hands you the picture, look at
-  it before you speak about it. Where it does not, you have not seen it: say what to check
-  (faces, hands, text, screen direction) and ask what they see. Do not start an engine to look.
+- **You see only what you ask to look at, and you never hear.** A generation's result gives
+  you the model, the seed, and the cost; the person sees and hears the result. `look: true` on
+  the call, or `library_look` afterwards, hands you a picture, four frames of a clip, or a
+  sound's waveform. Four frames show no motion, and a waveform is not sound: say what to check
+  in motion (faces, hands, screen direction) and by ear, and ask the person. Do not start an
+  engine to look.
 - **No tool deletes or retags a library entry, removes one of its files, or picks which image is
   its reference.** The newest image is the reference. Mark what is superseded
   `metadata.status: "rejected"` and move it to Archive; the person deletes in the Library panel.
 - **Previews and screenshots are not library entries**, and no tool of yours puts a file from an
-  engine into the library. The person can add a file to an entry in the Library panel, which is
-  also how their own photographs, a real product, or a logo file become references.
+  engine into the library. The person's own files (photographs, a real product, a logo, a track,
+  footage) come in through a card with an upload, which answers with the entry the file became,
+  or in the Library panel.
 - **Generated text is unreliable.** A logo, a label, or a title drawn by an image model may be
   misspelled. A generated logo is a concept; exact artwork is drawn as vectors or supplied by the
   person, and titles are set in the edit.
 - **A take cannot be regenerated sharper.** A new call at a higher resolution is a new take.
   `generate_video` takes no seed, no first or last frame, and no instruction to extend or edit a
   clip; a shot is continued by giving the take before it as a reference (shots.md).
-- **No voices or music are generated on their own.** The video model makes sound, ambience, and
-  spoken lines with the picture; music is supplied by the person or made in a sound engine.
+- **A shot's own sound comes with its picture.** The video model makes ambience and spoken lines
+  with each shot, and they cannot be changed afterwards. A song, a voice-over, or a sound effect
+  on its own is made with `generate_audio`, supplied by the person, or made in a sound engine.
 
 ## Hand-offs
 
@@ -340,4 +364,5 @@ Never call a picture good that you were not shown.
 - **To sound and to a poster.** A score needs the cut, and a poster needs a frame of it, so both
   come after the edit has started, through the edit's own hand-offs.
 - **From the person.** A script arrives as text in the conversation. Pictures, footage, music,
-  and logo files arrive as files they add to a library entry you made for them.
+  and logo files arrive through a card with an upload, or as files they add in the Library
+  panel.

@@ -25,7 +25,9 @@ Use the lightest thing that settles the matter:
 |---|---|
 | One of a few answers that need no picture | `ask_user` |
 | Work in progress to look at, nothing to decide | `preview` |
+| One choice that sets where the work goes next: a kind, a way in, a platform | `show_ui` with `instant` |
 | A decision made by looking, hearing, comparing, ordering, or tuning | `show_ui` with `submit` |
+| Something the person has and you need: a track, a script, a logo, footage | `show_ui` with an `upload` |
 | Something to explore that sends nothing back: a model to turn, a chart to read | `show_ui` without `submit` |
 
 A card earns its place when the choice is a value on a scale (how warm, how loud, how long), a
@@ -42,7 +44,9 @@ a time, in the conversation.
    match." The person should know the consequence before they touch a slider.
 3. **Show the card.** `waits: true` when you cannot go on without the answer: your turn ends, and
    the person's locked-in values start the next one. Leave `waits` out when you can keep working;
-   the card stays answerable, and its values arrive in a later message of theirs.
+   the card stays answerable, and its values arrive in a later message of theirs. Where the card
+   is one choice and nothing else, give `instant: true` in place of `submit`: the choice itself
+   locks it, so the person answers in one press.
 4. **Act on exactly what came back**, record it (the plan, the library entry's metadata), and say
    what you did. Then show the real result (see [Show your work](#show-your-work)).
 
@@ -59,7 +63,10 @@ The person's next message carries the card's answer.
   values; a toggle, true or false; a field, the words; a color, `#rrggbb`; a reorder, the values
   in the person's order; tabs with an id, the open tab's `value`; a table with an id, the first
   cell of each picked row; a model with an id, `{"azimuth", "elevation", "zoom"}`; layers with an
-  id, `{"selected", "layers": {name: {"visible", "opacity"}}}`.
+  id, `{"selected", "layers": {name: {"visible", "opacity"}}}`; an upload, `{"tag", "name",
+  "kind"}` for the file the person gave, or null where they gave none.
+- A file from an `upload` is in the project's library by the time the answer arrives: name it by
+  its `tag` wherever a tool takes one, as you would any other entry.
 - An `html` card answers with whatever its document last passed to `moody.setState`, or to
   `moody.submit`.
 
@@ -72,13 +79,15 @@ nothing they left on the card counts. Never act on a value they did not send.
 The tool's own definition lists every component and property, so this section is how to combine
 them. A card is one component, usually a `stack`, with the rest in `children`. Inputs have an
 `id`. A property marked `~` in the tool's reference can follow an input as `"$id"`; a text shows
-an input's value as `{id}`; any component takes `when` to appear only while a condition holds.
+an input's value as `{id}`; any component takes `when` to appear only while a condition holds. An
+input opens on the `value` you give it, and once the person changes anything the card offers
+"Back to default", which restores it as it opened.
 
 ### A look, tuned over the frame
 
 The frame is an engine's file here; a library entry would be `{"tag": "@market"}`. `compare` puts
 the untouched frame left of a divider and the adjusted one right of it, and each adjustment
-follows a slider. Start the sliders at your recommendation.
+follows a slider. Give each slider the value the card should open on.
 
 ```json
 {
@@ -142,13 +151,63 @@ references, its palette, a line on what it means. Give each tab a `value` you wi
 }
 ```
 
+### A kind, picked in one press
+
+For a choice that opens a path, show the options as tiles and let the press be the answer. Each
+option of a `pick` may carry an `icon`: a pixel drawing as rows of `0` and `1`, a square of 8 to
+16 cells. Tiles with icons are squares, two or three to a row, with the label and the note under
+the icon. Draw one plain idea per icon; eight cells are enough for a shape, twelve for an object.
+With `instant: true` there is no lock-in button and no `submit`, and the card may hold nothing
+else to set: one `pick` without `many`, or one `segmented`. The kind of a new project is asked
+this way by the conversation itself before your first turn; use the same shape for the forks
+that follow it.
+
+```json
+{
+  "title": "What shape is the piece?",
+  "components": {"type": "pick", "id": "shape", "columns": 3, "options": [
+    {"value": "vertical", "label": "Vertical", "note": "9:16, for a phone held upright",
+     "icon": ["00111100", "00100100", "00100100", "00100100", "00100100", "00100100", "00111100", "00000000"]},
+    {"value": "square", "label": "Square", "note": "1:1, for a feed",
+     "icon": ["00000000", "01111110", "01000010", "01000010", "01000010", "01000010", "01111110", "00000000"]},
+    {"value": "wide", "label": "Wide", "note": "16:9, for a screen",
+     "icon": ["00000000", "00000000", "11111111", "10000001", "10000001", "11111111", "00000000", "00000000"]}]},
+  "instant": true,
+  "waits": true
+}
+```
+
+### Sounds, compared by ear
+
+When you have two or three takes of a sound (an effect, a voice, a cue), do not describe them:
+give each option of a `pick` its `audio`, the name of one of the card's files. Each tile then
+plays its take, with its waveform and position, over the control that chooses it, and starting
+one stops the other, so the person hears them back to back and picks. Keep the labels short
+("A · Bell") and put what differs in the note. Three takes are a comparison; six are a chore.
+
+```json
+{
+  "title": "The lantern's chime",
+  "components": {"type": "pick", "id": "take", "label": "Which take?", "columns": 3, "options": [
+    {"value": "bell", "label": "A · Bell", "audio": "bell", "note": "Bright, rings out"},
+    {"value": "gong", "label": "B · Gong", "audio": "gong", "note": "Low, slow to bloom"},
+    {"value": "knock", "label": "C · Knock", "audio": "knock", "note": "Dry, a short ring"}]},
+  "submit": "Use this take",
+  "waits": true,
+  "media": [{"name": "bell", "engine_id": "ENGINE", "path": "audio/chime-bell.wav"},
+            {"name": "gong", "engine_id": "ENGINE", "path": "audio/chime-gong.wav"},
+            {"name": "knock", "engine_id": "ENGINE", "path": "audio/chime-knock.wav"}]
+}
+```
+
 ### The other shapes, in a line each
 
 - **An order**: `{"type": "reorder", "id": "order", "options": [{"value": "s1", "label": "The market wakes", "image": "s1", "note": "Wide, 6s"}, ...]}`.
 - **Layers**: `{"type": "layers", "id": "poster", "layers": [{"name": "Sky", "src": "sky"}, {"name": "Lanterns", "src": "lanterns", "blend": "screen"}]}`, the first at the bottom. Each layer is a picture of the full canvas with transparency.
 - **A 3D model**: `{"type": "model", "id": "angle", "src": "pip", "finish": "$finish", "spin": true}` beside a `segmented` whose id is `finish` and whose options are finishes. The file is a `.glb`: export one from Blender into the project's folder and name it in `media`.
 - **A table to pick from, and a chart that follows it**: a `table` with `id` and `pick: "many"`, and a `chart` whose `highlight` is `"$<the table's id>"` and whose labels are the rows' first cells. `kind` is `bar` to compare, `line` or `area` over an ordered axis, `share` for the parts of one whole (six at most).
-- **Sound**: `{"type": "audio", "src": "cue", "label": "A · Slow harbor pad"}` plays a file with its waveform; two of them over a `segmented` asks which.
+- **Sound to listen to**: `{"type": "audio", "src": "cue", "label": "A · Slow harbor pad"}` plays a file with its waveform. To choose between sounds, use tiles that play (above).
+- **A file from the person**: `{"type": "upload", "id": "track", "label": "The track", "accept": "audio", "section": "Music"}` takes a file they drop or pick (`accept` is `audio`, `image`, `video`, or `any`) into the library's `section`, and shows it once it is in. Ask for a file only when they may have one, and give the other way out beside it: a `pick` of "I have it" and "Make one with me", with the `upload` shown `when` the first is chosen and a `field` for the second.
 - **A follow-up only where it applies**: `{"type": "field", "id": "instead", "required": true, "when": {"cue": "neither"}}`.
 
 ## Custom HTML
@@ -171,6 +230,8 @@ Everything is inline, and files come through `media`.
   and once at the start if the starting values are an answer. The lock-in button sends the last
   value. Use `moody.submit(value)` only for a gesture that is itself the answer, such as a
   double-click on the chosen frame. It is ignored unless the person is in the card.
+- **The document's first state is the card's default.** "Back to default" starts your document
+  again from the top, so whatever it draws before the person touches it is what they return to.
 - **Make the value small, named JSON** you will want to read: `{"low": 3, "mid": -2, "high": 4}`.
 - **Start from `moody.state`** when it is set, and when `moody.locked` is true (or on the window's
   `moodylock` event) show the value and disable the controls.
@@ -203,12 +264,14 @@ A whole card, small enough to read:
 - **One decision per card.** Six inputs is a good ceiling. Two decisions are two cards, or one
   card now and a question later.
 - **Real media, never a stand-in.** The frame they are grading is the frame.
-- **Start at your recommendation**, and say it is yours: the person should be able to lock in
-  untouched.
+- **The card carries no opinion.** If you have a view, say it in a sentence of your message
+  before the card.
 - **Ranges where every position is plausible.** A warmth slider that only looks right between 10
   and 30 should not run from -100 to 100.
 - **Their words, with units**: "Hold" with `unit: "s"`, not `duration_frames`.
 - **The button says what happens**: "Lock in this look", "Cast this lead", never "Submit".
+- **One press where one press is the answer.** A card that only asks which way to go is
+  `instant`; a card with anything to tune or compare keeps its button, so trying costs nothing.
 - **The title says what the card is**, in a few words; the consequence goes in your message.
 - **Hide what does not apply** with `when` rather than showing a control that does nothing.
 - **Do not ask what you can decide.** File formats, bitrates, and layer names are yours.
@@ -227,7 +290,9 @@ conversation, so keep it to what the decision needs.
   it shows is fixed when you show it, and you hear from it once, at lock-in.
 - **The adjustments are the browser's approximation**, not an engine's grade. Treat the numbers as
   intent, reproduce them with the engine's own tools, and show the real result.
-- **No uploads from the person in a card**, and nothing a card stores survives it.
+- **Nothing a card stores survives it**, except a file given to an `upload`, which is in the library.
+- **An `html` card cannot take a file or be `instant`.** Where a gesture in it is the answer, the
+  document calls `moody.submit`.
 - **3D is a `.glb` only**, shown still or turning: no animation playback, no editing.
 - **The `audio` component plays a file as it is.** Processing sound needs an `html` card.
 - **Limits**: a card may have 120 components, 8 levels deep, in 24,000 bytes; 60 items in any

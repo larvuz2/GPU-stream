@@ -5,11 +5,13 @@
  */
 
 /**
- * The values a card's inputs hold: what each starts as, and how each reads in words.
+ * The values a card's inputs hold: what each starts as, how each reads in words, and when two
+ * of them are the same.
  *
  * A card's answer is `{id: value}`, and the shape of a value is its component's: a number for a
  * slider, an option's value for a select, a list for checkboxes, an order for a reorderable
- * list, a view for a 3D model, each layer's visibility and opacity for a composite. This module
+ * list, a view for a 3D model, each layer's visibility and opacity for a composite, the library
+ * entry a file the person gave became. This module
  * is the one place that knows those shapes. The functions are taken by component in
  * `registry.ts`, beside the renderers, so a component's start, its words, and its drawing are
  * registered together.
@@ -40,6 +42,16 @@ export interface LayerSetting {
 export interface LayersValue {
   selected: string;
   layers: Record<string, LayerSetting>;
+}
+
+/** A file the person gave an `upload` input, as the entry of the project's library it became. */
+export interface UploadedFile {
+  /** The entry's tag, which is how the agent names it. */
+  tag: string;
+  /** The file's name. */
+  name: string;
+  /** What the file is: `image`, `video`, `audio`, or `file`. */
+  kind: string;
 }
 
 /** One layer of a composite, as the card defines it. */
@@ -96,6 +108,16 @@ export function isLayersValue(value: unknown): value is LayersValue {
     isRecord(value.layers) &&
     Object.values(value.layers).every(isLayerSetting)
   );
+}
+
+/**
+ * Whether a value is a file's entry in the library.
+ *
+ * @param value The value to check.
+ * @returns `true` for a tag, a name, and a kind.
+ */
+export function isUploadedFile(value: unknown): value is UploadedFile {
+  return isRecord(value) && isString(value.tag) && isString(value.name) && isString(value.kind);
 }
 
 /**
@@ -239,6 +261,7 @@ export const STARTS = {
     elevation: number(node, 'elevation') ?? 0,
     zoom: 1,
   }),
+  upload: (): null => null,
   layers: (node: UiNode): LayersValue => {
     const layers = layerSpecs(node);
     return {
@@ -294,6 +317,7 @@ export const WORDS = {
     const tab = node.children[index];
     return tab === undefined ? show(value) : (text(tab, 'label') ?? show(value));
   },
+  upload: (_node: UiNode, value: unknown): string => (isUploadedFile(value) ? value.name : show(value)),
   model: (_node: UiNode, value: unknown): string =>
     isModelView(value)
       ? `${Math.round(value.azimuth)}° around, ${Math.round(value.elevation)}° up, ${show(value.zoom)}× zoom`
@@ -305,6 +329,30 @@ export const WORDS = {
           .join(', ')
       : show(value),
 };
+
+/**
+ * Whether two values are the same plain data: equal scalars, lists equal in order, records equal
+ * by their keys.
+ *
+ * @param one A value.
+ * @param other Another.
+ * @returns Whether they are the same answer.
+ */
+export function sameValue(one: unknown, other: unknown): boolean {
+  if (Array.isArray(one) || Array.isArray(other)) {
+    return (
+      Array.isArray(one) &&
+      Array.isArray(other) &&
+      one.length === other.length &&
+      one.every((item, index) => sameValue(item, other[index]))
+    );
+  }
+  if (isRecord(one) && isRecord(other)) {
+    const keys = Object.keys(one);
+    return keys.length === Object.keys(other).length && keys.every((key) => sameValue(one[key], other[key]));
+  }
+  return one === other;
+}
 
 /**
  * Whether a value is nothing: no choice, no words, an empty list.

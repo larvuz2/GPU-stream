@@ -34,10 +34,20 @@ links that expire. What the agent does in a project arrives as an append-only
 log of events the page polls (`events`), and a message to the agent claims the
 project's one turn in the database before a job runs it (`send_message`,
 `agent.py`). A message may lock in an interactive card the agent showed
-(`ui`), whose values go to the agent with it. Where the agent waits for the
+(`ui`), whose values go to the agent with it. A project made without a format,
+in a discipline whose kinds the catalog asks for, opens on a card the control
+plane writes itself (`opening_card`), and the message that locks that card
+sets the project's kind before its turn begins (`chosen_kind`, `set_kind`).
+Where the agent waits for the
 person's approval of a step, their answer is recorded once, in the database
 (`answer_approval`), and `always` is kept among the project's permissions,
-which the person can also set and clear (`update_project`). What a project's
+which the person can also set and clear (`update_project`). What one turn
+may spend on the model and how many steps it may take are settings of the
+person's account (`limits`, `change_me`): the deployment's default where
+they set none, and never above the deployment's ceiling. The account's other
+settings are the catalog's (`catalog.json`, `settings`): each is a switch or a
+choice with a default, the profile keeps what the person changed, and
+`settings` answers every one with the value that applies. What a project's
 agent can use beyond its tools is listed for the page (`connectors`). The
 user's GitHub account is connected through a GitHub App whose
 user token, and the refresh token that renews it, are kept sealed
@@ -94,6 +104,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import httpx
 
+import genui
 from github_client import EPIC_FLOW, EPIC_SCOPE, GitHub, GitHubError, Grant, read_state, seal, sign_state, unseal
 import unreal
 
@@ -156,6 +167,12 @@ PROJECT_FIELDS = (
     "plan",
     "permissions",
 )
+# What of a project the card that asks its kind sets, which is also the id of that card's one input
+KIND_FIELD = "format"
+# The longest name an account gives itself
+NAME_LIMIT = 80
+# The limits of one turn an account sets for itself, as `profiles` and `Config` name them
+LIMITS = ("turn_budget_usd", "turn_limit")
 ASSET_FIELDS = ("id", "section", "name", "tag", "description", "metadata", "created_at", "updated_at")
 EVENT_FIELDS = ("id", "turn_id", "kind", "data", "created_at")
 PLAN_STATUSES = ("pending", "active", "done", "blocked")
@@ -282,10 +299,12 @@ class Config:
     # The models a subagent's `balanced` and `light` tiers run on; `inherit` is the agent's own
     agent_model_balanced: str = "claude-sonnet-5-5"
     agent_model_light: str = "claude-haiku-5-5"
-    # What one turn may spend on the model, in dollars as the loop prices it, and the most steps it may take;
-    # zero for no limit
-    turn_budget_usd: float = 10.0
+    # What one turn may spend on the model, in dollars as the loop prices it, and the most steps it may take, for
+    # an account that has set neither; and the most an account may set either to (`Sessions.limits`)
+    turn_budget_usd: float = 15.0
     turn_limit: int = 200
+    turn_budget_max_usd: float = 100.0
+    turn_limit_max: int = 1000
     # How long a step waits for the person's approval before the agent is told to end its turn and ask
     approval_seconds: float = 600
     # Where the loop reaches the Messages API where not Anthropic's own address: a proxy that holds the key
@@ -298,6 +317,13 @@ class Config:
     loop_env: frozenset[str] = frozenset()
     # The `claude` program the loop runs, where not the one the SDK bundles
     loop_cli: str = ""
+
+    def __post_init__(self) -> None:
+        """Refuse limits of a turn that are none: a default or a ceiling of zero would end every turn as it began."""
+        if min(self.turn_budget_usd, self.turn_budget_max_usd) <= 0:
+            raise ValueError("MOODY_TURN_BUDGET_USD and MOODY_TURN_BUDGET_MAX_USD are positive numbers of dollars")
+        if min(self.turn_limit, self.turn_limit_max) <= 0:
+            raise ValueError("MOODY_TURN_LIMIT and MOODY_TURN_LIMIT_MAX are positive numbers of steps")
 
     @property
     def supabase(self) -> bool:
@@ -344,6 +370,8 @@ class Catalog:
         self.tiers = {tier["id"]: tier for tier in self.data["tiers"]}
         self.regions = {region["id"] for region in self.data["regions"]}
         self.packs = {pack["id"]: pack for pack in self.data["credit_packs"]}
+        # What a person may set for themselves beyond the limits of a turn, by id (`Sessions.settings`)
+        self.settings = {setting["id"]: setting for setting in self.data.get("settings", [])}
         self.signup_credits: int = self.data["signup_credits"]
 
 
@@ -652,13 +680,27 @@ def with_query(url: str, **params: str) -> str:
     return urlunsplit(parts._replace(query=urlencode(query)))
 
 
-def default_sections(discipline: str, project_format: str) -> list[str]:
-    """The library sections a new project starts with: a film's cast and world, a commercial's products and shots."""
-    if discipline != "media":
-        return []
-    if project_format == "Commercial":
-        return ["Products", "Shots"]
-    return ["Characters", "Environments", "Props"]
+def setting_app(setting: dict[str, Any], value: Any) -> str | None:
+    """The app a value of a catalog setting stands for, or nothing where the setting chooses between no apps.
+
+    A setting that chooses between engines names them in `apps`: a toggle's
+    under `on` and `off`, a choice's under its options' values. The agent is
+    told of the one that applies, and the page offers a person only that one
+    to start, so the choice is made in Settings and nowhere else.
+    """
+    key = ("on" if value else "off") if setting["kind"] == "toggle" else value
+    return setting.get("apps", {}).get(key)
+
+
+def default_sections(discipline: dict[str, Any], project_format: str) -> list[str]:
+    """The library sections a project of a discipline and a kind starts with, as the catalog gives them.
+
+    A kind's own (`kinds.<format>.sections`: a commercial's products and
+    shots) where it has any, else the discipline's (`sections`: a film's cast
+    and world), else none.
+    """
+    kind = discipline.get("kinds", {}).get(project_format, {})
+    return list(kind.get("sections") or discipline.get("sections") or [])
 
 
 def clean_sections(sections: list[str]) -> list[str]:
@@ -726,9 +768,103 @@ class Sessions:
         return {
             "id": profile["id"],
             "email": profile["email"],
+            "name": profile.get("name") or "",
             "credits": profile["credits"],
             "max_sessions": profile["max_sessions"],
+            "limits": self.limits(profile),
+            "settings": self.settings(profile),
         }
+
+    @staticmethod
+    def offered(setting: dict[str, Any], value: Any) -> bool:
+        """Whether a value is one a setting of the catalog may have: on or off for a toggle, one of a choice's options."""
+        if setting["kind"] == "toggle":
+            return isinstance(value, bool)
+        return any(value == option["value"] for option in setting.get("options", []))
+
+    def settings(self, profile: dict[str, Any]) -> dict[str, Any]:
+        """Every setting of the catalog with the value that applies to this person: their own, or its default.
+
+        A value kept from before the catalog stopped offering it does not
+        apply, so a choice whose option was removed is back on its default
+        without anyone's row being rewritten.
+        """
+        own = profile.get("settings") or {}
+        return {
+            name: own[name] if name in own and self.offered(setting, own[name]) else setting["default"]
+            for name, setting in self.catalog.settings.items()
+        }
+
+    def limits(self, profile: dict[str, Any]) -> dict[str, Any]:
+        """What one turn of this person's may spend on the model and how many steps it may take, and where that comes from.
+
+        Each limit is the person's own setting where they made one, else the
+        deployment's default, and in either case no more than the deployment's
+        ceiling, which also holds a setting made before the ceiling was
+        lowered. `own`, `default`, and `max` are the three it is made from,
+        for the page that lets the person change it.
+        """
+        config = self.config
+        ceiling = {"turn_budget_usd": config.turn_budget_max_usd, "turn_limit": config.turn_limit_max}
+        default = {"turn_budget_usd": min(config.turn_budget_usd, ceiling["turn_budget_usd"]), "turn_limit": min(config.turn_limit, ceiling["turn_limit"])}
+        own = {name: profile.get(name) for name in LIMITS}
+        applies = {name: min(default[name] if own[name] is None else own[name], ceiling[name]) for name in LIMITS}
+        return {**applies, "own": own, "default": default, "max": ceiling}
+
+    def change_me(self, user: User, changes: dict[str, Any]) -> dict[str, Any]:
+        """Change what is the user's to set of their account, and return their profile.
+
+        `changes` holds what to change: a limit of a turn by its name, `name`,
+        and `settings`, the catalog's settings to change by id. `None` puts a
+        limit or a setting back on its default, and clears the name. Nothing
+        is written where anything is refused.
+
+        Raises:
+            Refused: 400 for a limit that is not a positive number, a number of steps that is not whole, or
+                one over the deployment's ceiling; for a name that is not text; for settings that are
+                not an object, an id the catalog does not have, or a value it does not offer.
+        """
+        config = self.config
+        kept: dict[str, Any] = {}
+        if "name" in changes:
+            name = changes["name"]
+            if name is not None and not isinstance(name, str):
+                raise Refused(400, "A name is text.")
+            kept["name"] = " ".join((name or "").split())[:NAME_LIMIT]
+        chosen: dict[str, Any] | None = None
+        if "settings" in changes:
+            chosen = changes["settings"]
+            if not isinstance(chosen, dict):
+                raise Refused(400, "settings is the settings to change, each by its id.")
+            for name, value in chosen.items():
+                setting = self.catalog.settings.get(name)
+                if setting is None:
+                    raise Refused(400, f"There is no setting {name}.")
+                if value is not None and not self.offered(setting, value):
+                    wanted = "true or false" if setting["kind"] == "toggle" else ", ".join(str(option["value"]) for option in setting["options"])
+                    raise Refused(400, f"{name} is {wanted}, or null for its default.")
+        for name, value in changes.items():
+            if name not in LIMITS:
+                continue
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not value > 0):
+                raise Refused(400, "A limit is a positive number, or null for the default.")
+            if name == "turn_budget_usd" and value is not None and value > config.turn_budget_max_usd:
+                raise Refused(400, f"A turn may spend at most ${config.turn_budget_max_usd:g} here.")
+            if name == "turn_limit" and value is not None:
+                if value != int(value):
+                    raise Refused(400, "A turn's steps are a whole number.")
+                if value > config.turn_limit_max:
+                    raise Refused(400, f"A turn may take at most {config.turn_limit_max} steps here.")
+                value = int(value)
+            kept[name] = value
+        profile = self.me(user)
+        if chosen:
+            own = self.store.rows("profiles", id=f"eq.{user.id}")[0].get("settings") or {}
+            kept["settings"] = {name: value for name, value in {**own, **chosen}.items() if value is not None}
+        if kept:
+            self.store.update("profiles", kept, id=f"eq.{user.id}")
+            profile = self.me(user)
+        return profile
 
     # Sessions
 
@@ -995,6 +1131,9 @@ class Sessions:
     ) -> dict[str, Any]:
         """Make a project of one of the catalog's disciplines, in one of its formats, with that format's first sections.
 
+        A project made without a format, in a discipline that asks its kind, opens on the card that
+        asks it (`opening_card`): the project's first event, written here with no turn and no model.
+
         With `github_repo`, the project starts linked to that repository (and `github_branch`, where
         given), which is checked as `link_repo` checks it before anything is made: what the studio's
         "Import from GitHub" makes.
@@ -1017,12 +1156,73 @@ class Sessions:
                 "name": " ".join(name.split())[:120] or "Untitled project",
                 "discipline": discipline,
                 "format": project_format,
-                "library_sections": default_sections(discipline, project_format),
+                "library_sections": default_sections(offered, project_format),
                 "github_repo": linked[0],
                 "github_branch": linked[1],
             },
         )
+        card = None if project_format else self.opening_card(offered)
+        if card is not None:
+            self.add_event(row["id"], None, "ui", card)
         return self.public_project(row)
+
+    def opening_card(self, discipline: dict[str, Any]) -> dict[str, Any] | None:
+        """The card that asks a new project's kind, as its `ui` event, or nothing for a discipline that does not ask.
+
+        A discipline asks where the catalog gives it an `opening`, the card's
+        title, and formats to choose from. The card is one `pick` of the
+        formats, in the catalog's order, each with the line and the icon its
+        `kinds` entry names: the icon is looked up in the catalog's `icons`
+        and left out where there is none. Choosing locks the card (`instant`), and `sets`
+        names what of the project the choice sets, which is also the pick's
+        id, so the message that locks it carries `{format: <the kind>}`
+        (`chosen_kind`). The card is built and checked as any other is
+        (`genui.card`), so it is one the page renders.
+
+        Raises:
+            genui.Invalid: The catalog describes a card the catalog of cards does not allow.
+        """
+        formats = discipline.get("formats") or []
+        if not discipline.get("opening") or not formats:
+            return None
+        icons = self.catalog.data.get("icons", {})
+        options = []
+        for name in formats:
+            kind = discipline.get("kinds", {}).get(name, {})
+            option = {"value": name, "label": name}
+            if kind.get("note"):
+                option["note"] = kind["note"]
+            if icons.get(kind.get("icon")):
+                option["icon"] = icons[kind["icon"]]
+            options.append(option)
+        spec = {"type": "pick", "id": KIND_FIELD, "options": options}
+        data, _ = genui.card(
+            genui.catalog(), uuid.uuid4().hex[:12], discipline["opening"], spec, None, None, True, None, {}, instant=True
+        )
+        return {**data, "sets": KIND_FIELD, "media": []}
+
+    def chosen_kind(self, project: dict[str, Any], card: dict[str, Any], value: Any) -> str | None:
+        """The kind a message that locks a card chooses for the project, or nothing where the card sets none.
+
+        Raises:
+            Refused: 400 for a kind the project's discipline does not offer.
+        """
+        if card.get("sets") != KIND_FIELD:
+            return None
+        discipline = self.catalog.disciplines.get(project["discipline"], {})
+        chosen = value.get(KIND_FIELD) if isinstance(value, dict) else None
+        if not isinstance(chosen, str) or chosen not in discipline.get("formats", []):
+            raise Refused(400, f"{discipline.get('name', project['discipline'])} has no format {chosen!r}.")
+        return chosen
+
+    def set_kind(self, project: dict[str, Any], chosen: str) -> None:
+        """Make a project one of its discipline's kinds, with that kind's first sections where the library is untouched."""
+        discipline = self.catalog.disciplines.get(project["discipline"], {})
+        changes: dict[str, Any] = {"format": chosen, "updated_at": now()}
+        untouched = project["library_sections"] == default_sections(discipline, project["format"])
+        if untouched and not self.project_assets(project):
+            changes["library_sections"] = default_sections(discipline, chosen)
+        self.store.update("projects", changes, id=f"eq.{project['id']}")
 
     def update_project(
         self,
@@ -1517,7 +1717,8 @@ class Sessions:
         if len(text) > MESSAGE_LIMIT:
             raise Refused(413, "That message is too long.")
         project = self.owned_project(user, project_id)
-        locked = self.locked_card(project, ui) if ui is not None else None
+        locked, card = self.locked_card(project, ui) if ui is not None else (None, {})
+        kind = self.chosen_kind(project, card, locked["value"]) if locked else None
         turn_id = self.store.rpc(
             "moody_begin_turn",
             p_project=project["id"],
@@ -1526,6 +1727,9 @@ class Sessions:
             p_stale_seconds=TURN_STALE_SECONDS,
             p_ui=locked,
         )
+        if kind is not None:
+            # After the turn is the project's and before its job reads the project: the turn begins knowing its kind
+            self.set_kind(project, kind)
         try:
             self.jobs.turn(project["id"], turn_id)
         except Exception as error:
@@ -1535,8 +1739,8 @@ class Sessions:
             raise Refused(503, "The agent could not be started. Try again.") from error
         return turn_id
 
-    def locked_card(self, project: dict[str, Any], ui: dict[str, Any]) -> dict[str, Any]:
-        """A message's `ui` as the turn's first event keeps it: the card's ID and the state it was locked in with.
+    def locked_card(self, project: dict[str, Any], ui: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        """A message's `ui` as the turn's first event keeps it (the card's ID and the state it was locked in with), and the card.
 
         Raises:
             Refused: 400 for a `ui` without a card's ID or whose state is not JSON, 413 for a state
@@ -1552,9 +1756,10 @@ class Sessions:
         if size > UI_VALUE_LIMIT_BYTES:
             raise Refused(413, "That card's value is too large.")
         shown = self.store.rows("project_events", project_id=f"eq.{project['id']}", kind="eq.ui")
-        if not any(row["data"].get("ui_id") == ui_id for row in shown):
+        card = next((row["data"] for row in shown if row["data"].get("ui_id") == ui_id), None)
+        if card is None:
             raise Refused(404, "This project has no such card.")
-        return {"ui_id": ui_id, "value": ui["value"]}
+        return {"ui_id": ui_id, "value": ui["value"]}, card
 
     def answer_approval(self, user: User, project_id: str, approval_id: str, decision: str) -> bool:
         """Record the person's answer to an approval the agent of their project waits on; returns whether it stands.

@@ -53,9 +53,11 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import re
 import sys
 import time
+import urllib.request
 from pathlib import Path, PurePosixPath
 from secrets import token_hex, token_urlsafe
 from typing import Any, Callable
@@ -100,6 +102,42 @@ CRAFT_RELEASES = {
     "vectorcraft": (VECTORCRAFT_VERSION, VECTORCRAFT_SHA256),
     "lightcraft": (LIGHTCRAFT_VERSION, LIGHTCRAFT_SHA256),
 }
+# The Cut Room's parts beside the base image's FFmpeg (`cutroom_image`, `cutroom/install.sh`). Its Python
+# packages are pinned, each wheel by its hash, in `cutroom/python.lock`.
+# Inter's release archive of github.com/rsms/inter and its SHA-256; SIL Open Font License 1.1
+CUTROOM_INTER_VERSION = "4.1"
+CUTROOM_INTER_SHA256 = "9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e"
+# Archivo Black as github.com/google/fonts has it at one commit (ofl/archivoblack), with the SHA-256 of
+# ArchivoBlack-Regular.ttf and of the license beside it; SIL Open Font License 1.1
+CUTROOM_ARCHIVO_BLACK_COMMIT = "6ebe737e44fd64ee736bbc6feed6136a6dbfd222"
+CUTROOM_ARCHIVO_BLACK_SHA256 = "dd9a89a019b4849f66ab75455fe7bdf931311042cbb0f0f97acc061539703180"
+CUTROOM_ARCHIVO_BLACK_LICENSE_SHA256 = "3173acd82f8c6159b5b1037b539fcbd4edff68e65c2ea8b9412b5a5ca97b08ff"
+# The speech models the scripts load, huggingface.co/Systran/faster-whisper-<name>: the revision and the
+# SHA-256 of its weights (model.bin); MIT
+CUTROOM_WHISPER = {
+    "small": ("536b0662742c02347bc0e980a01041f333bce120", "3e305921506d8872816023e4c273e75d2419fb89b24da97b4fe7bce14170d671"),
+    "medium": ("08e178d48790749d25932bbc082711ddcfdfbc4f", "9b45e1009dcc4ab601eff815b61d80e60ce3fd8c74c1a14f4a282258286b51ae"),
+}
+# The face detector the webcam finder runs, huggingface.co/opencv/face_detection_yunet: the revision and the
+# SHA-256 of face_detection_yunet_2023mar.onnx; MIT
+CUTROOM_YUNET_REVISION = "3cc26e7f1014a5ee5d74a42acee58bafc9d0a310"
+CUTROOM_YUNET_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+# The HyperFrames session's parts that are pinned (`hyperframes_image`, `hyperframes/install.sh`): Node.js's
+# Linux build with the hash nodejs.org's SHASUMS256.txt lists for it, and Chrome for Testing, which the live
+# preview opens in, with the SHA-256 of its chrome-linux64.zip
+HYPERFRAMES_NODE_VERSION = "22.23.5"
+HYPERFRAMES_NODE_SHA256 = "cdeb8670a0c81f51b4dc4ac61919f9b1ad917b304bf8221eb939570663d240f8"
+HYPERFRAMES_CHROME_VERSION = "158.0.8127.88"
+HYPERFRAMES_CHROME_SHA256 = "59e3b43f8b3aaa292238fbdcfb36a93127debd53e212510dcdc2cc8812b4b57e"
+# The HyperFrames CLI is the one part that is not pinned: an image is built with the newest release of the
+# npm package `hyperframes` (`hyperframes_release`), and this is the release it is built with where the
+# registry does not answer, the one these files were written and proven against
+HYPERFRAMES_RELEASE = "0.9.97"
+HYPERFRAMES_REGISTRY = "https://registry.npmjs.org"
+# The release every HyperFrames session is held on, read from the environment of whoever defines the image (the
+# control plane, or the shell `selkies-modal` runs in): a version such as 0.9.97, or `built` for the image's own.
+# Unset, which is how a deployment starts, a session follows upstream (hyperframes/release.sh)
+HYPERFRAMES_HELD = os.environ.get("MOODY_HYPERFRAMES_VERSION", "")
 # The Unreal session's GitHub client: Desktop Plus, a fork of GitHub Desktop kept current with it
 # that publishes Linux packages; its Debian package and the SHA-256 its GitHub release lists for it
 DESKTOP_PLUS_VERSION = "3.6.12.0"
@@ -138,6 +176,14 @@ VECTORCRAFT_READY_FILE = "/tmp/selkies-modal/vectorcraft-ready"
 
 # LightCraft's, loopback only as theirs are, and the port its own documentation uses
 LIGHTCRAFT_CONTROL_PORT = 7980
+
+# Where the Cut Room is installed in its image, and the log of its commands a session shows on its screen
+CUTROOM_ROOT = "/opt/cutroom"
+CUTROOM_LOG = "/tmp/selkies-modal/cutroom.log"
+
+# Where HyperFrames is installed in its image, and the log a session shows on its screen until a preview is on it
+HYPERFRAMES_ROOT = "/opt/hyperframes"
+HYPERFRAMES_LOG = "/tmp/selkies-modal/hyperframes.log"
 
 # What the session is, whoever starts it. Modal terminates TLS and its connect
 # token guards the address, so Selkies serves plain HTTP with no login of its
@@ -241,6 +287,23 @@ APP_ENV = {
         # GPU, and on a GPU machine LightCraft's kernels fail to build on NVIDIA's OpenGL.
         "WGPU_BACKEND": "vulkan",
     },
+    "cutroom": {
+        "SELKIES_MODAL_APP": "cutroom",
+        # Where every `cutroom` command writes what it ran, which the session's screen shows (cutroom/autostart)
+        "CUTROOM_LOG": CUTROOM_LOG,
+    },
+    "hyperframes": {
+        "SELKIES_MODAL_APP": "hyperframes",
+        "HYPERFRAMES_LOG": HYPERFRAMES_LOG,
+        # The CLI reports its use to its makers unless told not to; a person's session reports nothing
+        "HYPERFRAMES_NO_TELEMETRY": "1",
+        # Which release runs is the session's own to settle (hyperframes/release.sh), so the CLI neither offers
+        # another nor installs skills into the home; the release's skills are at HYPERFRAMES_ROOT/skills
+        "HYPERFRAMES_NO_UPDATE_CHECK": "1",
+        "HYPERFRAMES_SKIP_SKILLS": "1",
+        # Set only where a deployment holds its sessions on one release (HYPERFRAMES_HELD)
+        **({"MOODY_HYPERFRAMES_VERSION": HYPERFRAMES_HELD} if HYPERFRAMES_HELD else {}),
+    },
 }
 APPS = tuple(APP_ENV)
 
@@ -291,9 +354,16 @@ def session_image(app: str = "blender") -> modal.Image:
     control channel (`filmcraft/control.sh`, `soundcraft/control.sh`). Unreal's
     is the desktop its editor runs beside, without the editor
     (`unreal_desktop`); `unreal_image` is the same desktop with the editor.
+    The Cut Room's has no application at all (`cutroom_image`), and neither
+    has HyperFrames', the one image whose main part follows its upstream
+    instead of a pin (`hyperframes_image`).
     """
     if app == "unreal":
         return with_session(unreal_desktop(modal.Image.from_registry(BASE_IMAGE)), app)
+    if app == "cutroom":
+        return with_session(cutroom_image(), app)
+    if app == "hyperframes":
+        return with_session(hyperframes_image(), app)
     if app in CRAFT_RELEASES:
         version, sha256 = CRAFT_RELEASES[app]
         image = (
@@ -359,6 +429,160 @@ def with_session(image: modal.Image, app: str) -> modal.Image:
         .add_local_file(HERE / "job.sh", "/usr/local/bin/selkies-modal-job", copy=True)
         .env({**SESSION_ENV, **APP_ENV[app]})
         .entrypoint([])
+    )
+
+
+def cutroom_image() -> modal.Image:
+    """The Cut Room's image: the base container with what editing video by code takes, and no application.
+
+    A Cut Room session is a machine an agent drives with shell commands, so
+    the image is its tools at fixed paths (`cutroom/install.sh` documents each
+    step):
+
+    - **FFmpeg** is the base image's own, pinned by the base's digest. The
+      build fails unless it has every filter and encoder the scripts call:
+      libass's `subtitles`, Rubber Band, `loudnorm`, and x264 among them.
+    - **Python.** A virtual environment at `CUTROOM_ROOT/venv` with the wheels
+      `cutroom/python.lock` names, each checked against its hash: faster-whisper,
+      NumPy, OpenCV, Pedalboard, Pillow, yt-dlp, and what the scripts import
+      beside them. The lock is compiled from `cutroom/python.in` for the base
+      image's Python.
+    - **Fonts.** Inter and Archivo Black, each from its upstream at a pinned
+      version and checksum, with the SIL Open Font License beside it.
+    - **Models.** The two Whisper conversions the scripts load and the face
+      detector, at pinned revisions and checksums, so a session fetches none.
+    - **The scripts,** `cutroom/scripts`, at `CUTROOM_ROOT/scripts`, each run
+      as `cutroom NAME` from any directory (`cutroom/run.sh`).
+
+    The session's screen is a terminal on the log of those commands
+    (`cutroom/autostart`). The layers are ordered by how often they change:
+    the tools (`cutroom_tools`), then the small files and the scripts, so a
+    changed script rebuilds a layer of kilobytes.
+    """
+    cutroom = HERE / "cutroom"
+    return (
+        cutroom_tools()
+        .add_local_file(HERE / "craft" / "project.sh", "/usr/local/bin/selkies-modal-project", copy=True)
+        .add_local_file(cutroom / "autostart", "/etc/xdg/openbox/autostart", copy=True)
+        .add_local_file(cutroom / "run.sh", "/usr/local/bin/cutroom", copy=True)
+        .add_local_dir(cutroom / "scripts", f"{CUTROOM_ROOT}/scripts", copy=True, ignore=["**/__pycache__"])
+    )
+
+
+def cutroom_fonts() -> str:
+    """The Dockerfile step that installs Inter and Archivo Black, pinned and checked (`cutroom/install.sh fonts`)."""
+    return (
+        f"RUN sh {SHARE}/cutroom/install.sh fonts {CUTROOM_INTER_VERSION} {CUTROOM_INTER_SHA256} "
+        f"{CUTROOM_ARCHIVO_BLACK_COMMIT} {CUTROOM_ARCHIVO_BLACK_SHA256} {CUTROOM_ARCHIVO_BLACK_LICENSE_SHA256}"
+    )
+
+
+def cutroom_tools() -> modal.Image:
+    """The base container with the Cut Room's packages, Python environment, fonts, and models: the heavy layers.
+
+    They change only when a pin moves, so they are an image of their own
+    under the scripts, and the last step proves them: it fails the build
+    unless FFmpeg has what the scripts call and every package and model
+    loads.
+    """
+    cutroom = HERE / "cutroom"
+    install = f"sh {SHARE}/cutroom/install.sh"
+    return (
+        modal.Image.from_registry(BASE_IMAGE)
+        .add_local_file(cutroom / "install.sh", f"{SHARE}/cutroom/install.sh", copy=True)
+        .dockerfile_commands(f"RUN selkies-privileged-files run {install} packages")
+        .add_local_file(cutroom / "python.lock", f"{SHARE}/cutroom/python.lock", copy=True)
+        .dockerfile_commands(
+            f"RUN {install} python {SHARE}/cutroom/python.lock",
+            cutroom_fonts(),
+            *(f"RUN {install} whisper {name} {revision} {sha256}" for name, (revision, sha256) in CUTROOM_WHISPER.items()),
+            f"RUN {install} yunet {CUTROOM_YUNET_REVISION} {CUTROOM_YUNET_SHA256}",
+            f"RUN {install} verify",
+        )
+    )
+
+
+def hyperframes_release() -> str:
+    """The release of the HyperFrames CLI an image defined now is built with.
+
+    The newest release of the npm package, asked of the registry, since this
+    engine follows its upstream (`hyperframes/release.sh` says why and what
+    bounds the risk). A deployment that holds its sessions on one release
+    (`MOODY_HYPERFRAMES_VERSION`, a version) builds with that one. Where the
+    registry does not answer within five seconds, or answers with something
+    that is not a version, the image is built with `HYPERFRAMES_RELEASE`, so
+    defining an image never fails for want of the network.
+
+    The version is part of the image's definition, so Modal builds the layer
+    again when a new release is out and reuses it until then.
+    """
+    if re.fullmatch(r"\d+\.\d+\.\d+", HYPERFRAMES_HELD):
+        return HYPERFRAMES_HELD
+    try:
+        with urllib.request.urlopen(f"{HYPERFRAMES_REGISTRY}/hyperframes/latest", timeout=5) as answer:
+            newest = str(json.load(answer).get("version", ""))
+    except (OSError, ValueError):
+        return HYPERFRAMES_RELEASE
+    return newest if re.fullmatch(r"\d+\.\d+\.\d+", newest) else HYPERFRAMES_RELEASE
+
+
+def hyperframes_image() -> modal.Image:
+    """The HyperFrames image: the base container with what writing a video as HTML and rendering it takes.
+
+    HyperFrames (HeyGen's, Apache 2.0) renders a composition of HTML, CSS,
+    and seekable animation by stepping a headless browser through its frames
+    and encoding them with FFmpeg. A session is driven with shell commands, as
+    the Cut Room is, and has one thing to watch: the live preview.
+
+    - **Pinned**, as every engine's parts are (`hyperframes/install.sh`):
+      Node.js, which the CLI runs on; Chrome for Testing, which the preview
+      opens in on the session's screen (`hyperframes/preview.sh`); the
+      libraries a Chrome links; and the Cut Room's fonts (`cutroom_fonts`).
+      FFmpeg is the base image's.
+    - **Following upstream**, the one place this engine differs: the
+      HyperFrames CLI, its skills, and the headless browser each release
+      renders with. The image is built with the newest release
+      (`hyperframes_release`), or with `HYPERFRAMES_RELEASE` where the newest
+      does not install and render in the build, and a session moves to the
+      newest again as it starts, within a bound of time, falling back on the
+      image's release (`hyperframes/release.sh` has the mechanism, the
+      reasons, and the risk). Whoever defines the image asks the registry
+      when it defines it, so a control plane that keeps an app's image for
+      the life of its container builds with a new release when it next
+      starts; the session's own update covers the time between.
+      `hyperframes-release status` says which release a session runs. The
+      folder is the session user's, so a session can install a release.
+
+    The release's skills are at `HYPERFRAMES_ROOT/skills`, the craft an agent
+    reads on the machine before it writes a composition; they are upstream's
+    and are not copied into this repository. The build's last step fails
+    unless the CLI answers with the version it was built with, its skills are
+    there, and both browsers find their libraries.
+    """
+    hyperframes = HERE / "hyperframes"
+    install = f"sh {SHARE}/hyperframes/install.sh"
+    as_user = "setpriv --reuid=1000 --regid=1000 --init-groups env HOME=/home/ubuntu"
+    # The newest release, then the proven one: the first that installs and renders is the image's (release.sh)
+    releases = " ".join(dict.fromkeys((hyperframes_release(), HYPERFRAMES_RELEASE)))
+    return (
+        modal.Image.from_registry(BASE_IMAGE)
+        .add_local_file(hyperframes / "install.sh", f"{SHARE}/hyperframes/install.sh", copy=True)
+        .dockerfile_commands(
+            f"RUN selkies-privileged-files run {install} packages",
+            f"RUN {install} node {HYPERFRAMES_NODE_VERSION} {HYPERFRAMES_NODE_SHA256}",
+            f"RUN {install} chrome {HYPERFRAMES_CHROME_VERSION} {HYPERFRAMES_CHROME_SHA256}",
+        )
+        .add_local_file(HERE / "cutroom" / "install.sh", f"{SHARE}/cutroom/install.sh", copy=True)
+        .dockerfile_commands(cutroom_fonts())
+        .add_local_file(hyperframes / "release.sh", "/usr/local/bin/hyperframes-release", copy=True)
+        .add_local_file(hyperframes / "run.sh", "/usr/local/bin/hyperframes", copy=True)
+        .dockerfile_commands(
+            f"RUN chown 1000:1000 {HYPERFRAMES_ROOT} && {as_user} hyperframes-release build {releases}",
+            f"RUN {install} verify",
+        )
+        .add_local_file(HERE / "craft" / "project.sh", "/usr/local/bin/selkies-modal-project", copy=True)
+        .add_local_file(hyperframes / "autostart", "/etc/xdg/openbox/autostart", copy=True)
+        .add_local_file(hyperframes / "preview.sh", "/usr/local/bin/hyperframes-preview", copy=True)
     )
 
 

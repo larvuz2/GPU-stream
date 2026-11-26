@@ -7,8 +7,8 @@
 # Starting a project
 
 The questions that decide a drawing, the defaults to propose for each, and the first commands.
-Ask one at a time with `ask_user`, your recommendation first; skip any the person already
-answered. Write the answers to `README.md` before you draw.
+Ask one at a time with `ask_user`, your recommendation first and named in `recommended`; skip
+any the person already answered. Write the answers to `README.md` before you draw.
 
 ## Intake
 
@@ -16,7 +16,7 @@ answered. Write the answers to `README.md` before you draw.
 |---|---|---|
 | What is it, and who builds or makes it? | A builder, a laser cutter, a print bed, and a client presentation read different drawings | Restate it in one line and confirm |
 | What do you need at the end? | Sets the sheets, the scale, and the file | "A PDF drawing set", "A 3D model and render (Blender)", "A file to cut or print", "A DXF or DWG for a consultant" |
-| Units and standard? | Fixes the dimension style, text, sheet sizes, and layer names | Millimeters, ISO (recommended outside the US); feet and inches, US practice |
+| Units and standard? | Fixes the dimension style, text, sheet sizes, and layer names | "Millimeters, ISO", which you recommend outside the US; "Feet and inches, US practice" |
 | What is fixed? | Constraints come before design | The measured room or site; mating parts; stock sizes; a machine's limits; a code |
 | What is the scale and sheet? | Annotation is sized for one plot scale | See the table below |
 | How precise? | Tolerances cost money | General tolerance from the process (drafting.md), tight only where it functions |

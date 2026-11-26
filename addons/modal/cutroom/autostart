@@ -1,0 +1,23 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Run by the Selkies window manager once it is up, as the session's
+# application, installed as /etc/xdg/openbox/autostart, which both backends
+# read: the Cut Room's log, in a terminal that fills the screen.
+#
+# The Cut Room has no application to click: its work is commands the agent
+# runs (`cutroom`, run.sh), each of which writes what it ran and what it
+# printed to the session's log. This shows that log as it grows, opened in the
+# session's project folder (`craft/project.sh`), so a person watching the
+# engine's screen sees what is being cut. The finished pictures and sound reach
+# them in the conversation, as previews, never here.
+folder="$(selkies-modal-project)" || exit 1
+cd "${folder}" || exit 1
+
+log="${CUTROOM_LOG:-/tmp/selkies-modal/cutroom.log}"
+mkdir -p "$(dirname "${log}")"
+[ -s "${log}" ] || printf 'Cut Room: video edited by code.\nProject folder: %s\nEach command the agent runs appears below.\n' "${folder}" > "${log}"
+
+exec xterm -T "Cut Room" -fa Hack -fs 15 -bg '#0d0d0f' -fg '#e8e8ea' -bc -e tail -n 200 -F "${log}"

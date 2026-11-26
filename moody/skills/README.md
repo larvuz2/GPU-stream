@@ -102,7 +102,10 @@ finds the same thing in the same place in every skill.
    another skill's job, by name.
 2. **The collaboration loop.** How one step goes: propose with a recommendation and a reason, ask
    with `ask_user`, execute exactly what was chosen, show the result, record it in the plan and
-   the library. Name the checkpoints where the agent always asks first.
+   the library. Name the checkpoints where the agent always asks first. A question's
+   recommendation is `ask_user`'s `recommended`, which the page marks: where the skill writes out
+   options, their text is only the options, and a line beside them says which one to recommend
+   and when.
 3. **The questions to ask first.** What only the person can answer, as questions with two to five
    short options, and what the agent decides by itself and reports.
 4. **Recipes.** The work as numbered steps, each with the exact tool call: the tool, the method,

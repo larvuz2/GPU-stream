@@ -78,7 +78,8 @@ from looking import NoPicture, picture_of
 from loop import BUILT_INS, PREFIX, SDK_VARIABLES, Blocks, Settings, Workspace, child_environment, fetchable, inside, loop_name
 from scripted_loop import Reply, ScriptedLoop
 from transcript import Transcript
-from generation import IMAGE_MODELS, VIDEO_MODELS, Fal, GenerationStopped, video_kilotokens
+from generation import AUDIO_MODELS, IMAGE_MODELS, SPEECH_VOICES, VIDEO_MODELS, Fal, GenerationStopped, audio_arguments, audio_units, video_kilotokens
+import genui
 from github_client import EPIC_FLOW, GitHub, GitHubError, Grant, read_state, seal, sign_state, unseal
 from launcher import ModalLauncher, origin
 from service import OPEN, Catalog, Clone, Config, OwnCopy, Refused, Sessions, Store, User, hash_key
@@ -149,7 +150,7 @@ class FakeStore:
         self.keys: dict[str, dict[str, Any]] = {}
         self.ledger: list[tuple[str, int, str | None]] = []
         self.tables: dict[str, dict[Any, dict[str, Any]]] = {
-            "sessions": self.sessions, "api_keys": self.keys,
+            "sessions": self.sessions, "api_keys": self.keys, "profiles": self.profiles,
             **{
                 table: {}
                 for table in ("projects", "assets", "project_events", "agent_transcripts", "github_connections", "epic_connections")
@@ -173,7 +174,9 @@ class FakeStore:
 
     def moody_ensure_profile(self, p_user: str, p_email: str, p_signup_credits: int) -> dict[str, Any]:
         return self.profiles.setdefault(
-            p_user, {"id": p_user, "email": p_email, "credits": p_signup_credits, "max_sessions": 1}
+            p_user,
+            {"id": p_user, "email": p_email, "credits": p_signup_credits, "max_sessions": 1, "turn_budget_usd": None, "turn_limit": None,
+             "name": "", "settings": {}},
         )
 
     def moody_request_session(
@@ -790,19 +793,33 @@ class FakeFal:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         # What a result's file holds, by its suffix; a file of a suffix not here holds its own address
         self.files: dict[str, bytes] = {}
+        # What the next runs raise, one each, before any run answers again
+        self.failures: list[Exception] = []
 
     def run(self, model: str, arguments: dict[str, Any], alive: Callable[[], bool], limit_seconds: float) -> dict[str, Any]:
         self.calls.append((model, arguments))
+        if self.failures:
+            raise self.failures.pop(0)
         if model in VIDEO_MODELS.values():
             return {"video": {"url": "https://fal.example.test/files/shot.mp4"}, "seed": 7}
+        if model == AUDIO_MODELS["music"]:
+            # As the music model answers: how long the piece came out, which may be under what was allowed
+            return {"audio": {"url": f"https://fal.example.test/files/take-{len(self.calls)}.wav"}, "seed": 40 + len(self.calls), "duration": 42.5}
+        if model in AUDIO_MODELS.values():
+            return {"audio": {"url": f"https://fal.example.test/files/take-{len(self.calls)}{'.mp3' if model == AUDIO_MODELS['sound'] else '.wav'}"}}
         return {"images": [{"url": f"https://fal.example.test/files/image-{n}.png"} for n in range(arguments["num_images"])]}
 
     def download(self, url: str) -> tuple[bytes, str]:
-        return self.files.get(PurePosixPath(url).suffix, url.encode()), "video/mp4" if url.endswith(".mp4") else "image/png"
+        types = {".mp4": "video/mp4", ".wav": "audio/wav", ".mp3": "audio/mpeg"}
+        return self.files.get(PurePosixPath(url).suffix, url.encode()), types.get(PurePosixPath(url).suffix, "image/png")
 
     def cost(self, model: str, units: dict[str, float]) -> float | None:
         if model in VIDEO_MODELS.values():
             return round(0.473 * units["second"], 4) if "second" in units else None
+        if model == AUDIO_MODELS["speech"]:
+            return round(0.045 * units["1000 character"], 4)
+        if model in AUDIO_MODELS.values():
+            return round(0.002 * units["second"], 4) if "second" in units else None
         return round(0.15 * units["image"], 4)
 
 
@@ -906,7 +923,7 @@ def auth(token: str) -> dict[str, str]:
 
 def new_project(client: TestClient, token: str = "alice-token", asks: bool = False, **body: Any) -> dict[str, Any]:
     """Make a project. Its agent runs the tools the person approves without asking, unless `asks` leaves that on."""
-    response = client.post("/v1/projects", headers=auth(token), json={"name": "Mara", "discipline": "media", "format": "Movie", **body})
+    response = client.post("/v1/projects", headers=auth(token), json={"name": "Mara", "discipline": "media", "format": "Film & TV", **body})
     assert response.status_code == 200, response.text
     project = response.json()["project"]
     if not asks:
@@ -990,7 +1007,158 @@ def test_no_credential_and_a_wrong_one_are_refused(world):
 def test_a_first_visit_makes_a_profile_with_the_sign_up_credits(world):
     client = world[0]
     me = client.get("/v1/me", headers=auth("alice-token")).json()
-    assert me == {"id": ALICE.id, "email": ALICE.email, "credits": CATALOG.signup_credits, "max_sessions": 1}
+    limits = {
+        "turn_budget_usd": 15.0, "turn_limit": 200,
+        "own": {"turn_budget_usd": None, "turn_limit": None},
+        "default": {"turn_budget_usd": 15.0, "turn_limit": 200},
+        "max": {"turn_budget_usd": 100.0, "turn_limit": 1000},
+    }
+    assert me == {"id": ALICE.id, "email": ALICE.email, "name": "", "credits": CATALOG.signup_credits, "max_sessions": 1, "limits": limits,
+                  "settings": {"video_hyperframes": False}}
+
+
+def test_settings_are_the_persons_each_one_of_the_catalogs_and_on_its_default_until_changed(studio, monkeypatch):
+    client, model, store = studio.client, studio.model, studio.store
+    mine = lambda token="alice-token": client.get("/v1/me", headers=auth(token)).json()
+    change = lambda **body: client.patch("/v1/me", headers=auth("alice-token"), json=body)
+    (entry,) = CATALOG.data["settings"]
+    assert entry == {
+        "id": "video_hyperframes", "tab": "Video editing", "label": "Use HyperFrames for videos edited by code", "help": entry["help"],
+        "kind": "toggle", "default": False, "apps": {"on": "hyperframes", "off": "cutroom"},
+    } and "Cut Room" in entry["help"] and len(entry["help"]) < 140
+    assert set(entry["apps"].values()) <= set(CATALOG.apps), "the setting names the engine each of its values stands for"
+    assert (mine()["name"], mine()["settings"]) == ("", {"video_hyperframes": False}), "everyone sees it, and it is off"
+
+    changed = change(name="  Mara   Films ", settings={"video_hyperframes": True})
+    assert changed.status_code == 200 and changed.json() == mine(), "the answer is the profile"
+    assert (mine()["name"], mine()["settings"]) == ("Mara Films", {"video_hyperframes": True})
+    assert mine("bob-token")["settings"] == {"video_hyperframes": False} and mine("bob-token")["name"] == ""
+    assert change(turn_limit=300).status_code == 200
+    assert (mine()["name"], mine()["settings"], mine()["limits"]["turn_limit"]) == ("Mara Films", {"video_hyperframes": True}, 300), (
+        "what a change leaves out is left as it is"
+    )
+    assert change(settings={}).status_code == 200 and mine()["settings"] == {"video_hyperframes": True}
+    for refused in ({"settings": {"video_hyperframe": True}}, {"settings": {"video_hyperframes": "yes"}}, {"settings": {"video_hyperframes": 1}},
+                    {"settings": [True]}, {"name": 7}, {"settings": {"video_hyperframes": False, "nope": True}, "name": "Other"},
+                    {"settings": {"video_hyperframes": False}, "turn_limit": 0}):
+        answer = change(**refused)
+        assert answer.status_code == 400 and answer.json()["detail"], refused
+    assert (mine()["name"], store.profiles[ALICE.id]["settings"]) == ("Mara Films", {"video_hyperframes": True}), "a refused change changes nothing"
+    assert change(settings={"video_hyperframe": True}).json()["detail"] == "There is no setting video_hyperframe."
+    assert change(settings={"video_hyperframes": "on"}).json()["detail"] == "video_hyperframes is true or false, or null for its default."
+    assert change(settings={"video_hyperframes": None}, name=None).status_code == 200
+    assert (mine()["name"], mine()["settings"], store.profiles[ALICE.id]["settings"]) == ("", {"video_hyperframes": False}, {}), (
+        "null puts a setting back on its default, and the profile keeps only what the person changed"
+    )
+    assert len(change(name="x" * 200).json()["name"]) == 80
+
+    # A choice is one of its options, and a value the catalog no longer offers is back on the default
+    captions = {"id": "captions", "tab": "Video editing", "label": "Captions", "help": "How a video carries its words.", "kind": "choice",
+                "options": [{"value": "burned", "label": "Burned in"}, {"value": "file", "label": "A file beside it"}], "default": "burned"}
+    monkeypatch.setitem(CATALOG.settings, "captions", captions)
+    assert mine()["settings"] == {"video_hyperframes": False, "captions": "burned"}
+    assert change(settings={"captions": "file"}).status_code == 200 and mine()["settings"]["captions"] == "file"
+    assert change(settings={"captions": "sung"}).json()["detail"] == "captions is burned, file, or null for its default."
+    monkeypatch.setitem(CATALOG.settings, "captions", {**captions, "options": captions["options"][:1]})
+    assert mine()["settings"]["captions"] == "burned" and store.profiles[ALICE.id]["settings"] == {"captions": "file"}
+    monkeypatch.delitem(CATALOG.settings, "captions")
+    assert mine()["settings"] == {"video_hyperframes": False}
+
+    # A turn's state names the engine a video is edited by code in, of the engines the catalog has
+    film = new_project(client)
+    model.script(*[reply(say("Hello."))] * 8)
+
+    def editor() -> str | None:
+        message(client, film["id"], "Hi")
+        line = next((line for line in said(model.requests[-1])[1].splitlines() if line.startswith("A video edited by code")), None)
+        return line and line.removeprefix("A video edited by code is made in: ")
+
+    assert editor() == "Cut Room (app `cutroom`)", "the catalog's own two engines: the Cut Room while the setting is off"
+    change(settings={"video_hyperframes": True})
+    assert editor() == "HyperFrames (app `hyperframes`)", "and HyperFrames once it is on"
+    change(settings={"video_hyperframes": None})
+    cut_room, hyperframes = CATALOG.apps["cutroom"], CATALOG.apps["hyperframes"]
+    monkeypatch.delitem(CATALOG.apps, "cutroom")
+    monkeypatch.delitem(CATALOG.apps, "hyperframes")
+    assert editor() is None, "nothing is said of an engine the catalog does not have"
+    monkeypatch.setitem(CATALOG.apps, "cutroom", cut_room)
+    assert editor() == "Cut Room (app `cutroom`)"
+    change(settings={"video_hyperframes": True})
+    assert editor() == "Cut Room (app `cutroom`)", "switched on, but the catalog has no such engine"
+    monkeypatch.setitem(CATALOG.apps, "hyperframes", {**hyperframes, "status": "soon"})
+    assert editor() == "Cut Room (app `cutroom`)", "nor one that cannot be started yet"
+    monkeypatch.setitem(CATALOG.apps, "hyperframes", hyperframes)
+    assert editor() == "HyperFrames (app `hyperframes`)"
+    change(settings={"video_hyperframes": None})
+    assert editor() == "Cut Room (app `cutroom`)", "off is the default"
+
+
+def test_what_a_turn_may_spend_and_how_many_steps_it_may_take_are_the_persons_own_settings(studio):
+    client, model, store = studio.client, studio.model, studio.store
+    mine = lambda token="alice-token": client.get("/v1/me", headers=auth(token)).json()["limits"]
+    change = lambda **limits: client.patch("/v1/me", headers=auth("alice-token"), json=limits)
+    assert (mine()["turn_budget_usd"], mine()["turn_limit"], mine()["own"]) == (15.0, 200, {"turn_budget_usd": None, "turn_limit": None})
+
+    changed = change(turn_budget_usd=40, turn_limit=350)
+    assert changed.status_code == 200 and changed.json() == client.get("/v1/me", headers=auth("alice-token")).json(), "the answer is the profile"
+    assert (mine()["turn_budget_usd"], mine()["turn_limit"], mine()["own"]) == (40, 350, {"turn_budget_usd": 40, "turn_limit": 350})
+    assert mine()["default"] == {"turn_budget_usd": 15.0, "turn_limit": 200} and mine()["max"] == {"turn_budget_usd": 100.0, "turn_limit": 1000}
+    assert mine("bob-token")["own"] == {"turn_budget_usd": None, "turn_limit": None}, "one person's limits are not another's"
+    assert change(turn_limit=None).status_code == 200
+    assert (mine()["turn_budget_usd"], mine()["turn_limit"], mine()["own"]) == (40, 200, {"turn_budget_usd": 40, "turn_limit": None}), (
+        "null puts a limit back on the default, and a limit left out is left as it is"
+    )
+    assert change().status_code == 200 and mine()["own"]["turn_budget_usd"] == 40
+    assert change(turn_budget_usd=0.5, turn_limit=1000.0).status_code == 200 and mine()["own"] == {"turn_budget_usd": 0.5, "turn_limit": 1000}
+    for refused in ({"turn_budget_usd": 0}, {"turn_budget_usd": -3}, {"turn_budget_usd": "ten"}, {"turn_budget_usd": True}, {"turn_budget_usd": 100.01},
+                    {"turn_limit": 0}, {"turn_limit": 2.5}, {"turn_limit": 1001}, {"turn_limit": [200]}):
+        answer = change(**refused)
+        assert answer.status_code == 400 and answer.json()["detail"], refused
+    assert "at most $100" in change(turn_budget_usd=250).json()["detail"] and "at most 1000 steps" in change(turn_limit=5000).json()["detail"]
+    assert mine()["own"] == {"turn_budget_usd": 0.5, "turn_limit": 1000}, "a refused change changes nothing"
+    assert client.patch("/v1/me", json={"turn_limit": 5}).status_code == 401
+
+    # A turn runs on its person's limits, and on no more than the deployment's ceiling
+    film = new_project(client)
+    change(turn_budget_usd=40, turn_limit=350)
+    model.script(reply(say("Hello.")), reply(say("Hello.")), reply(say("Hello.")))
+    message(client, film["id"], "Hi")
+    assert (model.options[-1].max_budget_usd, model.options[-1].max_turns) == (40.0, 350)
+    with_config(studio, turn_budget_max_usd=20.0, turn_limit_max=100, turn_budget_usd=30.0, turn_limit=500)
+    assert (mine()["turn_budget_usd"], mine()["turn_limit"], mine()["own"]) == (20.0, 100, {"turn_budget_usd": 40, "turn_limit": 350}), (
+        "a setting made before the ceiling came down runs at the ceiling"
+    )
+    assert mine("bob-token")["default"] == {"turn_budget_usd": 20.0, "turn_limit": 100} and mine("bob-token")["turn_limit"] == 100
+    message(client, film["id"], "Hi")
+    assert (model.options[-1].max_budget_usd, model.options[-1].max_turns) == (20.0, 100)
+    store.profiles[ALICE.id].update(turn_budget_usd=None, turn_limit=None)
+    with_config(studio, turn_budget_max_usd=100.0, turn_limit_max=1000, turn_budget_usd=15.0, turn_limit=200)
+    message(client, film["id"], "Hi")
+    assert (model.options[-1].max_budget_usd, model.options[-1].max_turns) == (15.0, 200), "an account that set none runs on the default"
+
+    # A turn that reaches one says which and how much, and that it is the person's to change
+    wrong = lambda: [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "error"]
+    change(turn_limit=2)
+    model.script(reply(use("library_list")), reply(use("library_list")), reply(say("never")))
+    message(client, film["id"], "Loop")
+    assert wrong()[-1] == {
+        "message": "This turn reached your limit of 2 steps and stopped. You can change the limit in your settings. Send a message to go on.",
+        "limit": "steps",
+    }
+    model.steps.clear()
+    change(turn_limit=None, turn_budget_usd=0.0015)
+    model.script(reply(use("library_list")), reply(use("library_list")), reply(say("never")))
+    message(client, film["id"], "Spend")
+    assert wrong()[-1] == {
+        "message": "This turn reached your spending limit of $0.0015 and stopped. You can change the limit in your settings. Send a message to go on.",
+        "limit": "budget",
+    }
+    assert len(wrong()) == 2 and kinds(client, film["id"])[-3:] == ["error", "usage", "turn_end"]
+    model.steps.clear()
+
+    for none in ({"turn_budget_usd": 0}, {"turn_limit_max": 0}):
+        with pytest.raises(ValueError, match="positive"):
+            config(**none)
 
 
 def test_a_session_starts_in_the_users_own_workspace_and_hands_back_a_link(world):
@@ -1196,8 +1364,10 @@ def test_a_project_is_made_listed_read_changed_and_deleted(studio):
     film = new_project(client)
     assert film["library_sections"] == ["Characters", "Environments", "Props"] and film["plan"] == []
     assert film["github_repo"] is None and film["pinned"] is False
-    ad = new_project(client, name="  Spot   30 ", format="Commercial")
-    assert ad["name"] == "Spot 30" and ad["library_sections"] == ["Products", "Shots"]
+    ad = new_project(client, name="  Spot   30 ", format="Commercials")
+    assert ad["name"] == "Spot 30" and ad["library_sections"] == ["Products", "Shots"], "a kind's own sections, from the catalog"
+    old = client.post("/v1/projects", headers=auth("alice-token"), json={"name": "Old", "discipline": "media", "format": "Movie"})
+    assert old.status_code == 400 and "Media has no format 'Movie'" in old.json()["detail"]
     assert [p["id"] for p in client.get("/v1/projects", headers=auth("alice-token")).json()["projects"]] == [ad["id"], film["id"]]
 
     pinned = client.patch(f"/v1/projects/{film['id']}", headers=auth("alice-token"), json={"pinned": True}).json()["project"]
@@ -1270,6 +1440,112 @@ def test_another_users_project_does_not_exist_for_this_one(studio):
     for strange in ("nope", "1,user_id.eq.x"):
         assert client.get(f"/v1/projects/{strange}", headers=auth("alice-token")).status_code == 404
         assert client.delete(f"{base}/library/{strange}", headers=auth("alice-token")).status_code == 404
+
+
+def test_a_project_made_without_its_kind_opens_on_the_card_that_asks_it_and_locking_the_card_sets_it(studio, monkeypatch):
+    client, model, store = studio.client, studio.model, studio.store
+    make = lambda **body: client.post("/v1/projects", headers=auth("alice-token"), json={"name": "Reel", **body})
+    made = make(discipline="media")
+    assert made.status_code == 200
+    reel = made.json()["project"]
+    assert reel["format"] == "" and reel["library_sections"] == ["Characters", "Environments", "Props"]
+    log = events(client, reel["id"])
+    assert log["running"] is False and [e["kind"] for e in log["events"]] == ["ui"], "the card is the project's first event"
+    assert log["events"][0]["turn_id"] is None and model.requests == [], "written with no turn and no model"
+    card = log["events"][0]["data"]
+    assert (card["title"], card["kind"], card["instant"], card["sets"], card["submit"], card["waits"], card["media"]) == (
+        "What kind of video are you making?", "components", True, "format", None, True, [])
+    pick = card["spec"]
+    assert (pick["type"], pick["id"]) == ("pick", "format") and set(pick) == {"type", "id", "options"}
+    assert [option["value"] for option in pick["options"]] == [
+        "Film & TV", "Social Media", "Vertical Shows", "Commercials", "Music Videos", "Education", "Other"], "the kinds, in the catalog's order"
+    assert all(option["label"] == option["value"] and option["note"] and len(option["note"]) < 70 for option in pick["options"])
+    assert [e["kind"] for e in events(client, new_project(client)["id"])["events"]] == [], "a project made with its kind is not asked it"
+    song = make(discipline="music").json()["project"]
+    assert [e["kind"] for e in events(client, song["id"])["events"]] == [] and song["library_sections"] == [], (
+        "nor is one of a discipline the catalog gives no opening, which starts with the sections the catalog gives it: none"
+    )
+
+    # An icon is the registry's rows where the registry has the kind's icon, and the card is checked as any other is
+    tiles = lambda: studio.sessions.opening_card(CATALOG.disciplines["media"])["spec"]["options"]
+    monkeypatch.setitem(CATALOG.data, "icons", {})
+    assert not any("icon" in option for option in tiles())
+    film_icon, social_icon = ["00111100"] * 8, ["11110000"] * 4 + ["00001111"] * 4
+    monkeypatch.setitem(CATALOG.data, "icons", {"film": film_icon, "social": social_icon})
+    assert [option.get("icon") for option in tiles()] == [film_icon, social_icon, None, None, None, None, None]
+    monkeypatch.setitem(CATALOG.data, "icons", {"film": ["01", "10"]})
+    with pytest.raises(genui.Invalid, match="pixel icon"):
+        tiles()
+    monkeypatch.undo()
+
+    # The message that locks the card sets the kind, or is refused and starts nothing
+    lock = lambda value: client.post(f"/v1/projects/{reel['id']}/messages", headers=auth("alice-token"),
+                                     json={"text": "", "ui": {"ui_id": card["ui_id"], "value": value}})
+    for refused in ({"format": "Movie"}, {"format": 3}, {}, "Social Media", None):
+        answer = lock(refused)
+        assert answer.status_code == 400 and "Media has no format" in answer.json()["detail"], refused
+    assert store.tables["projects"][reel["id"]]["format"] == "" and kinds(client, reel["id"]) == ["ui"] and model.requests == []
+    model.script(reply(say("A commercial. What does it sell?")))
+    assert lock({"format": "Commercials"}).status_code == 202
+    chosen = client.get(f"/v1/projects/{reel['id']}", headers=auth("alice-token")).json()["project"]
+    assert chosen["format"] == "Commercials" and chosen["library_sections"] == ["Products", "Shots"], "with that kind's first sections"
+    words, state = said(model.requests[-1])
+    assert words == '[The person chose this project\'s kind on the card "What kind of video are you making?": Commercials]'
+    assert "Kind: Commercials" in state and "Library sections: Products, Shots" in state, "the first turn already knows the kind"
+    opening = next(e["data"] for e in events(client, reel["id"])["events"] if e["kind"] == "user_message")
+    assert opening == {"text": "", "ui": {"ui_id": card["ui_id"], "value": {"format": "Commercials"}}}
+
+    # A project the person wrote to first has no kind until they choose, and keeps the library they arranged
+    plain = make(discipline="media").json()["project"]
+    model.script(reply(say("Hello.")), reply(say("Education it is.")))
+    message(client, plain["id"], "Hello")
+    assert "Kind: not chosen yet" in said(model.requests[-1])[1]
+    client.patch(f"/v1/projects/{plain['id']}", headers=auth("alice-token"), json={"library_sections": ["Lessons"]})
+    asked = next(e["data"] for e in events(client, plain["id"])["events"] if e["kind"] == "ui")
+    locked = client.post(f"/v1/projects/{plain['id']}/messages", headers=auth("alice-token"),
+                         json={"text": "A lesson on tides", "ui": {"ui_id": asked["ui_id"], "value": {"format": "Education"}}})
+    assert locked.status_code == 202
+    words, state = said(model.requests[-1])
+    assert words.startswith("A lesson on tides\n\n[The person chose this project's kind") and "Kind: Education" in state
+    assert "Library sections: Lessons" in state
+    assert "opening card" not in model.requests[-1]["system"][0]["text"], "this project has no skill that holds its kinds' cards"
+    monkeypatch.setitem(CATALOG.disciplines["media"], "opening_skill", "filmcraft")
+    model.script(reply(say("Hello.")))
+    message(client, plain["id"], "And now?")
+    assert "open the `filmcraft` skill and show that kind's opening card" in " ".join(model.requests[-1]["system"][0]["text"].split()), (
+        "a turn's prompt names the skill where the project is offered it"
+    )
+
+
+def test_every_discipline_that_asks_its_kind_has_a_card_the_page_renders_and_a_line_for_each_kind():
+    asking = [discipline for discipline in CATALOG.disciplines.values() if discipline.get("opening")]
+    assert [discipline["id"] for discipline in asking] == ["media"]
+    sessions = Sessions(config(), CATALOG, FakeStore(), FakeLauncher(), InlineJobs())
+    for discipline in asking:
+        card = sessions.opening_card(discipline)
+        assert len(card["title"]) <= genui.catalog().limits["title_chars"] and card["spec"]["options"]
+        assert set(discipline["kinds"]) == set(discipline["formats"]), "every kind has its line and its icon's name"
+        assert all(kind.get("note") and kind.get("icon") for kind in discipline["kinds"].values())
+    assert sessions.opening_card(CATALOG.disciplines["music"]) is None
+
+
+def test_every_kind_names_an_icon_the_catalog_has_and_the_card_that_asks_the_kind_draws_it():
+    icons = CATALOG.data["icons"]
+    sessions = Sessions(config(), CATALOG, FakeStore(), FakeLauncher(), InlineJobs())
+    named = 0
+    for discipline in CATALOG.disciplines.values():
+        kinds = discipline.get("kinds", {})
+        missing = {name: kind["icon"] for name, kind in kinds.items() if kind["icon"] not in icons}
+        assert not missing, f"{discipline['id']} names icons the catalog's icons do not have: {missing}"
+        named += len(kinds)
+        if discipline.get("opening"):
+            # Building the card checks each icon as the cards' catalog asks: a square of 0 and 1, of an allowed side
+            options = sessions.opening_card(discipline)["spec"]["options"]
+            assert [option["icon"] for option in options] == [icons[kinds[name]["icon"]] for name in discipline["formats"]]
+    assert named, "the catalog has kinds to draw"
+    # An icon no kind names yet is still one a card would take
+    spec = {"type": "pick", "id": "icon", "options": [{"value": name, "icon": rows} for name, rows in icons.items()]}
+    genui.card(genui.catalog(), "icons", "Every icon of the catalog", spec, None, None, True, None, {}, instant=True)
 
 
 def test_the_library_keeps_entries_and_hands_out_their_files_as_signed_links(studio):
@@ -1522,7 +1798,8 @@ def test_the_agent_works_through_its_tools_and_its_conversation_is_one_session_i
     requests = model.requests
     assert len(requests) == 6
     prompt = requests[0]["system"][0]["text"]
-    assert "Discipline: Media" in prompt and "Format: Movie" in prompt and f"projects/{film['id']}" in prompt
+    assert "Discipline: Media" in prompt and "Its kinds: Film & TV, Social Media, Vertical Shows" in prompt and f"projects/{film['id']}" in prompt
+    assert "Kind: Film & TV" in said(requests[0])[1], "which kind the project is, is its state: it can be chosen after the project is made"
     assert "SKILL-TEXT" not in prompt, "no skill's text is in the prompt: the loop loads one when the work calls for it"
     assert all(r["system"] == requests[0]["system"] for r in requests)
     assert requests[0]["tools"] == ["Agent", "WebSearch", "WebFetch", "Skill", "Read", *(f"{PREFIX}{name}" for name in TOOL_NAMES)]
@@ -1554,14 +1831,16 @@ def test_the_agent_works_through_its_tools_and_its_conversation_is_one_session_i
 def test_ask_user_ends_the_turn_and_the_answer_starts_the_next_on_the_same_session(studio):
     client, model = studio.client, studio.model
     film = new_project(client)
-    question = use("ask_user", question="Do you have a script, or shall we write one?", options=["I have one", "Let's write one"])
+    question = use("ask_user", question="Do you have a script, or shall we write one?", options=["I have one", "Let's write one"],
+                   recommended="Let's write one")
     model.script(reply(say("Let's begin."), use("library_list"), question), reply(say("This is never asked for.")))
     message(client, film["id"], "Hi")
     log = events(client, film["id"])
     assert [e["kind"] for e in log["events"]] == [
         "user_message", "text", "tool_start", "tool_end", "tool_start", "ask", "tool_end", "usage", "turn_end"]
     asked = next(e["data"] for e in log["events"] if e["kind"] == "ask")
-    assert asked == {"question": "Do you have a script, or shall we write one?", "options": ["I have one", "Let's write one"]}
+    assert asked == {"question": "Do you have a script, or shall we write one?", "options": ["I have one", "Let's write one"],
+                     "recommended": "Let's write one"}, "the question carries the answer the agent would give"
     assert log["running"] is False and len(model.requests) == 1, "the turn ended at the question: no machine waits for the person"
 
     model.steps.clear()
@@ -1576,7 +1855,8 @@ def test_ask_user_ends_the_turn_and_the_answer_starts_the_next_on_the_same_sessi
 def test_one_question_ends_a_turn_and_a_second_in_it_is_refused(studio):
     client, model = studio.client, studio.model
     film = new_project(client)
-    first, second = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"]), use("ask_user", question="How long?", options=["Short", "Feature"])
+    first = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended="Color")
+    second = use("ask_user", question="How long?", options=["Short", "Feature"], recommended="Short")
     turn = SimpleNamespace(asked=False, event=lambda kind, data: None)
     assert studio.agent.tool_ask_user(turn, **first["input"]).ends_turn
     with pytest.raises(Refused, match="one question at a time"):
@@ -1586,6 +1866,33 @@ def test_one_question_ends_a_turn_and_a_second_in_it_is_refused(studio):
     model.script(reply(first))
     message(client, film["id"], "Hi")
     assert kinds(client, film["id"]).count("ask") == 1
+
+
+def test_a_question_may_name_the_option_the_agent_would_choose_and_one_named_wrongly_is_sent_back(studio):
+    client, model = studio.client, studio.model
+    film = new_project(client)
+    other = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended="Sepia")
+    marked = use("ask_user", question="Color or black and white?", options=["Color (Recommended for a comedy)", "Black and white"],
+                 recommended="Color (Recommended for a comedy)")
+    spaced = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended=" Black and white ")
+    model.script(reply(other), reply(marked), reply(spaced))
+    message(client, film["id"], "Hi")
+    told = [next(iter(tool_results(request).values())) for request in model.requests[1:]]
+    assert all(result["is_error"] for result in told) and len(model.requests) == 3, "each is answered, and the turn goes on"
+    assert "recommended has to be one of the options, written exactly as it is there: Color / Black and white" in told[0]["content"]
+    assert "An option's text is only the option" in told[1]["content"] and "name that option in recommended" in told[1]["content"]
+    log = events(client, film["id"])["events"]
+    assert [e["data"] for e in log if e["kind"] == "ask"] == [
+        {"question": "Color or black and white?", "options": ["Color", "Black and white"], "recommended": "Black and white"}
+    ], "one question reached the person, its recommendation as the option is written"
+    assert [e["kind"] for e in log][-3:] == ["tool_end", "usage", "turn_end"]
+
+    # A question the agent has no preference on names none, and reaches the person as it is
+    model.steps.clear()
+    model.script(reply(use("ask_user", question="What is the story?", options=["I have a script", "I have an idea"])))
+    message(client, film["id"], "Black and white")
+    asked = [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "ask"]
+    assert asked[-1] == {"question": "What is the story?", "options": ["I have a script", "I have an idea"]}
 
 
 def test_a_tool_input_that_fails_its_schema_is_answered_not_run(studio):
@@ -1622,12 +1929,8 @@ def test_a_turn_the_model_could_not_finish_ends_with_an_error_the_person_can_rea
     message(client, film["id"], "Again")
     assert told()[-1] == "The model could not be reached. Try again."
 
-    # The most steps one turn may take, and a loop that breaks, are told too
-    with_config(studio, turn_limit=2)
-    model.script(reply(use("library_list")), reply(use("library_list")), reply(say("never")))
-    message(client, film["id"], "Loop")
-    assert "limit of steps" in told()[-1] and model.options[-1].max_turns == 2
-    model.steps.clear()
+    # A loop that breaks is told too, and none of these names a limit of the person's
+    assert not any("limit" in e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "error")
     model.may_run_dry = True
     message(client, film["id"], "The script is empty, which breaks the loop")
     assert told()[-1] == "Something went wrong on our side, and this turn stopped."
@@ -2116,8 +2419,17 @@ def test_a_screenshot_is_shown_as_a_preview_card_and_previews_are_signed_at_each
         reply(say("Seen.")),
     )
     message(client, film["id"], "What is on screen?")
+    studio.launcher.answers += [probe("previews/frame.png", 240_000, PNG)] * 2
+    model.script(
+        reply(use("preview", engine_id=eid, path="previews/frame.png", caption="The whole cut", version="  Rough   cut "),
+              use("preview", engine_id=eid, path="previews/frame.png", caption="The whole cut", version="x" * 90)),
+        reply(say("Shown.")),
+    )
+    message(client, film["id"], "Show the cut")
 
-    screen, twice = previews(client, film["id"])
+    screen, twice, rough, long = previews(client, film["id"])
+    assert "version" not in screen and "version" not in twice, "a step along the way is no version of the piece"
+    assert rough["version"] == "Rough cut" and long["version"] == "x" * 40, "a version carries its label, kept short"
     assert screen["caption"] == "FilmCraft's screen" and [(i["kind"], i["name"]) for i in screen["items"]] == [("image", "screen.jpg")]
     ended = [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "tool_end"]
     assert not any("media" in end for end in ended), "the card is the preview, not a second picture under the call"
@@ -2127,7 +2439,7 @@ def test_a_screenshot_is_shown_as_a_preview_card_and_previews_are_signed_at_each
         "the log keeps where a file is, never a link that expires"
     )
     del store.files[rows[1]["items"][0]["path"]]
-    assert [len(p["items"]) for p in previews(client, film["id"])] == [1, 1], "a file that is gone is left out of its preview"
+    assert [len(p["items"]) for p in previews(client, film["id"])] == [1, 1, 1, 1], "a file that is gone is left out of its preview"
     client.delete(f"/v1/projects/{film['id']}", headers=auth("alice-token"))
     assert not store.files, "a project's previews go with it"
 
@@ -3198,10 +3510,10 @@ def test_the_loop_is_configured_by_the_deployment_and_keeps_none_of_its_own_file
     assert options.include_partial_messages and options.forward_subagent_text and options.session_store_flush == "eager"
     assert options.disallowed_tools == ["Agent(fork)"] and options.cwd == str(studio.tmp / "loop" / film["id"])
 
-    with_config(studio, agent_model="", agent_thinking=False, agent_fallback_model="", turn_budget_usd=0, turn_limit=0)
+    with_config(studio, agent_model="", agent_thinking=False, agent_fallback_model="")
     message(client, film["id"], "Hi")
     options = model.options[1]
-    assert (options.model, options.fallback_model, options.max_budget_usd, options.max_turns) == ("claude-fable-5-2", None, None, None)
+    assert (options.model, options.fallback_model) == ("claude-fable-5-2", None)
     assert options.thinking == {"type": "disabled"}
 
     with_config(studio, agent_effort="enormous")
@@ -3448,6 +3760,97 @@ def test_the_agent_is_handed_pictures_of_what_it_generates_and_of_the_library_wh
     assert told[lost["id"]]["is_error"] and "No library entry is tagged @nobody" in told[lost["id"]]["content"]
 
 
+def test_sound_is_generated_by_kind_shown_with_a_player_and_kept_like_pictures(studio):
+    client, fal, model, store = studio.client, studio.fal, studio.model, studio.store
+    film = new_project(client)
+    lyrics = "[verse]\nThe lamp turns over the water\n[chorus]\nCome home, come home"
+    song = use("generate_audio", kind="music", prompt="Genre: sea shanty. BPM: 96. A low male lead and a fiddle.", lyrics=lyrics, seconds=45,
+               save_to={"section": "Music", "name": "The keeper's song", "tag": "@song"})
+    bed = use("generate_audio", kind="music", prompt="Slow strings under a storm", instrumental=True, count=3)
+    door = use("generate_audio", kind="sound", prompt="A heavy wooden door creaks open in a stone hallway", seconds=3, count=2)
+    wave = use("generate_audio", kind="sound", prompt="One wave breaks on rock")
+    line = use("generate_audio", kind="speech", prompt="Three cuts, one hook, and you are done.", voice="Fenrir", style="Warm, at a brisk pace.")
+    plain = use("generate_audio", kind="speech", prompt="Keep the light.")
+    model.script(reply(song), reply(bed), reply(door), reply(wave), reply(line), reply(plain), reply(say("Listen.")))
+    message(client, film["id"], "Make the sound")
+
+    # Each model is asked as its own page on fal says, and a take is a call
+    asked = [(called, arguments) for called, arguments in fal.calls]
+    assert [called for called, _ in asked] == [
+        "minimax/music-3", *["minimax/music-3"] * 3, *["elevenlabs/sound-effects/v3"] * 2, "elevenlabs/sound-effects/v3",
+        "google/gemini-3.8-flash-tts", "google/gemini-3.8-flash-tts"]
+    assert asked[0][1] == {"prompt": "Genre: sea shanty. BPM: 96. A low male lead and a fiddle.", "lyrics": lyrics, "duration": 45}
+    assert asked[1][1] == {"prompt": "Slow strings under a storm", "lyrics": "[instrumental]"}, "the model requires lyrics, so no singing is a lyric sheet of one tag"
+    assert asked[4][1] == {"text": "A heavy wooden door creaks open in a stone hallway", "duration_seconds": 3} and asked[6][1] == {"text": "One wave breaks on rock"}
+    assert asked[7][1] == {"prompt": "Three cuts, one hook, and you are done.", "voice": "Fenrir", "style_instructions": "Warm, at a brisk pace."}
+    assert asked[8][1] == {"prompt": "Keep the light.", "voice": "Kore"}
+    assert set(AUDIO_MODELS) == {"music", "sound", "speech"} and len(SPEECH_VOICES) == 30 and {"Fenrir", "Puck", "Kore", "Charon"} <= set(SPEECH_VOICES)
+    assert audio_arguments("speech", "Hi", None, None, None, None) == ("google/gemini-3.8-flash-tts", {"prompt": "Hi", "voice": "Kore"})
+    assert audio_units("speech", "x" * 500, None) == {"1000 character": 0.5} and audio_units("sound", "x", None) == {} and audio_units("music", "x", 42.5) == {"second": 42.5}
+
+    # The person hears each take with a player, and what was saved is in the library
+    log = events(client, film["id"])["events"]
+    starts = [e["data"] for e in log if e["kind"] == "tool_start"]
+    assert [start["title"] for start in starts] == [
+        "Generating 1 song", "Generating 3 instrumentals", "Generating 2 sounds", "Generating 1 sound", "Generating 1 spoken line",
+        "Generating 1 spoken line"]
+    assert {start["activity"] for start in starts} == {"creating"} and not any(e["kind"] == "approval" for e in log)
+    ends = [e["data"] for e in log if e["kind"] == "tool_end"]
+    assert all(end["ok"] for end in ends), ends
+    assert [[item["kind"] for item in end["media"]] for end in ends] == [["audio"], ["audio"] * 3, ["audio"] * 2, ["audio"], ["audio"], ["audio"]]
+    assert all(item["url"].startswith("https://storage.example.test/") for end in ends for item in end["media"])
+    assert [end["summary"] for end in ends] == [
+        "1 song saved to @song, about $0.09", "3 instrumentals, about $0.26", "2 sounds, about $0.01", "1 sound", "1 spoken line, under $0.01",
+        "1 spoken line, under $0.01"], "a song is costed by the seconds fal says it made, a sound by those asked for, a line by its characters"
+    entry = next(e["data"]["asset"] for e in log if e["kind"] == "library")
+    assert (entry["tag"], entry["section"], [item["kind"] for item in entry["media"]]) == ("@song", "Music", ["audio"])
+    assert entry["media"][0]["name"].endswith(".wav") and sum("/generations/" in path for path in store.files) == 8
+    told = [tool_results(model.requests[index])[call["id"]]["content"] for index, call in enumerate((song, bed, door, wave, line, plain), start=1)]
+    assert "Generated 1 song. Saved to @song (Music)" in told[0] and '"seed": 41' in told[0] and '"cost_usd": 0.085' in told[0]
+    assert "Generated 3 instrumentals." in told[1] and '"model": "minimax/music-3"' in told[1]
+    assert '"cost_usd": null' in told[3], "a sound whose length the model chose has no estimate where fal gives none"
+
+    # What a kind does not take is sent back before anything is paid for
+    spent = len(fal.calls)
+    wrong = [
+        use("generate_audio", kind="music", prompt="A waltz"),
+        use("generate_audio", kind="music", prompt="A waltz", lyrics="[verse]\nOne two three", instrumental=True),
+        use("generate_audio", kind="sound", prompt="A bell", lyrics="[verse]\nDing"),
+        use("generate_audio", kind="music", prompt="A waltz", instrumental=True, voice="Puck"),
+        use("generate_audio", kind="speech", prompt="Hello.", seconds=4),
+        use("generate_audio", kind="sound", prompt="rain " * 100),
+        use("generate_audio", kind="sound", prompt="A bell", seconds=45),
+        use("generate_audio", kind="music", prompt="A waltz", instrumental=True, seconds=301),
+        use("generate_audio", kind="speech", prompt="Hello.", voice="Mara"),
+        use("generate_audio", kind="noise", prompt="Hiss"),
+    ]
+    model.script(reply(*wrong), reply(say("Sorry.")))
+    message(client, film["id"], "More")
+    refused = tool_results(model.requests[-1])
+    assert all(refused[call["id"]]["is_error"] for call in wrong) and len(fal.calls) == spent
+    words = [refused[call["id"]]["content"] for call in wrong]
+    assert "give lyrics" in words[0] and "not both" in words[1] and "lyrics and instrumental are for kind music" in words[2]
+    assert "voice and style are for kind speech" in words[3] and "as long as its words" in words[4]
+    assert "at most 450 characters; this one is 500" in words[5] and "from 0.5 to 30 for kind sound" in words[6] and "from 1 to 300 for kind music" in words[7]
+
+    # A take that does not come back does not cost the person the ones that did, and one take of none fails the call
+    fal.failures = [RuntimeError("fal could not generate it: busy")]
+    some = use("generate_audio", kind="sound", prompt="A bell", seconds=1, count=3)
+    fal_failed = RuntimeError("fal refused the request: no credit")
+    none = use("generate_audio", kind="sound", prompt="A bell", seconds=1, count=2)
+    model.script(reply(some), reply(none), reply(say("Two of three.")))
+    message(client, film["id"], "Bells")
+    partly = tool_results(model.requests[-2])[some["id"]]
+    assert not partly.get("is_error") and "Generated 2 sounds." in partly["content"]
+    assert "1 of 3 takes did not come back, and nothing was kept of them: fal could not generate it: busy" in partly["content"]
+    fal.failures = [fal_failed, fal_failed]
+    model.script(reply(none), reply(say("None.")))
+    message(client, film["id"], "Again")
+    assert tool_results(model.requests[-1])[none["id"]]["is_error"] and "no credit" in tool_results(model.requests[-1])[none["id"]]["content"]
+    last = [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "tool_end"]
+    assert (last[-1]["ok"], "media" in last[-1]) == (False, False) and last[-3]["summary"] == "2 sounds, under $0.01; 1 failed"
+
+
 def test_a_look_where_no_picture_can_be_made_says_why_and_the_generation_stands(studio, monkeypatch):
     client, model = studio.client, studio.model
     film = new_project(client)
@@ -3489,15 +3892,28 @@ def test_the_program_that_reads_a_file_for_a_look_gets_nothing_of_the_worker(mon
 
 def test_the_system_prompt_carries_no_skill_and_says_how_the_agent_works_with_engines_approvals_and_subagents():
     skills = read_skills(skills_directory())
-    project = {"id": "p", "discipline": "media", "format": "Movie"}
+    project = {"id": "p", "discipline": "media", "format": "Film & TV"}
     prompt = system_prompt(CATALOG, project, frozenset({"cpu"}))
     offered = skills_for(skills, CATALOG, "media")
     assert len(offered) >= 2 and not any(skill.body[:200] in prompt for skill in offered)
     assert len(prompt) < 12000 < sum(len(skill.body) for skill in offered), "the prompt is a fraction of what the skills' texts were in it"
     flat = " ".join(prompt.split())
     for said_once in ("none starts unless the work needs it or the person asked", "The person approves some steps", "Agent tool",
-                      "Skill tool", "<project_state>", "mcp__moody__<name>", "the Moody agent"):
-        assert said_once in flat, said_once
+                      "Skill tool", "<project_state>", "mcp__moody__<name>", "the Moody agent",
+                      "Where a decision is the person's and you have a view, say which way you would go",
+                      "`ask_user`'s `recommended`", "Keep interactive cards clean",
+                      "A long job (many steps, subagents, or minutes of work) ends with a report",
+                      "Your job is to keep the project moving", "never leave them at an empty box",
+                      "A short exchange gets a short answer in plain sentences, with no headings"):
+        assert flat.count(said_once) == 1, said_once
+    assert "recap" not in flat and "Keep messages short" not in flat, "how to close is said once, by the kind of work it closes"
+    assert "Its kinds: Film & TV, Social Media" in flat and "Kind: " not in flat, "which kind it is can change, so the state says it"
+
+    # A project's first turn opens with its kind's card, from the skill the catalog names, where the project has that skill
+    assert CATALOG.disciplines["media"]["opening_skill"] == "video" and "opening card" not in flat
+    opened = " ".join(system_prompt(CATALOG, project, frozenset({"cpu"}), ["studio", "video"]).split())
+    assert opened.count("open the `video` skill and show that kind's opening card from it, in place of questions in words") == 1
+    assert "opening card" not in system_prompt(CATALOG, {**project, "discipline": "music"}, frozenset({"cpu"}), ["studio", "video"])
 
 
 def test_subagents_are_read_from_files_offered_by_discipline_and_given_their_tools_skills_and_model(studio, tmp_path):
@@ -3506,7 +3922,7 @@ def test_subagents_are_read_from_files_offered_by_discipline_and_given_their_too
     model.script(reply(say("Hello.")), reply(say("Hello.")), reply(say("Hello.")))
     message(client, film["id"], "Hi")
     offered = model.options[0].agents
-    assert list(offered) == ["research", "filmcraft", "photocraft", "nuke"], (
+    assert list(offered) == ["research", "filmcraft", "cutroom", "hyperframes", "photocraft", "nuke"], (
         "the defined ones that fit, then an operator for each of the discipline's engines that can be started"
     )
     research, operator = offered["research"], offered["filmcraft"]
@@ -3636,15 +4052,20 @@ def test_a_subagents_steps_show_in_the_conversation_and_its_card_follows_what_it
 
     # A tool kept to the agent itself is refused to a subagent, whatever its definition came to list
     turn = SimpleNamespace(beat=lambda: True, acting=lambda agent_id: nullcontext(), event=lambda kind, data: None)
-    refusal = studio.agent.run_tool(turn, "ask_user", {"question": "Which?", "options": ["A", "B"]}, "call_1", first)
+    refusal = studio.agent.run_tool(turn, "ask_user", {"question": "Which?", "options": ["A", "B"], "recommended": "A"}, "call_1", first)
     assert not refusal.ok and "Only the agent itself can use ask_user" in refusal.content
 
 
 def answering(studio: SimpleNamespace, project_id: str, decision: str) -> threading.Thread:
-    """Answer the next approval the project's agent asks for, as the person would while the turn waits."""
+    """Answer the next approval the project's agent asks for, as the person would while the turn waits.
+
+    It answers as soon as the approval is in the log. The bound is only for
+    a turn that never asks, and is long because a loaded machine starts the
+    loop's program slowly.
+    """
 
     def answer() -> None:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             rows = [e for e in list(studio.store.tables["project_events"].values()) if e["project_id"] == project_id]
             answered = {e["data"]["approval_id"] for e in rows if e["kind"] == "approval_result"}
@@ -3812,13 +4233,13 @@ def test_a_message_can_lock_in_a_card_the_agent_showed_and_the_model_reads_which
     assert words.startswith("This one.\n\n[The person locked in the card \"Pick a grade\" (ui_id ui-grade) with these values: ")
     assert json.loads(words[words.index("values: ") + 8:-1]) == value
     assert post({"ui": {"ui_id": "ui-grade", "value": None}}).status_code == 202, "a card can be locked in with no words"
-    assert said(model.requests[-1])[0].startswith("\n\n[The person locked in the card")
+    assert said(model.requests[-1])[0].startswith("[The person locked in the card")
 
 
 def test_a_card_that_waits_ends_the_turn_and_its_lock_resumes_the_session_with_what_was_chosen(studio):
     client, model = studio.client, studio.model
     film = new_project(client)
-    tuner = {"type": "stack", "children": [{"type": "slider", "id": "warmth", "label": "Warmth"}]}
+    tuner = {"type": "stack", "children": [{"type": "slider", "id": "warmth", "label": "Warmth", "value": 20}]}
     shown = use("show_ui", title="The look of shot 3", components=tuner, submit="Lock in this look", waits=True)
     model.script(reply(say("Tune it and lock it in."), shown), reply(say("This is never asked for.")))
     message(client, film["id"], "Find a look for shot 3")
@@ -3850,6 +4271,9 @@ def test_the_real_definitions_offer_a_film_its_skills_its_subagents_and_an_agent
     film = {agent.name: agent for agent in agents_for(agents, derived, offered["media"], CATALOG, "media")}
     assert {"research", "story", "art-direction", "character-design", "production-design", "librarian", "animation", "review"} <= set(film)
     assert film["filmcraft"].title == "FilmCraft agent" and film["filmcraft"].skills == ("filmcraft",)
+    for engine, title in (("cutroom", "Cut Room agent"), ("hyperframes", "HyperFrames agent")):
+        assert [discipline for discipline, chosen in names.items() if engine in chosen] == ["media"], f"{engine} is a skill of video alone"
+        assert (film[engine].title, film[engine].skills) == (title, (engine,)), "and its operator reads it"
     assert all(name in TOOL_NAMES or name.endswith("*") or name in ("web_search", "web_fetch")
                for agent in film.values() for name in agent.tools), "a definition names only tools the agent has"
     assert not any(name in ("ask_user", "show_ui", "engine_start", "engine_stop") for agent in film.values() for name in agent.tools), \
@@ -3874,6 +4298,8 @@ def test_the_environment_lists_what_a_projects_agent_can_use(studio):
     assert found["agents"] == [
         {"name": "research", "title": "Research agent", "description": "Looks things up on the web and in the library."},
         {"name": "filmcraft", "title": "FilmCraft agent", "description": "Drives FilmCraft for one job in a running engine."},
+        {"name": "cutroom", "title": "Cut Room agent", "description": "Drives Cut Room for one job in a running engine."},
+        {"name": "hyperframes", "title": "HyperFrames agent", "description": "Drives HyperFrames for one job in a running engine."},
         {"name": "photocraft", "title": "PhotoCraft agent", "description": "Drives PhotoCraft for one job in a running engine."},
         {"name": "nuke", "title": "Nuke agent", "description": "Drives Nuke for one job in a running engine."},
     ]
@@ -3902,7 +4328,7 @@ def test_the_environment_lists_what_a_projects_agent_can_use(studio):
 def test_a_session_that_begins_in_a_project_with_a_past_is_told_what_was_said(studio):
     client, model, store = studio.client, studio.model, studio.store
     film = new_project(client)
-    question = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"])
+    question = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended="Color")
     model.script(reply(say("A film about Mara. One thing first."), question), reply(say("Color it is.")))
     message(client, film["id"], "Make a film about Mara")
     message(client, film["id"], "Color")
@@ -3920,7 +4346,7 @@ def test_a_session_that_begins_in_a_project_with_a_past_is_told_what_was_said(st
     before = state[: state.index("The project's state at the start of this turn:")]
     assert before.splitlines()[1:-1] == [
         "The person: Make a film about Mara", "You: A film about Mara. One thing first.",
-        "You asked: Color or black and white? (Color / Black and white)", "The person: Color", "You: Color it is.",
+        "You asked: Color or black and white? (Color / Black and white; you recommended Color)", "The person: Color", "You: Color it is.",
     ], "the recap is the conversation the page shows, without this turn's own message"
 
     log = [{"kind": "user_message", "data": {"text": "x" * 5000}}] * 5 + [{"kind": "text", "data": {"text": "partial", "partial": True}},

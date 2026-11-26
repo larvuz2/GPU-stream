@@ -5,7 +5,7 @@
  */
 
 /**
- * How the pages write money, credits, durations, and dates.
+ * How the pages write money, credits, durations, dates, and a catalog name inside a sentence.
  * @module
  */
 
@@ -25,6 +25,17 @@ const date = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', 
  */
 export function usd(amount: number): string {
   return Number.isInteger(amount) ? wholeDollars.format(amount) : dollars.format(amount);
+}
+
+/**
+ * Writes a catalog name, such as a format, as it reads inside a sentence: its first letter lowered
+ * and the rest as written, so "Concept art" is "concept art" and "3D object" keeps its D.
+ *
+ * @param name The name, as the catalog writes it.
+ * @returns The name for the middle of a sentence.
+ */
+export function midSentence(name: string): string {
+  return name.charAt(0).toLowerCase() + name.slice(1);
 }
 
 /**

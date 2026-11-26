@@ -39,10 +39,12 @@ here when the film needs music or designed sound made, then hand the files back.
 
 ## The loop: propose, decide, execute
 
-1. **Propose.** Two to four options, your recommendation first and marked "(recommended)", each
+1. **Propose.** Two to four options, your recommendation first, each
    with one line of why, in musical terms a non-musician can follow ("slower and warmer, like
    the reference's verse").
-2. **Ask.** `ask_user(question, options)` ends your turn. One decision per question; the last
+2. **Ask.** `ask_user(question, options, recommended)` ends your turn. `recommended` is the
+   option you would choose, in its own words: the page marks it, so no option's text says it is
+   recommended. One decision per question; the last
    option is a way out ("Something else"). Never ask what you can decide: track layout, note
    lengths, plug-in settings, file names, and command details are yours to choose and report.
 3. **Execute** exactly what was chosen, read it back from SoundCraft, and measure it.

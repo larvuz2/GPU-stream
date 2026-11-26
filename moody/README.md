@@ -16,7 +16,10 @@ user works in, and this directory is everything around it.
 | [`agents/`](agents) | The subagents the Studio's agent hands jobs to, one definition per file | Carried into the control plane's image |
 
 `catalog.json` is the one place to change a price, switch an app from `soon`
-to `available`, or rename the service (`brand`).
+to `available`, or rename the service (`brand`). It is also where a
+discipline's kinds are (`formats`, with the card that asks a new project's
+kind: `opening`, and each kind's line, icon, and first library sections under
+`kinds`), and where a setting of the app's Settings is added (`settings`).
 
 ## How a session happens
 
@@ -62,7 +65,7 @@ in the docblocks of [`control/agent.py`](control/agent.py),
 
 **What to configure.** Each part below says how; this is the whole list.
 
-1. A Supabase project with the four migrations run, and its Site URL and
+1. A Supabase project with the six migrations run, and its Site URL and
    redirect URL.
 2. The Modal Secret `moody`: at least `SUPABASE_URL`, `SUPABASE_SECRET_KEY`,
    `MOODY_SITE_URL`, and `MOODY_SECRET_KEY`, then whichever integrations are
@@ -91,7 +94,14 @@ which keeps the GitHub App's expiring tokens and adds the Epic connection, then
 [`20261126000000_agent_loop.sql`](supabase/migrations/20261126000000_agent_loop.sql),
 which adds what the agent's loop keeps: a project's session and its transcript
 (`agent_transcripts`), and what the person no longer wants to be asked about
-(`projects.permissions`). A project that already ran the earlier ones runs
+(`projects.permissions`), then
+[`20261127000000_limits.sql`](supabase/migrations/20261127000000_limits.sql),
+which lets an account set what one turn of the agent may spend and how many
+steps it may take (`profiles.turn_budget_usd`, `profiles.turn_limit`), then
+[`20261128000000_settings.sql`](supabase/migrations/20261128000000_settings.sql),
+which keeps a person's name and the settings they changed (`profiles.name`,
+`profiles.settings`). A
+project that already ran the earlier ones runs
 only those it has not. `github_app` deletes the GitHub connections an OAuth
 App made before, whose users connect again. `agent_loop` drops
 `agent_messages`, the conversation the agent replayed to the model before it
@@ -121,14 +131,15 @@ and set:
 | `MOODY_AGENT_FALLBACK_MODEL` | A model the loop asks instead where the agent's own is overloaded or declines a request; none unless set |
 | `MOODY_AGENT_EFFORT` | How hard the model works on each step: `low`, `medium`, `high`, `xhigh`, or `max`; `high` unless set |
 | `MOODY_AGENT_THINKING` | `false` to run the agent without thinking; unset, it thinks as much as a step needs and the conversation shows a summary |
-| `MOODY_TURN_BUDGET_USD` | What one turn may spend on the model, in dollars as the loop prices it, `10` unless set; `0` for no limit. Generation and engines are not in it |
-| `MOODY_TURN_LIMIT` | The most steps one turn may take, `200` unless set; `0` for no limit |
+| `MOODY_TURN_BUDGET_USD` | What one turn may spend on the model, in dollars as the loop prices it, for an account that has not set its own in the app; `15` unless set. Generation and engines are not in it |
+| `MOODY_TURN_LIMIT` | The most steps one turn may take, for an account that has not set its own; `200` unless set |
+| `MOODY_TURN_BUDGET_MAX_USD`, `MOODY_TURN_LIMIT_MAX` | The most an account may set either limit to, `100` dollars and `1000` steps unless set. A default above its ceiling runs at the ceiling. All four are positive: a deployment that wants turns to run further raises the ceilings |
 | `MOODY_APPROVAL_SECONDS` | How long a step waits for the person's approval before the agent is told to end its turn and ask, `600` unless set. A waiting turn holds its worker |
 | `ANTHROPIC_BASE_URL` | Where the loop reaches the Messages API where not Anthropic's own address: a proxy that holds the key, in which case `ANTHROPIC_API_KEY` is whatever the proxy takes |
 | `MOODY_LOOP_ENV` | Variables of this Secret, comma-separated, the loop's program also gets (a proxy's address, a certificate bundle). It gets `ANTHROPIC_API_KEY` and nothing else of the Secret unless named here |
 | `MOODY_LOOP_ROOT` | Under which a turn's working directory is made, `/tmp/moody-loop` unless set. The loop keys a project's session by that path, so changing it starts every project's conversation anew |
 | `MOODY_LOOP_CLI` | The `claude` program the loop runs, where not the one the SDK's package carries |
-| `FAL_KEY` | fal.ai's key, for the agent's image and video generation; without it those tools say generation is not configured |
+| `FAL_KEY` | fal.ai's key, for the agent's image, video, and sound generation; without it those tools say generation is not configured |
 | `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | The client ID and a client secret of the GitHub App users connect their accounts through (below) |
 | `GITHUB_APP_SLUG` | That app's name in its address, `https://github.com/apps/<slug>`, where "Don't see your repository?" sends a user to install it |
 | `EPIC_GITHUB_CLIENT_ID`, `EPIC_GITHUB_CLIENT_SECRET` | The client ID and a client secret of the OAuth App that reads packages, through which a user's own copy of Unreal Engine is pulled (below) |
@@ -276,8 +287,13 @@ runs the API, the MCP endpoint, and the agent against stand-ins for Supabase,
 Modal, Anthropic, fal, and GitHub: who a credential names, what each route and
 tool returns and refuses, that one user's sessions, projects, and connections do not exist
 for another, the agent driven by a scripted model through every tool, its
-subagents, approvals, and skills, that `ask_user` ends a turn and a second
-message waits for the first, the pictures the agent looks at its generations
+subagents, approvals, and skills, that a project made without its kind opens
+on the card that asks it and the message that locks the card sets it, the
+sound the agent generates by kind, an account's name and settings, that
+`ask_user` ends a turn and a second
+message waits for the first, that a question may name the option the agent
+recommends, that a turn runs on its person's own limits and says which one
+stopped it, the pictures the agent looks at its generations
 and the library by (made by a real ffmpeg, so those tests skip where there is
 none) and that the ffmpeg which makes them gets nothing of the worker's
 environment, Nuke's gate and seats, Unreal Engine's gate on an
@@ -324,8 +340,9 @@ calls every function: what is refused and by which name, how a minute is
 charged and that a balance never goes below zero, that a payment delivered
 twice is credited once, that a project runs one agent turn at a time and a dead
 turn does not hold it, that the agent's transcript keeps its order and a batch
-sent twice is kept once, that an approval is answered once, and that the keys
-a browser holds reach no row and no function.
+sent twice is kept once, that an approval is answered once, that an account's
+limits of a turn are unset until it sets them, and that the keys a browser
+holds reach no row and no function.
 
 ## What is not here yet
 
@@ -335,14 +352,17 @@ pick one. The GPU tiers are switched off until the Modal account can start
 GPUs, and the session has not been run on one.
 
 The Studio's backend has run only against its tests' stand-ins: not yet against
-Anthropic, fal, GitHub, or Supabase Storage. The agent's loop has run as it
+Anthropic, GitHub, or Supabase Storage, and against fal only for sound, where
+one instrumental, one sound effect, and one spoken line were generated
+through the agent's tool. The agent's loop has run as it
 ships, on Modal too, with the model scripted; no turn has been answered by a
 real model, so how the model uses its subagents, skills, and approvals, what a
 turn costs, and how the loop summarizes a conversation that outgrows the
 model's context window are unmeasured (`trial.py::real` is the first step).
 The transcript's store has run against the tests' database and the SDK's
 conformance suite, not against Supabase, and neither has the read of a library
-file the agent looks at (`Store.download`). The agent's model and generation are
+file the agent looks at (`Store.download`) or the write of an account's limits
+(`PATCH /v1/me`). The agent's model and generation are
 not billed in credits yet, and only an Unreal engine clones the project's
 repository as it starts. The MCP endpoint has no project tools.
 

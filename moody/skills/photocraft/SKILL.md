@@ -38,10 +38,12 @@ picture becomes a finished one.
 
 ## The loop: propose, decide, execute
 
-1. **Propose.** Two to four options, your recommendation first and marked "(recommended)", each
+1. **Propose.** Two to four options, your recommendation first, each
    with one line of why. For a layout, describe it in words the person can picture: what is
    biggest, where the eye lands, what the type does.
-2. **Ask.** `ask_user(question, options)` ends your turn. One decision per question; the last
+2. **Ask.** `ask_user(question, options, recommended)` ends your turn. `recommended` is the
+   option you would choose, in its own words: the page marks it, so no option's text says it is
+   recommended. One decision per question; the last
    option is a way out ("Something else"). Never ask what you can decide: layer names, file
    formats, pixel sizes that follow from the answer they gave, and command details are yours.
 3. **Execute** exactly what was chosen, one step at a time, reading each answer.
@@ -75,9 +77,9 @@ get them before you make it, because a canvas made at the wrong size is remade, 
 1. **What is it for, and who must it stop?** "A festival poster for a short film", "a YouTube
    thumbnail", "a product ad". This sets the one thing the image has to say.
 2. **Where will it be seen: printed, on screens, or both?** Options: "Printed (tell me the size)",
-   "Screens only (which platforms)", "Both: print master and platform versions (recommended for a
-   poster)". Print sets inches and 300 pixels an inch; screens set pixels. The table of sizes is
-   in design.md.
+   "Screens only (which platforms)", "Both: print master and platform versions"; recommend both
+   for a poster. Print sets inches and 300 pixels an inch; screens set pixels. The table of sizes
+   is in design.md.
 3. **The size, and who prints it.** For print: the trim size, and whether the printer gave a
    specification (bleed, safe margin, file type, color profile). Without one, use 0.125 in of
    bleed and keep everything that matters 0.25 in inside the trim, and say that their printer's

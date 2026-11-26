@@ -60,8 +60,8 @@ question is whether the look holds when it moves; a pretty test is not the goal.
    about the shots; that model's lowest resolution; 4 or 5 seconds; the film's aspect ratio.
 4. **Show them together** and ask one question, with what to look for: the face against the
    sheet, hands, the clothes, the light, whether the motion is the action asked for. Options:
-   "It holds: plan the shots (recommended when nothing drifted)", "Fix a character", "Fix the
-   place", "Change the look".
+   "It holds: plan the shots", "Fix a character", "Fix the place", "Change the look". Recommend
+   the first when nothing drifted, and otherwise the fix for what did.
 5. **A test that fails is fixed at the entry**, not by rewording the shot:
 
    | What drifted | Go back to |
@@ -176,9 +176,10 @@ library_upsert(section="Shots", name="S01 SH10 T1", tag="@s01-sh10-t1",
 
 - `status` is `candidate`, `selected`, or `rejected`. The person selects; you recommend. Set
   `selected` on their word, and write the tag into the shot list's Selected column.
-- **Reviewing a take.** Tell the person what to check: faces against the sheet, hands, text,
-  physics, screen direction, the line as spoken. Where a result did not hand you the clip, you
-  have not seen it; say so, and never present a take as fine on its facts alone.
+- **Reviewing a take.** `look: true` on the call, or `library_look` afterwards, hands you four
+  frames of the clip: check the face against the sheet, hands, and text. Frames show no motion
+  and no sound, so tell the person what is theirs to check: the movement, physics, screen
+  direction, the line as spoken. Never present a take as fine on its facts alone.
 - **A retake** changes one thing and says which (prompting.md, "Fixing a take"). It is a new
   take with a new tag; the old one stays as `rejected`.
 - Generated files are kept only in the library: a clip made without `save_to` is not there for

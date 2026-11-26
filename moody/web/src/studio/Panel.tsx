@@ -8,7 +8,9 @@
  * The shell every panel of the right column shares: a header that folds the panel away, with room
  * for a count and the panel's own actions, over its body.
  *
- * The body is unmounted while folded, so a folded panel does no work.
+ * The body is unmounted while folded, so a folded panel does no work. The arrow that folds it is
+ * quiet (`.panel-chevron` in `studio.css`): it shows while the pointer or the keyboard is on the
+ * header, and stays faintly while the panel is folded.
  * @module
  */
 import { useId, type ReactNode } from 'react';

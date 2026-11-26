@@ -60,6 +60,16 @@ export interface CatalogApp {
   requires_gpu?: boolean;
 }
 
+/** What a discipline's opening card says of one of its formats, the project's kind. */
+export interface Kind {
+  /** What the kind is, in a line. */
+  note: string;
+  /** Its icon, by name in the catalog's {@link Catalog.icons}. */
+  icon: string;
+  /** The library's first sections for a project of the kind, where they differ from the discipline's. */
+  sections?: string[];
+}
+
 /**
  * A top-level creative discipline: what a person makes, independent of the software that makes it.
  *
@@ -76,6 +86,53 @@ export interface Discipline {
   blurb: string;
   /** The apps it uses, by {@link CatalogApp} identifier, the first the main one. */
   engines: string[];
+  /**
+   * What a project of the discipline is asked first when it starts without a format: the title of
+   * the card that asks its kind. A discipline without one asks nothing.
+   */
+  opening?: string;
+  /** What that card says of each format, by the format's name. */
+  kinds?: Record<string, Kind>;
+  /** The agent's skill that opens a project of each kind with a card of its own. */
+  opening_skill?: string;
+  /** The library's first sections for a project of the discipline. */
+  sections?: string[];
+}
+
+/** One card of what a shortcut will offer: a tool that may come, and what it is for. */
+export interface ShortcutPreview {
+  /** The tool's name. */
+  name: string;
+  /** What it is for, in a line. */
+  line: string;
+  /** Where it stands, in a word: "Soon" for one being prepared, "Exploring" for one still looked into. */
+  tag: string;
+  /** The card's picture, by its file under the site's media. */
+  image: string;
+}
+
+/**
+ * A shortcut into a new project: a kind of work by its everyday name, which the studio's sidebar
+ * lists under Create.
+ *
+ * One that is `available` names the discipline its project belongs to and, where its name means
+ * one, the format; one that names no format leaves that choice to the person. One that is `soon`
+ * is announced with nothing behind it yet and starts nothing; what it shows instead is its
+ * `preview`, where it has one.
+ */
+export interface Shortcut {
+  /** The identifier, which also picks the icon of a shortcut that has one of its own. */
+  id: string;
+  /** What the sidebar calls it, such as "Video". */
+  label: string;
+  /** `available` for one a project starts from today, `soon` for one that is only announced. */
+  status: string;
+  /** The discipline its project belongs to, by {@link Discipline} identifier. */
+  discipline?: string;
+  /** The format its project starts with, for a shortcut whose name means one. */
+  format?: string;
+  /** What to expect of one that is not available yet, as cards. */
+  preview?: ShortcutPreview[];
 }
 
 /** One of the finer creative categories, each under a {@link Discipline}. */
@@ -144,6 +201,42 @@ export interface CreditPack {
   usd: number;
 }
 
+/** One of the values a setting of kind `choice` offers. */
+export interface SettingOption {
+  /** The value the control plane keeps. */
+  value: string;
+  /** What the page calls it. */
+  label: string;
+}
+
+/**
+ * A setting of the person's account that is a plain switch or choice.
+ *
+ * The control plane reads the same entries: it keeps what a person changed and refuses an id or a
+ * value they do not offer, so a new setting is an entry here and the code that reads it.
+ */
+export interface Setting {
+  /** The identifier its value is kept under. */
+  id: string;
+  /** The tab of Settings it sits on, by the tab's name as shown. */
+  tab: string;
+  /** What the setting is, as its control is labeled. */
+  label: string;
+  /** One line on what it changes. */
+  help: string;
+  /** `toggle` for a switch, on or off, or `choice` for one of {@link Setting.options}. */
+  kind: string;
+  /** What a `choice` offers. */
+  options?: SettingOption[];
+  /** The value that applies until the person changes it. */
+  default: boolean | string;
+  /**
+   * For a setting that chooses between engines: the app each value stands for, a toggle's under
+   * `on` and `off` and a choice's under its options' values ({@link settingApp}).
+   */
+  apps?: Record<string, string>;
+}
+
 /** The shape of `catalog.json`. */
 export interface Catalog {
   /** The product's name. */
@@ -156,16 +249,25 @@ export interface Catalog {
   activities: Activity[];
   /** The twelve top-level disciplines, in the order they are shown. */
   disciplines: Discipline[];
+  /** The shortcuts into a new project, in the order the sidebar lists them. */
+  shortcuts: Shortcut[];
   /** The finer categories, each under a discipline. */
   categories: Category[];
   /** Every app, offered or announced. */
   apps: CatalogApp[];
   /** Every tier, cheapest first. */
   tiers: Tier[];
+  /** The settings of a person's account that are a plain switch or choice, in the order they are shown. */
+  settings: Setting[];
   /** Every region, the automatic choice among them. */
   regions: Region[];
   /** Every credit pack, smallest first. */
   credit_packs: CreditPack[];
+  /**
+   * Pixel icons by name, each twelve rows of twelve cells written as `0` and `1`. A discipline's
+   * kinds name theirs here, and the control plane puts the rows on the card that asks the kind.
+   */
+  icons: Record<string, string[]>;
 }
 
 /** The catalog. */
@@ -192,6 +294,19 @@ export const IDLE_SHUTDOWN_MINUTES = 10;
  */
 export function isAvailable(app: CatalogApp): boolean {
   return app.status === 'available';
+}
+
+/**
+ * The app a value of a setting stands for.
+ *
+ * @param setting The catalog's setting.
+ * @param value One of its values.
+ * @returns The app's identifier, or `undefined` where the setting chooses between no apps or names
+ *   none for the value.
+ */
+export function settingApp(setting: Setting, value: boolean | string): string | undefined {
+  const key = setting.kind === 'toggle' ? (value === true ? 'on' : 'off') : String(value);
+  return setting.apps !== undefined && Object.hasOwn(setting.apps, key) ? setting.apps[key] : undefined;
 }
 
 /**
@@ -300,6 +415,43 @@ export function activityLabel(id: string): string | undefined {
  */
 export function findDiscipline(id: string): Discipline | undefined {
   return catalog.disciplines.find((discipline) => discipline.id === id);
+}
+
+/**
+ * Whether a project of a discipline is asked its kind when it starts without a format.
+ *
+ * @param discipline The discipline.
+ * @returns `true` for one the catalog gives an opening question and formats to answer it with.
+ */
+export function asksKind(discipline: Discipline): boolean {
+  return discipline.opening !== undefined && discipline.formats.length > 0;
+}
+
+/**
+ * The library sections a project of a discipline and a kind starts with: the kind's own where it
+ * has any (a commercial's products and shots), else the discipline's.
+ *
+ * @param discipline The discipline.
+ * @param format The project's format, empty for one whose kind is not chosen yet.
+ * @returns The sections, in order.
+ */
+export function defaultSections(discipline: Discipline, format: string): string[] {
+  const kinds = discipline.kinds ?? {};
+  const kind = Object.hasOwn(kinds, format) ? kinds[format] : undefined;
+  return kind?.sections ?? discipline.sections ?? [];
+}
+
+/**
+ * The discipline a shortcut starts a project in.
+ *
+ * @param shortcut The shortcut.
+ * @returns The discipline, or `undefined` for a shortcut that starts nothing: one that is not
+ *   `available`, or whose discipline the catalog does not list.
+ */
+export function shortcutDiscipline(shortcut: Shortcut): Discipline | undefined {
+  return shortcut.status === 'available' && shortcut.discipline !== undefined
+    ? findDiscipline(shortcut.discipline)
+    : undefined;
 }
 
 /**

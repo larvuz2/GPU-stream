@@ -103,6 +103,22 @@ class NewEngine(BaseModel):
     region: str = "auto"
 
 
+class Account(BaseModel):
+    """What `PATCH /v1/me` takes: the limits of one turn, the name, and the settings to change.
+
+    What is left out is left as it is, which `model_fields_set` tells from
+    what is sent as `null`: a limit or a setting put back on its default, a
+    name cleared. What each may be is the service's to say
+    (`Sessions.change_me`), so that a value it refuses is refused in its
+    words.
+    """
+
+    turn_budget_usd: Any = None
+    turn_limit: Any = None
+    name: Any = None
+    settings: Any = None
+
+
 class Message(BaseModel):
     """What `POST /v1/projects/{pid}/messages` takes: the person's words, and the card they lock in where they do."""
 
@@ -350,6 +366,10 @@ def create_app(
     @app.get("/v1/me")
     def me(who: Who) -> dict[str, Any]:
         return service().me(who)
+
+    @app.patch("/v1/me")
+    def change_me(body: Account, who: Who) -> dict[str, Any]:
+        return service().change_me(who, {name: getattr(body, name) for name in body.model_fields_set})
 
     @app.get("/v1/sessions")
     def list_sessions(who: Who) -> dict[str, Any]:

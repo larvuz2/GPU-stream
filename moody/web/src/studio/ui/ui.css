@@ -94,6 +94,28 @@
     }
   }
 
+  /* Tiles that play need room for a waveform and its time, so their columns are a most, not a
+     count: as many as fit at twelve rems each, down to one to a row on a phone. */
+  .ui-grid[data-tiles='audio'] {
+    --ui-columns: 2;
+    grid-template-columns: repeat(
+      auto-fit,
+      minmax(min(100%, max(12rem, (100% - (var(--ui-columns) - 1) * 0.6rem) / var(--ui-columns))), 1fr)
+    );
+  }
+
+  .ui-grid[data-tiles='audio'][data-columns='1'] {
+    --ui-columns: 1;
+  }
+
+  .ui-grid[data-tiles='audio'][data-columns='3'] {
+    --ui-columns: 3;
+  }
+
+  .ui-grid[data-tiles='audio'][data-columns='4'] {
+    --ui-columns: 4;
+  }
+
   .ui-group-label {
     color: var(--color-faint);
     font-family: var(--font-mono);
@@ -627,15 +649,28 @@
     color: var(--color-fg);
   }
 
-  .ui-segment:has(input:checked) > span {
+  /* On an instant card an option is a button to press. */
+  button.ui-segment {
+    cursor: pointer;
+  }
+
+  button.ui-segment:disabled {
+    cursor: default;
+  }
+
+  .ui-segment:has(input:checked) > span,
+  .ui-segment[data-chosen='true'] > span {
     background: var(--selection-bg);
     box-shadow: inset 0 0 0 1px var(--color-lime);
     color: var(--color-fg);
   }
 
   .ui-segment:has(input:focus-visible) > span,
+  button.ui-segment:focus-visible > span,
   .ui-check:has(input:focus-visible),
-  .ui-pick:has(input:focus-visible),
+  .ui-pick:has(input.sr-only:focus-visible),
+  button.ui-pick:focus-visible,
+  button.ui-pick-choose:focus-visible,
   .ui-toggle:has(input:focus-visible) .ui-switch,
   .ui-table tr:has(input:focus-visible) {
     outline: 2px solid var(--color-lime);
@@ -785,20 +820,23 @@
 
   /* A locked card's choices: the chosen one stays as it was, the others step back. */
   fieldset.ui-input:disabled label,
+  fieldset.ui-input[data-frozen='true'] label,
+  .ui-pick:disabled,
+  .ui-pick-choose:disabled,
   .ui-toggle:has(input:disabled),
   .ui-swatch-button:disabled,
   .ui-color:disabled {
     cursor: default;
   }
 
-  fieldset.ui-input:disabled .ui-segment:not(:has(input:checked)),
+  fieldset.ui-input:disabled .ui-segment:not(:has(input:checked)):not([data-chosen='true']),
   fieldset.ui-input:disabled .ui-check:not(:has(input:checked)),
-  fieldset.ui-input:disabled .ui-pick:not(:has(input:checked)),
+  fieldset.ui-input[data-frozen='true'] .ui-pick:not(:has(input:checked)):not([data-chosen='true']),
   .ui-swatch-button:disabled:not([aria-pressed='true']) {
     opacity: 0.45;
   }
 
-  /* Options as pictures */
+  /* Options as tiles: over a picture, a pixel icon, or a sound, or as words alone */
   .ui-pick {
     position: relative;
     display: flex;
@@ -808,20 +846,129 @@
     border: 1px solid var(--color-line-strong);
     border-radius: 0.7rem;
     background: rgb(255 255 255 / 0.03);
+    text-align: left;
+    cursor: pointer;
     transition:
       border-color 0.15s ease,
-      background-color 0.15s ease;
+      background-color 0.15s ease,
+      transform 0.15s ease;
   }
 
-  fieldset:not(:disabled) .ui-pick:hover {
-    border-color: #777;
+  /* A tile with a sound holds two controls, so the tile itself is not one. */
+  .ui-pick[data-art='audio'] {
+    cursor: default;
+  }
+
+  fieldset:not([data-frozen='true']) .ui-pick:not([data-art='audio']):hover {
+    border-color: var(--color-muted);
     background: var(--color-ink-800);
   }
 
-  .ui-pick:has(input:checked) {
+  /* A tile that is a button answers the press, where motion is welcome. */
+  @media (prefers-reduced-motion: no-preference) {
+    button.ui-pick:not(:disabled):active {
+      transform: scale(0.98);
+    }
+  }
+
+  .ui-pick:has(input:checked),
+  .ui-pick[data-chosen='true'] {
     border-color: var(--color-lime);
     background: var(--color-ink-700);
     box-shadow: 0 0 0 1px var(--color-lime);
+  }
+
+  /* Tiles with pixel icons are squares, the icon over its words. The tile is measured by what is
+     inside it: two halves, each half of a square as wide as the tile, up to ten rems, since on a
+     wide card a square would be mostly empty. The icon stands at the foot of the upper half and
+     the words at the head of the lower, which grows where the words need more, so nothing is
+     clipped and the icons and labels of a row stand level however long a note runs. The tiles
+     of a row are as tall as the tallest. */
+  .ui-pick[data-art='icon'] {
+    container-type: inline-size;
+    text-align: center;
+  }
+
+  .ui-pick-square {
+    --ui-half: calc((min(10rem, 100cqw) - 2.1rem) / 2);
+
+    display: grid;
+    flex: 1 1 auto;
+    grid-template-rows: repeat(2, minmax(var(--ui-half), auto));
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    justify-items: center;
+    row-gap: 0.6rem;
+    padding: 0.75rem 0.6rem;
+  }
+
+  .ui-pick-square > .ui-pick-icon {
+    align-self: end;
+  }
+
+  .ui-pick-icon {
+    display: grid;
+    place-items: center;
+    color: var(--color-soft);
+    transition: color 0.15s ease;
+  }
+
+  fieldset:not([data-frozen='true']) .ui-pick:hover .ui-pick-icon,
+  .ui-pick:has(input:checked) .ui-pick-icon,
+  .ui-pick[data-chosen='true'] .ui-pick-icon {
+    color: var(--color-fg);
+  }
+
+  .ui-pick[data-art='icon'] .ui-pick-text {
+    align-content: start;
+    align-self: start;
+    justify-items: center;
+    padding: 0;
+  }
+
+  /* A tile with a sound: its player, then the control that chooses it. */
+  .ui-pick[data-art='audio'] .ui-audio {
+    padding: 0.6rem 0.7rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .ui-pick-choose {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.7rem;
+    border-top: 1px solid var(--color-line);
+    color: var(--color-muted);
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  fieldset:not([data-frozen='true']) .ui-pick-choose:hover {
+    background: var(--color-ink-800);
+    color: var(--color-fg);
+  }
+
+  .ui-pick-choose .ui-pick-text {
+    flex: 1 1 0;
+    padding: 0;
+  }
+
+  .ui-pick-choose:has(input:checked) .ui-check-mark {
+    border-color: var(--color-lime);
+    background: var(--color-lime);
+  }
+
+  .ui-pick-choose:has(input:checked) .ui-check-mark::after {
+    content: '';
+    width: 0.35rem;
+    height: 0.35rem;
+    border-radius: inherit;
+    background: var(--color-ink-950);
   }
 
   .ui-pick-art {
@@ -837,13 +984,12 @@
     padding: 0.5rem 0.6rem;
   }
 
+  /* A label wraps rather than being cut, so a long one is read whole on a narrow card. */
   .ui-pick-label {
-    overflow: hidden;
     color: var(--color-fg);
     font-size: 0.8125rem;
     font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
 
   .ui-pick-note {
@@ -985,6 +1131,28 @@
   .ui-lockbar .ui-hint {
     flex: 1 1 12rem;
     color: var(--color-faint);
+  }
+
+  /* The way back to how the card opened: a quiet, secondary control, never the action's lime. */
+  .ui-default {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: 0.35rem;
+    min-height: 1.75rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.4rem;
+    color: var(--color-muted);
+    font-size: 0.75rem;
+    transition:
+      color 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  .ui-default:hover {
+    border-color: var(--color-muted);
+    color: var(--color-fg);
   }
 
   .ui-lockbar[data-locked='true'] {
@@ -1460,6 +1628,14 @@
     border-color: #777;
   }
 
+  /* Under a finger, what plays a sound is a fingertip tall. */
+  @media (pointer: coarse) {
+    .ui-play {
+      width: 2.75rem;
+      height: 2.75rem;
+    }
+  }
+
   .ui-audio-body {
     display: grid;
     flex: 1 1 0;
@@ -1553,5 +1729,153 @@
     right: 0.4rem;
     bottom: 0.4rem;
     background: rgb(8 8 8 / 0.78);
+  }
+
+  /* A file the person gives: where it is dropped, how it is sent, and the file once it is in */
+  .ui-drop {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem 0.7rem;
+    min-height: 4.5rem;
+    padding: 0.8rem;
+    border: 1px dashed var(--color-line-strong);
+    border-radius: 0.7rem;
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+    transition:
+      border-color 0.15s ease,
+      background-color 0.15s ease;
+  }
+
+  .ui-drop[data-over='true'] {
+    border-color: var(--color-lime);
+    background: var(--selection-bg);
+    color: var(--color-fg);
+  }
+
+  /* With a file in, what is left is the way to give another, and that is a quiet line. */
+  .ui-drop[data-filled='true'] {
+    justify-content: flex-start;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .ui-drop[data-state='sending'] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    border-style: solid;
+  }
+
+  .ui-drop-button {
+    min-height: 1.9rem;
+    padding: 0 0.8rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.5rem;
+    background: var(--color-ink-700);
+    color: var(--color-fg);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+
+  .ui-drop-button:hover {
+    border-color: var(--color-muted);
+  }
+
+  .ui-drop[data-filled='true'] .ui-drop-button {
+    min-height: 1.75rem;
+    background: transparent;
+    color: var(--color-muted);
+    font-size: 0.75rem;
+    font-weight: 400;
+  }
+
+  /* Under a finger, what opens the device's files is a fingertip tall. */
+  @media (pointer: coarse) {
+    .ui-drop .ui-drop-button,
+    .ui-drop[data-filled='true'] .ui-drop-button {
+      min-height: 2.75rem;
+    }
+  }
+
+  .ui-upload-file {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.4rem;
+  }
+
+  .ui-upload-picture {
+    display: block;
+    max-width: 100%;
+    max-height: 14rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.6rem;
+    background: var(--color-ink-950);
+  }
+
+  .ui-upload-line {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    color: var(--color-muted);
+    font-size: 0.75rem;
+  }
+
+  .ui-upload-name {
+    overflow: hidden;
+    color: var(--color-fg);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ui-upload-tag {
+    flex: none;
+    color: var(--color-faint);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+  }
+
+  .ui-upload-refused {
+    color: var(--color-bad);
+    font-size: 0.75rem;
+    line-height: 1.5;
+  }
+
+  /* A bar that moves without a measure: the page is told when the file is in, not how far along it is. */
+  .ui-progress {
+    position: relative;
+    overflow: hidden;
+    height: 0.2rem;
+    border-radius: 9999px;
+    background: var(--color-line-strong);
+  }
+
+  .ui-progress::after {
+    content: '';
+    position: absolute;
+    inset: 0 60% 0 0;
+    border-radius: inherit;
+    background: var(--color-fg);
+    animation: ui-progress 1.2s ease-in-out infinite alternate;
+  }
+
+  @keyframes ui-progress {
+    to {
+      inset: 0 0 0 60%;
+    }
+  }
+
+  /* Where less motion is asked for, the bar stands still and full: the words beside it say the rest. */
+  @media (prefers-reduced-motion: reduce) {
+    .ui-progress::after {
+      inset: 0;
+      animation: none;
+      opacity: 0.6;
+    }
   }
 }

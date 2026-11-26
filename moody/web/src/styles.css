@@ -984,6 +984,11 @@
     box-shadow: 0 0 0 3px rgb(255 255 255 / 0.18);
   }
 
+  /* A field whose value was refused says so by its border as well as in words, focused or not. */
+  .field[aria-invalid='true'] {
+    border-color: var(--color-bad);
+  }
+
   select.field {
     appearance: none;
     padding-right: 2.4rem;
@@ -1154,6 +1159,24 @@
 
   dialog.dialog-wide {
     --dialog-width: 44rem;
+  }
+
+  /* A dialog that is a page of its own: as tall as the window allows, its content scrolling inside it. */
+  dialog.dialog-page {
+    --dialog-width: 60rem;
+    height: min(100dvh - 1.5rem, 44rem);
+    overflow: hidden;
+  }
+
+  @media (max-width: 639.98px) {
+    dialog.dialog-page {
+      width: 100vw;
+      height: 100dvh;
+      max-height: none;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
   }
 
   dialog.dialog[open] {

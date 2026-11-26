@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "The catalog of the interactive cards Moody's agent shows in a conversation (`show_ui`). The control plane builds the tool's reference from it and checks every card against it (moody/control/genui.py); the app renders from it (moody/web/src/studio/ui). A component is an entry here plus its renderer there.",
+  "about": "The catalog of the interactive cards Moody's agent shows in a conversation (`show_ui`). The control plane builds the tool's reference from it and checks every card against it (moody/control/genui.py); the app renders from it (moody/web/src/studio/ui). A component is an entry here plus its renderer there. A component marked `instant` can be the one input of an instant card, which locks on the choice.",
   "limits": {
     "title_chars": 120,
     "submit_chars": 40,
@@ -15,6 +15,8 @@
     "height_max": 900,
     "height_default": 360,
     "frame_min": 40,
+    "icon_min": 8,
+    "icon_max": 16,
     "problems": 8
   },
   "media_kinds": {
@@ -58,6 +60,19 @@
         "value": { "kind": "value", "required": true, "doc": "What the answer carries." },
         "label": { "kind": "string", "doc": "What the person reads; the value where left out." },
         "image": { "kind": "media", "kinds": ["image"], "doc": "A picture of the choice." },
+        "note": { "kind": "string", "doc": "A line under the label." }
+      }
+    },
+    "tile": {
+      "doc": "One choice of a pick, drawn as a tile. A bare string or number is short for {value}. A tile shows one of `image` (a picture of the card's media), `icon` (a pixel icon: rows of 0 and 1, a square of 8 to 16 cells; such tiles are squares, two or three to a row), and `audio` (a sound of the card's media, which the tile plays with its waveform, so two or three are compared by ear), or its words alone.",
+      "short": "value",
+      "one_of": ["image", "icon", "audio"],
+      "props": {
+        "value": { "kind": "value", "required": true, "doc": "What the answer carries." },
+        "label": { "kind": "string", "doc": "What the person reads; the value where left out." },
+        "image": { "kind": "media", "kinds": ["image"], "doc": "A picture of the choice." },
+        "icon": { "kind": "icon", "doc": "A pixel icon in place of a picture: rows of 0 and 1, a square of 8 to 16 cells, such as [\"00111100\", \"01000010\", ...]. Tiles with icons are squares, two or three to a row." },
+        "audio": { "kind": "media", "kinds": ["audio"], "doc": "A sound in place of a picture: the tile plays it with its waveform, so two or three are compared by ear." },
         "note": { "kind": "string", "doc": "A line under the label." }
       }
     },
@@ -291,6 +306,7 @@
       "group": "input",
       "doc": "One of two to five options, all in view.",
       "input": "the option's value",
+      "instant": true,
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
@@ -346,12 +362,13 @@
     },
     "pick": {
       "group": "input",
-      "doc": "One of several options shown as pictures; with many, any of them.",
+      "doc": "One of several options shown as tiles: pictures, pixel icons, sounds that play, or words; with many, any of them.",
       "input": "the option's value, or a list of them with many",
+      "instant": true,
       "props": {
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
-        "options": { "kind": "list", "of": "option", "required": true },
+        "options": { "kind": "list", "of": "tile", "required": true },
         "many": { "kind": "boolean", "default": false },
         "columns": { "kind": "integer", "min": 1, "max": 4, "default": 3 },
         "value": { "kind": "any" },
@@ -366,6 +383,18 @@
         "id": { "kind": "id", "required": true },
         "label": { "kind": "string" },
         "options": { "kind": "list", "of": "option", "required": true }
+      }
+    },
+    "upload": {
+      "group": "input",
+      "doc": "A file the person drops or picks from their device. It goes into the project's library, and the card shows it once it is in.",
+      "input": "{tag, name, kind}: the library entry the file became, or null while there is none",
+      "props": {
+        "id": { "kind": "id", "required": true },
+        "label": { "kind": "string" },
+        "accept": { "kind": "enum", "values": ["any", "audio", "image", "video"], "default": "any", "doc": "The kind of file it takes." },
+        "section": { "kind": "string", "doc": "The library section the file goes into; the library's own choice where left out." },
+        "required": { "kind": "boolean", "default": false }
       }
     }
   }

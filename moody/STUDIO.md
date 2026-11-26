@@ -13,9 +13,9 @@ The app is three panes, the layout of a coding agent's workspace:
 
 | Pane | Holds |
 | --- | --- |
-| Left sidebar | New project, search, **Pinned** and **Recent** projects, the account (credits, Connect Claude, sign out) |
+| Left sidebar | New project, **Create** (the short list of things to start, which is `catalog.json`'s `shortcuts`: each starts a project of a discipline, with a format where it means one, and one that is not available yet shows what is coming instead), **Pinned** and **Recent** projects with search opened from the Recent row, the account (**Settings**, the balance, sign out; Settings is a dialog of tabs: Profile, Billing, Agent, Video editing, Connections, API keys) |
 | Center | The project's conversation with the agent: messages, tool activity, the agent's questions as choices, generated images and videos inline, the composer |
-| Right pane | Modular panels the project shows as it needs them: **Screen** (the live stream of an engine), **Environment** (the engines running, start and stop, **Connect GitHub**, and, for Unreal Engine, **Connect Epic**), **Plan** (the agent's tasks and their state), **Library** (the project's characters, environments, props, products, or whatever sections the project has) |
+| Right pane | Modular panels the project shows as it needs them, each folded and unfolded by a quiet arrow: **Screen** (the live stream of an engine), **Latest** (the newest version of the piece, to play, to open full screen, and to download, with the versions before it), **Environment** (the engines running, start and stop, **Connect GitHub**, and, for Unreal Engine, **Connect Epic**), **Plan** (the agent's tasks and their state), **Library** (the project's characters, environments, props, products, or whatever sections the project has) |
 
 Clicking the screen rearranges the panes: the stream becomes the largest area,
 above the conversation, which stays visible below it. The library's sections are
@@ -24,9 +24,11 @@ props; a commercial has products and shots; the agent adds sections as the work
 needs them.
 
 A new project starts from one of twelve disciplines (`catalog.json`,
-`disciplines`), the first being **Media** (movie, commercial, episode, vertical
-drama), and the agent opens the conversation: a script to bring, or one to
-write together.
+`disciplines`), the first being **Media**, which is video of every kind: film
+and television, social media, vertical shows, commercials, music videos, and
+education. A video opens on the card that asks which kind it is, and the agent
+opens the conversation as that kind does: for a film, a script to bring or one
+to write together ("Contract: starting a project by its kind").
 
 ## The film workflow (the first one built)
 
@@ -43,7 +45,11 @@ write together.
 5. **Spin-offs.** A poster opens a PhotoCraft engine on the same project files;
    blocking a scene opens Blender. Engines of one project share its folder.
 
-The agent's craft knowledge is in skills. `moody/skills/movie` is the production
+The agent's craft knowledge is in skills. `moody/skills/video` is how a video
+starts by its kind: the card each kind opens with, what the agent has to learn
+before it makes anything, and the workflow each kind starts from, the one above
+for a story and footage edited by code for social and educational video.
+`moody/skills/movie` is the production
 before the edit: the opening questions (the story, the main characters, the art
 style), the library, prompting with references, animation tests, and the shots,
 all of it generated with no engine running. `moody/skills/filmcraft` is the
@@ -259,7 +265,10 @@ Event    {id, turn_id, kind, data, created_at}, kind one of
                                               that returned it, and an item whose file is gone
                                               is left out
            turn_end      {}
-           error         {message}
+           error         {message, limit?: "budget" | "steps"}  `limit` names the limit of the
+                                              person's the turn reached, where that is why it
+                                              stopped; the message says how much it was and
+                                              that they change it in their settings
 ```
 
 The agent runs one turn at a time per project, as a Modal function the message
@@ -378,6 +387,32 @@ a process the model steers.
   locks in a card names it (`ui_id`, which must be a `ui` event of the
   project) and carries its state (`value`, JSON of at most 64 KiB); the
   model reads them as a line after the person's words.
+- **The agent recommends where a decision is the person's.** A question
+  (`ask_user`) may name one of its options as `recommended`, the one the agent
+  would choose for the project's taste and brief, and the page marks it with a
+  quiet "(recommended)"; a question the agent has no preference on names none.
+  One whose `recommended` is none of its options, or one of whose options says
+  in its own text that it is recommended, is sent back to the agent and does
+  not reach the person, so an option's text is only the option. In a report,
+  the agent says which way it would go beside each decision it leaves to the
+  person. Interactive cards carry no recommendation: a card shows the thing
+  and its controls, opens on the starting values the agent gave it, and once
+  the person has changed something offers one way back, "Back to default".
+- **A long job ends with a report.** After work of many steps the agent's last
+  message is organized under short headings it chooses for what it has to
+  say (what was done, what there is now, decisions that are the person's,
+  what it needs from them, what it does not know), each a few bullets, the
+  most important first. A short exchange gets a short answer and no headings.
+- **Limits are the person's settings.** What one turn may spend on the model
+  and how many steps it may take are settings of the person's account
+  (`profiles.turn_budget_usd`, `profiles.turn_limit`), which they change in
+  the app. An account that has not set one runs on the deployment's default
+  (`MOODY_TURN_BUDGET_USD`, 15; `MOODY_TURN_LIMIT`, 200), and no account sets
+  one above the deployment's ceiling (`MOODY_TURN_BUDGET_MAX_USD`, 100;
+  `MOODY_TURN_LIMIT_MAX`, 1000). A turn runs on its person's limits as they
+  were when it began. A setting made before the ceiling was lowered runs at
+  the ceiling, and so does a default set above it. The number of steps is a
+  whole number.
 - **Sessions.** A project's conversation is one SDK session
   (`projects.agent_session`), its transcript stored in the database
   (`agent_transcripts`) through the SDK's session store as the turn writes
@@ -387,12 +422,12 @@ a process the model steers.
   engines, what was shown) is sent with each message, after the person's
   words. A project that has events and no session yet starts one that is
   first told what was said before.
-- **Spending.** A turn has a budget (`MOODY_TURN_BUDGET_USD`, 10 by default,
-  0 for none) and a limit of steps (`MOODY_TURN_LIMIT`, 200 by default) the
-  loop enforces, each ending the turn with an `error` event that says so, and
-  every turn ends with a `usage` event. `cost_usd` is the loop's own pricing
-  of the turn's model calls, subagents' included; generation and engines are
-  not in it.
+- **Spending.** The loop enforces the person's two limits. A turn that
+  reaches one ends with an `error` event that names it (`limit`), and the
+  calls of the answer that reached the budget still run. Every turn ends with
+  a `usage` event. `cost_usd` is the loop's own pricing of the turn's model
+  calls, subagents' included, and is what the budget is counted in;
+  generation and engines are not in it.
 - **Stopping.** `POST /v1/projects/{pid}/stop` interrupts the loop: a call
   still running ends with a `tool_end` that is not ok, a subagent's card ends
   `stopped`, and what was written of the answer stays as its last snapshot.
@@ -411,6 +446,11 @@ GET    /v1/projects/{pid}/environment      {connectors: [Connector], agents: [Ag
 PATCH  /v1/projects/{pid}                  also {permissions?: {tool: "always"}}: what the person no longer
                                            wants to be asked about, the whole of it; a tool left out is
                                            asked again
+GET    /v1/me                              also {limits: Limits}
+PATCH  /v1/me                              {turn_budget_usd?: number | null, turn_limit?: number | null} -> the
+                                           same as GET /v1/me. `null` puts a limit back on the deployment's
+                                           default; 400 for a value that is not positive or is over the
+                                           deployment's ceiling
 ```
 
 ```text
@@ -420,6 +460,11 @@ Connector    {id, name, kind: "generation" | "repository" | "search" | "license"
               use, or could once the person connects it. The ids are `fal`, `github`, `web`, and,
               in a project whose discipline has Unreal Engine, `epic`; `off` is a service the
               deployment is not configured for
+Limits       {turn_budget_usd, turn_limit, own: {turn_budget_usd: number | null, turn_limit:
+              number | null}, default: {turn_budget_usd, turn_limit}, max: {turn_budget_usd,
+              turn_limit}}: what a turn of this person's may spend on the model, in dollars, and
+              how many steps it may take; `own` is what they set themselves, `null` where they
+              have not, and the two at the top are what applies
 AgentInfo    {name, title, description}: a subagent this project's agent can hand work to
 SkillInfo    {name, description}
 Activity     one of catalog.json's `activities` ids: thinking, searching, processing, analyzing,
@@ -431,6 +476,8 @@ subagent it belongs to, absent for the agent itself.
 
 ```text
 user_message     {text, ui?: {ui_id, value}}
+ask              {question, options: [string], recommended?}   `recommended` is the option the agent
+                                            would choose, one of `options`, where it has a view
 text             {text, block?, partial?}   `block` names the block of the answer this is; a later
                                             event with the same `block` replaces it, which is how an
                                             answer appears while it is written (`partial: true`).
@@ -467,6 +514,137 @@ ui               {ui_id, title, kind: "components" | "html", spec?, html?, heigh
 usage            {input_tokens, output_tokens, cost_usd, seconds, agents}   once per turn, before turn_end.
                                             `input_tokens` counts what was read from and written to
                                             the cache too, `agents` the subagents the turn started
+```
+
+## Contract: starting a project by its kind
+
+A project of a discipline is of one of that discipline's formats, its kind:
+for Media, in this order, Film & TV, Social Media, Vertical Shows,
+Commercials, Music Videos, Education, and Other. The kind decides how the
+agent opens and which default workflow it follows, so it is asked first, by
+the conversation itself.
+
+- **A project may start without a format.** `POST /v1/projects` takes
+  `format` as optional. Where it is left out and the discipline has formats,
+  the control plane writes the project's first event itself, with no turn and
+  no model: a `ui` card that asks the kind (`catalog.json`: the discipline's
+  `opening` title, its `formats`, and for each its `kinds` entry, a line and
+  an icon's name in the catalog's `icons`). The card is `instant`: choosing
+  locks it. Its data carries `sets: "format"`, and the message that locks it
+  sets the project's format to the chosen one before the turn begins, so the
+  agent's first turn already knows the kind.
+
+  The event has no `turn_id`, and its data is `{ui_id, title, kind:
+  "components", spec: {type: "pick", id: "format", options: [{value, label,
+  note?, icon?}]}, submit: null, waits: true, instant: true, sets: "format",
+  media: []}`. An option's `value` and `label` are the format, its `note` the
+  kind's line, and its `icon` the rows the catalog's `icons` has under the
+  name the kind gives, left out where it has none. The pick's id is what the
+  card sets, so the message that locks it carries `ui.value` `{format: <the
+  kind>}`. A kind the discipline does not offer is a 400 and starts no turn.
+  With the kind, a project whose library is untouched takes that kind's first
+  sections (`kinds.<format>.sections` in the catalog, else the discipline's
+  `sections`). The project's state names the kind at the start of every turn
+  (`Kind:`, and `not chosen yet` where the person wrote before choosing), and
+  the turn that chose it reads that as a line after the person's words.
+- **The agent opens each kind with a card of its own**, written by the
+  `video` skill for that kind: where the story comes from for Film & TV, the
+  track for a music video, the platform and the goal for social media. It
+  gathers what the work needs in as few, as easy answers as it can, and keeps
+  the project moving: every turn ends on a next step it has already prepared
+  or on one decision made easy.
+- **Cards for these openings.** A `pick` option may carry `icon` (a pixel
+  icon as rows of `0` and `1`, a square of eight to sixteen cells) in place
+  of an image, or `audio` (the name of one of the card's files), which makes
+  the option a tile that plays, so two or three sounds are compared by ear. A
+  card may be `instant` where its one input is a single choice. An `upload`
+  input takes a file from the person into the project's library and answers
+  with the entry it made (`{tag, name, kind}`).
+- **Sound is generated like pictures.** `generate_audio(prompt, kind:
+  "music" | "sound" | "speech", lyrics?, instrumental?, voice?, style?,
+  seconds?, count?, save_to?)` makes a song, an instrumental, a sound effect,
+  or a spoken line through fal, shows each result with a player, and keeps it
+  in the library where `save_to` says. The models are data beside the image
+  and video models (`moody/control/generation.py`): MiniMax Music 3 for
+  `music` (up to 300 seconds; lyrics, or `instrumental`, never both), ElevenLabs
+  Sound Effects v3 for `sound` (half a second to thirty, from at most 450
+  characters; the model chooses the length where `seconds` is left out), and
+  Gemini 3.8 Flash TTS for `speech` (`prompt` is the words, `voice` one of its
+  thirty, `style` a line of direction that is not spoken, and no `seconds`).
+  `count` is one to four takes, each a call of its own, run at once: a take
+  that does not come back is told, and the others are kept. What a kind does
+  not take is refused before anything is paid for. A result is a `tool_end`
+  with `media` of kind `audio`.
+- **Video is also edited by code.** The Cut Room engine (`cutroom`) is a
+  machine with no application to click: FFmpeg, speech-to-text with word
+  timings, voice mastering, captions, and the scripts that find the moments
+  in footage, cut vertical clips and horizontal explainers, lay narration,
+  music, and titles, and check the result. The agent drives it with
+  `engine_exec`, by the recipes of its skill, and shows each cut with
+  `preview`. It is the default way a Social Media or an Education video is
+  made, as FilmCraft's timeline is for Film & TV; a default, which the agent
+  leaves when the work or the person calls for something else.
+- **The latest version is always at hand.** `preview` takes an optional
+  `version`, a short label ("Rough cut", "v3") that marks what it shows as a
+  version of the piece itself, and the event carries it, trimmed and at most
+  forty characters; a preview without one has no `version`. The page's right
+  pane has a **Latest** module that plays the newest version (failing one,
+  the newest video or sound the session showed), full screen on request,
+  hands its file to the person to keep, and lists the versions before it. The
+  file is handed over by the address the control plane signed with `download`
+  added, which the storage serves as an attachment under the file's name.
+- **Every module of the right pane folds**, and so does each section inside
+  Environment, by a quiet arrow that shows on hover and focus.
+
+- **Settings are the person's, and one place holds them.** The account menu
+  opens Settings: Profile (name, email), Billing (credits, buying more),
+  Agent (what a turn may spend and how many steps it may take), Video editing,
+  Connections (GitHub, Epic, Claude), and API keys. A setting that is a plain
+  switch or choice is data: `catalog.json`'s `settings` gives each its id, the
+  tab it sits on, its label and one line of help, its kind (`toggle` or
+  `choice`, with the options), and its default. The control plane keeps what a
+  person changed (`profiles.settings`) and refuses an id or a value the
+  catalog does not offer, so adding one is a catalog entry and the code that
+  reads it. An entry is `{id, tab, label, help, kind: "toggle" | "choice",
+  options?: [{value, label}], default, apps?}`: a toggle is `true` or `false`,
+  a choice one of its options' `value`. A setting that chooses between
+  engines names the app each value stands for in `apps` (a toggle's under
+  `on` and `off`, a choice's under its options' values): the agent is told of
+  the one that applies, and the form that starts an engine by hand offers
+  only that one, so the choice is made in Settings and nowhere else. A value kept from before the catalog
+  stopped offering it does not apply, and the default does. The name
+  (`profiles.name`) is at most eighty characters, and `null` clears it. A
+  change that is refused in any part changes nothing.
+- **HyperFrames is the other way to edit by code.** The `hyperframes` engine
+  runs HeyGen's open-source HyperFrames (Apache 2.0): a video written as HTML,
+  CSS, and seekable animation, rendered by a headless browser and FFmpeg, with
+  its live preview on the engine's Screen. It follows upstream: a machine
+  takes the newest release and that release's own skills as it starts, and
+  falls back on the ones its image was built with. A release is switched to
+  only once it has installed whole and rendered on that machine, and the
+  update has two minutes; `MOODY_HYPERFRAMES_VERSION` in the control plane's
+  environment holds every session on one release. Which engine the agent
+  reaches for when a video is edited by code is the person's setting
+  (`video_hyperframes`, a switch on the Video editing tab, off by default, so
+  the Cut Room unless they turn it on); the turn's state names the one that
+  applies, as `A video edited by code is made in: <App> (app `<id>`)`: the
+  app the person's value stands for in the setting's `apps` where the catalog
+  has it as one that can be started (`hyperframes`, switched on), the app the
+  default stands for otherwise (`cutroom`), and no line where the catalog has
+  neither to start.
+
+Additions to the API and the events:
+
+```text
+GET    /v1/me                              also {name, settings: {id: value}}: every setting of the catalog
+                                           with the value that applies, the person's own or its default
+PATCH  /v1/me                              also {name?, settings?: {id: value | null}}: `null` puts a setting
+                                           back on its default; 400 for an id or a value the catalog does
+                                           not offer
+POST   /v1/projects                        {name?, discipline, format?, ...}: without a format, the project
+                                           opens on the card that asks its kind
+ui               also {instant?, sets?: "format"}
+preview          also {version?}
 ```
 
 ## What is done when

@@ -49,14 +49,60 @@
       "id": "media",
       "name": "Media",
       "formats": [
-        "Movie",
-        "Commercial",
-        "Episode",
-        "Vertical drama"
+        "Film & TV",
+        "Social Media",
+        "Vertical Shows",
+        "Commercials",
+        "Music Videos",
+        "Education",
+        "Other"
+      ],
+      "opening": "What kind of video are you making?",
+      "opening_skill": "video",
+      "kinds": {
+        "Film & TV": {
+          "note": "A film, a series, or a documentary, told shot by shot.",
+          "icon": "film"
+        },
+        "Social Media": {
+          "note": "Clips for a feed: a hook, captions, the platform's shape.",
+          "icon": "social"
+        },
+        "Vertical Shows": {
+          "note": "Serial drama for a phone, in short upright episodes.",
+          "icon": "vertical"
+        },
+        "Commercials": {
+          "note": "An ad for a product or a brand, in every length it runs.",
+          "icon": "commercial",
+          "sections": [
+            "Products",
+            "Shots"
+          ]
+        },
+        "Music Videos": {
+          "note": "Pictures cut to a track: a performance, a story, a look.",
+          "icon": "music-video"
+        },
+        "Education": {
+          "note": "A lesson or an explainer, narrated and shown.",
+          "icon": "education"
+        },
+        "Other": {
+          "note": "Something else. Say what it is, and we shape it together.",
+          "icon": "other"
+        }
+      },
+      "sections": [
+        "Characters",
+        "Environments",
+        "Props"
       ],
       "blurb": "Films, series, ads, and social video, from script to final cut.",
       "engines": [
         "filmcraft",
+        "cutroom",
+        "hyperframes",
         "photocraft",
         "nuke",
         "effectcraft"
@@ -82,7 +128,8 @@
       "formats": [
         "Illustration",
         "Concept art",
-        "Painting"
+        "Painting",
+        "3D object"
       ],
       "blurb": "Illustration, concept art, and generative pieces.",
       "engines": [
@@ -228,6 +275,76 @@
         "unreal",
         "craft-anything",
         "comfyui"
+      ]
+    }
+  ],
+  "shortcuts": [
+    {
+      "id": "video",
+      "label": "Video",
+      "status": "available",
+      "discipline": "media"
+    },
+    {
+      "id": "image",
+      "label": "Image",
+      "status": "available",
+      "discipline": "art"
+    },
+    {
+      "id": "audio",
+      "label": "Audio",
+      "status": "available",
+      "discipline": "music"
+    },
+    {
+      "id": "architecture",
+      "label": "Architecture",
+      "status": "available",
+      "discipline": "architecture"
+    },
+    {
+      "id": "games",
+      "label": "Games",
+      "status": "available",
+      "discipline": "games"
+    },
+    {
+      "id": "object",
+      "label": "3D Object",
+      "status": "available",
+      "discipline": "art",
+      "format": "3D object"
+    },
+    {
+      "id": "immersive",
+      "label": "Immersive",
+      "status": "soon",
+      "preview": [
+        {
+          "name": "TouchDesigner",
+          "line": "Node-based real-time visuals for installations and live shows.",
+          "tag": "Exploring",
+          "image": "immersive-light-wall.webp"
+        },
+        {
+          "name": "cables",
+          "line": "Open-source, node-based real-time visuals for the web.",
+          "tag": "Soon",
+          "image": "immersive-nodes.webp"
+        },
+        {
+          "name": "ossia score",
+          "line": "An open-source sequencer for interactive shows: media, light, and sound on one timeline.",
+          "tag": "Soon",
+          "image": "immersive-stage.webp"
+        },
+        {
+          "name": "Splash",
+          "line": "Open-source projection mapping for domes and any surface with a 3D model.",
+          "tag": "Soon",
+          "image": "immersive-dome.webp"
+        }
       ]
     }
   ],
@@ -485,6 +602,30 @@
         "animation"
       ],
       "source": "https://github.com/storytold/filmcraft"
+    },
+    {
+      "id": "cutroom",
+      "name": "Cut Room",
+      "version": "",
+      "status": "available",
+      "tagline": "Social clips and explainers edited by code: moments found, captions and hooks burned in, voice and music laid, every cut a command your agent runs.",
+      "accent": "#f25c54",
+      "disciplines": [
+        "media"
+      ],
+      "source": "https://github.com/larvuz2/GPU-stream/tree/main/addons/modal/cutroom"
+    },
+    {
+      "id": "hyperframes",
+      "name": "HyperFrames",
+      "version": "",
+      "status": "available",
+      "tagline": "Video written as HTML and animation and rendered frame by frame: titles, captions, charts, and motion your agent composes in code, with a live preview.",
+      "accent": "#14b8a6",
+      "disciplines": [
+        "media"
+      ],
+      "source": "https://github.com/heygen-com/hyperframes"
     },
     {
       "id": "blender",
@@ -795,6 +936,20 @@
       "blurb": "NVIDIA A10G. Production scenes and long renders."
     }
   ],
+  "settings": [
+    {
+      "id": "video_hyperframes",
+      "tab": "Video editing",
+      "label": "Use HyperFrames for videos edited by code",
+      "help": "The agent writes such a video as HTML and animation, and HyperFrames renders it. Off, it cuts in the Cut Room.",
+      "kind": "toggle",
+      "default": false,
+      "apps": {
+        "on": "hyperframes",
+        "off": "cutroom"
+      }
+    }
+  ],
   "regions": [
     {
       "id": "auto",
@@ -829,5 +984,105 @@
       "credits": 7200,
       "usd": 60
     }
-  ]
+  ],
+  "icons": {
+    "film": [
+      "110110110110",
+      "011011011011",
+      "111111111111",
+      "100000000001",
+      "100000000001",
+      "100001000001",
+      "100001100001",
+      "100001110001",
+      "100001100001",
+      "100001000001",
+      "100000000001",
+      "111111111111"
+    ],
+    "social": [
+      "011111111110",
+      "100000000001",
+      "100110011001",
+      "101111111101",
+      "101111111101",
+      "100111111001",
+      "100011110001",
+      "100001100001",
+      "100000000001",
+      "011100111110",
+      "000110000000",
+      "000100000000"
+    ],
+    "vertical": [
+      "000111111000",
+      "001000000100",
+      "001000000100",
+      "001001000100",
+      "001001100100",
+      "001001110100",
+      "001001100100",
+      "001001000100",
+      "001000000100",
+      "001000000100",
+      "001001100100",
+      "000111111000"
+    ],
+    "commercial": [
+      "000000000011",
+      "000000001111",
+      "000000111111",
+      "011111111011",
+      "111111111011",
+      "111111111011",
+      "011111111011",
+      "000110111111",
+      "000110001111",
+      "000110000011",
+      "000110000000",
+      "000000000000"
+    ],
+    "music-video": [
+      "000011111111",
+      "000011111111",
+      "000011000011",
+      "000011000011",
+      "000011000011",
+      "000011000011",
+      "000011000011",
+      "011111001111",
+      "111111011111",
+      "111111011111",
+      "011110001110",
+      "000000000000"
+    ],
+    "education": [
+      "000000000000",
+      "011110011110",
+      "100001100001",
+      "101101101101",
+      "100001100001",
+      "101101101101",
+      "100001100001",
+      "101101101101",
+      "100001100001",
+      "111111111111",
+      "000001100000",
+      "000000000000"
+    ],
+    "other": [
+      "000000000000",
+      "000000000000",
+      "000000000000",
+      "000000000000",
+      "000000000000",
+      "011001100110",
+      "011001100110",
+      "000000000000",
+      "000000000000",
+      "000000000000",
+      "000000000000",
+      "000000000000"
+    ]
+  }
 }

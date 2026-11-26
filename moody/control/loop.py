@@ -807,8 +807,8 @@ class TurnLoop:
             thinking={"type": "adaptive", "display": "summarized"}
             if settings.thinking
             else {"type": "disabled"},
-            max_turns=settings.turn_limit or None,
-            max_budget_usd=settings.budget_usd or None,
+            max_turns=settings.turn_limit,
+            max_budget_usd=settings.budget_usd,
             include_partial_messages=True,
             forward_subagent_text=True,
             verbatim_prompts=True,
@@ -895,7 +895,7 @@ class TurnLoop:
         if not stopped and not self.crashed:
             problem = self.problem(result)
             if problem:
-                await self.emit("error", {"message": problem})
+                await self.emit("error", problem)
         used = (result.model_usage if result else None) or {}
         await self.emit(
             "usage",
@@ -917,26 +917,46 @@ class TurnLoop:
             },
         )
 
-    def problem(self, result: ResultMessage | None) -> str | None:
-        """What to tell the person of a turn that ended some other way than the agent finishing, or nothing."""
+    def problem(self, result: ResultMessage | None) -> dict[str, Any] | None:
+        """The `error` event of a turn that ended some other way than the agent finishing, or nothing.
+
+        A turn that reached one of its person's limits says which and how
+        much, and names it in `limit`, so the page can offer the setting
+        beside the message.
+        """
+        settings = self.settings
         if result is None:
-            return "Something went wrong on our side, and this turn stopped."
+            return {
+                "message": "Something went wrong on our side, and this turn stopped."
+            }
         if result.subtype == "error_max_turns":
-            return "This turn reached its limit of steps. Send a message to go on."
+            return {
+                "message": f"This turn reached your limit of {settings.turn_limit} step{'' if settings.turn_limit == 1 else 's'} and stopped. You can change "
+                "the limit in your settings. Send a message to go on.",
+                "limit": "steps",
+            }
         if result.subtype == "error_max_budget_usd":
-            return f"This turn reached its spending limit of ${self.settings.budget_usd:g}. Send a message to go on."
+            return {
+                "message": f"This turn reached your spending limit of ${settings.budget_usd:g} and stopped. You can "
+                "change the limit in your settings. Send a message to go on.",
+                "limit": "budget",
+            }
         if result.stop_reason == "refusal":
-            return "The model declined to go on with this. Try asking another way."
+            return {
+                "message": "The model declined to go on with this. Try asking another way."
+            }
         if self.failure is not None:
             print(
                 f"loop: the model could not be asked ({self.failure}): {result.result}"
             )
-            return API_FAILURES.get(self.failure, API_FAILURE)
+            return {"message": API_FAILURES.get(self.failure, API_FAILURE)}
         if result.is_error:
             print(
                 f"loop: the turn ended as {result.subtype} ({result.terminal_reason}): {result.errors or result.result}"
             )
-            return "Something went wrong on our side, and this turn stopped."
+            return {
+                "message": "Something went wrong on our side, and this turn stopped."
+            }
         return None
 
     # What comes back

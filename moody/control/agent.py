@@ -27,8 +27,12 @@ A project's conversation is one session of the loop
 as it writes it (`transcript.py`), so the next turn resumes it on whichever
 machine runs it. Nothing of the conversation is kept here. What a turn adds to
 it is the person's message followed by the project's state (`Agent.prompt`):
-its name, plan, library, engines, and GitHub link, which change between turns
-and so are no part of the system prompt. Each open engine is listed with its
+its name, kind, plan, library, engines, and GitHub link, which change between
+turns and so are no part of the system prompt. The kind is among them because
+a project may be made without one and asked it by a card (`Sessions.opening_card`);
+the turn whose message locked that card reads the choice as a line after the
+person's words. The state also names the engine a video is edited by code in,
+which is the person's setting (`Agent.code_editor`). Each open engine is listed with its
 app and whether it has a command channel, under the project folder the
 engines share, so the agent knows what it can drive and where files meet.
 Where an Unreal engine runs, the state also lists the Unreal projects in that
@@ -60,9 +64,12 @@ end its turn and ask. The answer is recorded in the database once
 (`moody_resolve_approval`), whoever is first.
 
 The model is `MOODY_AGENT_MODEL`, Claude Fable 5.2 by default, with summarized
-thinking, which the page shows; effort, the budget of one turn, and the most
-steps one turn may take are configuration (`loop_settings`). A subagent runs
-on the tier its definition names, which the deployment maps to a model.
+thinking, which the page shows; effort is configuration (`loop_settings`). A
+subagent runs on the tier its definition names, which the deployment maps to
+a model. What one turn may spend on the model and how many steps it may take
+are its person's own settings (`Sessions.limits`), read as the turn begins;
+a turn that reaches one ends with an `error` event that names the limit, so
+the page can offer the setting where it tells the person.
 
 The turn's worker beats every `HEARTBEAT_SECONDS` on a thread of its own
 (`moody_turn_alive`), which both shows the turn is alive, so a turn whose
@@ -109,6 +116,13 @@ the model the same small picture of each file (`Agent.pictured`). No engine
 holds those files, so the turn's own worker makes the pictures
 (`looking.py`).
 
+Sound is generated like pictures (`generate_audio`): a song or an
+instrumental, a sound effect, or a spoken line, by `kind`, each on the model
+`generation.py` names for it. A call of those models makes one file, so
+`count` takes are that many calls, run at once, and a take that failed does
+not cost the person the ones that did not. The results are stored and shown
+as an image's are, as files the page plays.
+
 A project's repository may be a whole team's, shared by everyone who works on
 the game, so the agent reads it freely and writes only to a branch of its own
 (`tool_github_save`): `moody/`, the project's name as a slug, and the first
@@ -126,6 +140,7 @@ request from the compare link the save gives back.
 from __future__ import annotations
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import json
 import mimetypes
 import re
@@ -139,7 +154,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
-from typing import Any, Callable, Iterator, get_args
+from typing import Any, Callable, Collection, Iterator, get_args
 from urllib.parse import quote
 
 import anyio
@@ -159,7 +174,14 @@ from definitions import (
     skills_for,
 )
 from generation import (
+    AUDIO_MODELS,
+    AUDIO_SECONDS,
+    SOUND_PROMPT_CHARACTERS,
+    SPEECH_VOICE,
+    SPEECH_VOICES,
     VIDEO_LONGEST,
+    audio_arguments,
+    audio_units,
     video_kilotokens,
     IMAGE_ASPECT_RATIOS,
     IMAGE_MODELS,
@@ -180,6 +202,7 @@ from looking import LOOK_BYTES, NoPicture, look_arguments, picture_of
 from loop import BUILT_INS, PREFIX, Brief, Loop, Settings, Subagent, ToolSpec, TurnLoop, Workspace, sdk_loop
 from service import (
     DESKTOP,
+    KIND_FIELD,
     LIBRARY_BUCKET,
     MEGABYTE,
     OPEN,
@@ -197,6 +220,7 @@ from service import (
     clean_sections,
     normal_tag,
     safe_name,
+    setting_app,
 )
 from transcript import Transcript
 import unreal
@@ -210,6 +234,15 @@ OUTPUT_LIMIT = 20000
 READ_LIMIT = 100000
 IMAGE_SECONDS = 300
 VIDEO_SECONDS = 1200
+AUDIO_WAIT_SECONDS = 600
+# The setting by which a person chooses the engine their videos are edited by code in; the catalog's entry names the
+# app each of its values stands for (`apps`)
+CODE_EDITOR_SETTING = "video_hyperframes"
+# The longest label a preview's version carries
+VERSION_CHARACTERS = 40
+# What a generated sound is called, by its kind, where the page and the model are told how many were made
+AUDIO_NOUNS = {"music": "song", "sound": "sound", "speech": "spoken line"}
+INSTRUMENTAL_NOUN = "instrumental"
 # How often a call that waits for the person's approval looks for their answer
 APPROVAL_POLL_SECONDS = 1.0
 # What the answer to an approval may be, and what a wait that ran out is recorded as
@@ -288,17 +321,30 @@ def project_folder(project_id: str) -> str:
     return f"{WORKSPACE}/projects/{project_id}"
 
 
-def system_prompt(catalog: Catalog, project: dict[str, Any], tiers: frozenset[str]) -> str:
+def system_prompt(catalog: Catalog, project: dict[str, Any], tiers: frozenset[str], skills: Collection[str] = ()) -> str:
     """The project's system prompt: what does not change with the work.
 
-    It is built from the project's discipline and format, the catalog, and
-    the machine tiers the deployment switched on. What changes between turns
-    arrives with each message (`Agent.prompt`), and the skills and subagents
-    the project is offered are listed by the loop, which loads a skill's text
-    only when the agent opens it.
+    It is built from the project's discipline, the catalog, and the machine
+    tiers the deployment switched on. What changes between turns arrives
+    with each message (`Agent.prompt`), the project's kind among it, and the
+    skills and subagents the project is offered are listed by the loop, which
+    loads a skill's text only when the agent opens it. `skills` names the
+    skills the project is offered: a discipline whose kinds each open with a
+    card of their own names the skill that holds those cards
+    (`opening_skill` in the catalog), and the prompt sends the agent to it
+    only where the project has that skill.
     """
     brand = catalog.data["brand"]
     discipline = catalog.disciplines.get(project["discipline"], {"name": project["discipline"], "blurb": "", "engines": []})
+    opening = discipline.get("opening_skill")
+    first_turn = (
+        f"""
+- A project begins with its kind, which its state names. On its first turn, the kind just chosen, open the
+  `{opening}` skill and show that kind's opening card from it, in place of questions in words: it gathers what
+  the work needs in as few and as easy answers as it can."""
+        if opening and opening in skills
+        else ""
+    )
     engines = []
     for app_id in discipline.get("engines", []):
         app = catalog.apps.get(app_id)
@@ -330,7 +376,7 @@ engines on cloud machines and drive them, and you ask the person at every decisi
 # The project
 
 Discipline: {discipline['name']}. {discipline.get('blurb', '')}
-Format: {project['format'] or 'not chosen yet'}.
+Its kinds: {', '.join(discipline.get('formats', [])) or 'none'}. Which one this project is, is in the project's state.
 
 The engines of this discipline:
 {chr(10).join(engines) or '- none yet'}
@@ -343,10 +389,18 @@ The machines an engine runs on (`tier`):
 
 # How you work
 
+- Your job is to keep the project moving. End every turn on a next step you have already prepared, or on one
+  decision made easy to make; where the person has no direction, propose one; never leave them at an empty box.
+  Someone who has to work out what to ask for next has stopped making their thing.{first_turn}
 - The person decides what is theirs: the story, the look, which take to keep, what to spend. Ask with `ask_user`
   and two to five short options. Asking ends your turn: the question is shown to the person, and their answer, an
   option or their own words, is the next message you get. Decide the craft questions yourself, as a professional
   would, and say what you chose.
+- Where a decision is the person's and you have a view, say which way you would go: in a question, name that
+  option in `ask_user`'s `recommended`, and in a report, say it in a few words beside the decision. They work with
+  you for your judgment, and with it in front of them they agree in a word or see what they are deciding
+  against. Leave it out where you have no real preference. Keep interactive cards clean: a card shows the thing
+  and its controls, and no recommendation is written on it.
 - Keep the plan current with `update_plan`: a few concrete tasks, one of them active at a time.
 - The library holds what the project is made of: characters, environments, props, products, shots, or whatever
   sections it needs (`set_library_sections`). Each entry has a tag such as `@mara`, and the person and the
@@ -400,13 +454,19 @@ The machines an engine runs on (`tier`):
   start of each turn, in a `<project_state>` block that {brand} writes, not the person. Trust it over what you
   remember of earlier turns.
 - Before you start, say in a line what you are about to do; brief updates while you work help the person follow
-  along. Close with a short recap that stands on its own: what you did, what you found, and what is next.
+  along.
 
 # Communicating clearly
 
 Write for an intelligent reader who has not seen your tool calls or your reasoning. Put the key point first, use
-plain words in full sentences, and do not use a term you made up during the work. Keep messages short: the person
-is making something with you, not reading a report."""
+plain words in full sentences, and do not use a term you made up during the work.
+
+A short exchange gets a short answer in plain sentences, with no headings: the person is making something with
+you, and structure on a reply of a few lines reads like paperwork. A long job (many steps, subagents, or minutes
+of work) ends with a report, because the person was not watching and picks the work up from your last message
+alone. Put it under short headings chosen for what there is to say, such as what was done, what there is now,
+the decisions that are theirs, what you need from them, and what you do not know: a few bullets under each, the
+most important first, and only the headings that have content."""
 
 
 # What a subagent is told beside its own prompt
@@ -476,7 +536,17 @@ TOOLS = [
         "the question is shown to them, and their answer, an option or their own words, is the next message you get.",
         {
             "question": {"type": "string", "description": "The question, in a sentence or two."},
-            "options": {**STRINGS, "description": "Two to five short answers to pick from."},
+            "options": {
+                **STRINGS,
+                "description": "Two to five short answers to pick from. An option's text is only the option: it "
+                "never says that it is recommended.",
+            },
+            "recommended": {
+                "type": "string",
+                "description": "The option you would choose for this project, where you have a view, written exactly "
+                "as it is in options. The person sees it marked as your recommendation. Leave it out where you have "
+                "no real preference.",
+            },
         },
         ["question", "options"],
         activity="curious", main_only=True,
@@ -598,6 +668,41 @@ TOOLS = [
         },
         ["prompt"],
         activity="creating", approval="ask",
+    ),
+    tool(
+        "generate_audio",
+        "Generate sound on fal: a song or an instrumental (kind music), a sound effect (kind sound), or a spoken line "
+        "(kind speech). The person hears each result in the conversation, with a player; with count, several takes "
+        "to compare by ear. Returns the model used and fal's cost estimate.",
+        {
+            "prompt": {
+                "type": "string",
+                "description": "music: the genre, mood, tempo, instruments, and voice of the piece. sound: what is "
+                f"heard, in at most {SOUND_PROMPT_CHARACTERS} characters. speech: the exact words to say.",
+            },
+            "kind": {"type": "string", "enum": list(AUDIO_MODELS)},
+            "lyrics": {
+                "type": "string",
+                "description": "music: the words to sing, with structure tags such as [verse] and [chorus], each on a "
+                "line of its own. A piece of music is given lyrics or is instrumental.",
+            },
+            "instrumental": {"type": "boolean", "description": "music: true for a piece with no singing."},
+            "voice": {"type": "string", "enum": list(SPEECH_VOICES), "description": f"speech: who says it; {SPEECH_VOICE} unless given."},
+            "style": {
+                "type": "string",
+                "description": "speech: how it is said, in a line: tone, pace, accent. It is direction and is not spoken.",
+            },
+            "seconds": {
+                "type": "number",
+                "description": f"music: the most the piece may run, up to {AUDIO_SECONDS['music'][1]} (60 unless "
+                f"given). sound: how long it is, {AUDIO_SECONDS['sound'][0]:g} to {AUDIO_SECONDS['sound'][1]} (the "
+                "model chooses unless given). A spoken line is as long as its words.",
+            },
+            "count": {"type": "integer", "minimum": 1, "maximum": 4, "description": "How many takes, 1 to 4."},
+            "save_to": SAVE_TO,
+        },
+        ["prompt", "kind"],
+        activity="creating",
     ),
     tool(
         "engine_start",
@@ -723,6 +828,12 @@ TOOLS = [
                 "description": "Also return a small picture of each file to you: an image itself, four frames of a "
                 "video, the waveform of a sound.",
             },
+            "version": {
+                "type": "string",
+                "description": "A short label, such as Rough cut or v3, where what this shows is a version of the piece "
+                "itself and not a detail or a step. The person's Latest panel plays the newest version and lists the "
+                "ones before it.",
+            },
         },
         ["engine_id", "caption"],
         activity="analyzing",
@@ -807,6 +918,8 @@ SPECS = {definition["name"]: definition for definition in TOOLS}
 # What a tool's `approval` says where the person approves each call of it, and what a project's permissions say
 # where they no longer want to be asked
 APPROVAL_ASK = "ask"
+# How an option of a question would say that it is the recommended one, in lowercase, which the page says itself
+RECOMMENDED_MARK = "(recommended"
 ALWAYS = "always"
 
 
@@ -824,8 +937,8 @@ def check_activities(catalog: Catalog) -> None:
         raise ValueError(f"these tools name activities catalog.json does not have: {unknown}")
 
 
-def loop_settings(config: Config) -> Settings:
-    """What the deployment configures of the loop.
+def loop_settings(config: Config, limits: dict[str, Any]) -> Settings:
+    """What the deployment configures of the loop, and the limits of the person whose turn it runs (`Sessions.limits`).
 
     Raises:
         ValueError: The configured effort is none the loop knows.
@@ -838,8 +951,8 @@ def loop_settings(config: Config) -> Settings:
         effort=config.agent_effort,
         thinking=config.agent_thinking,
         fallback_model=config.agent_fallback_model,
-        budget_usd=config.turn_budget_usd,
-        turn_limit=config.turn_limit,
+        budget_usd=float(limits["turn_budget_usd"]),
+        turn_limit=int(limits["turn_limit"]),
         base_url=config.anthropic_base_url,
         passed=config.loop_env,
         cli=config.loop_cli,
@@ -864,7 +977,8 @@ def recap(events: list[dict[str, Any]]) -> str:
         elif event["kind"] == "text":
             lines.append(f"You: {data.get('text', '')}")
         elif event["kind"] == "ask":
-            lines.append(f"You asked: {data.get('question', '')} ({' / '.join(data.get('options', []))})")
+            advised = f"; you recommended {data['recommended']}" if data.get("recommended") else ""
+            lines.append(f"You asked: {data.get('question', '')} ({' / '.join(data.get('options', []))}{advised})")
     kept: list[str] = []
     for line in reversed(lines[-RECAP_EVENTS:]):
         if sum(map(len, kept)) + len(line) > RECAP_CHARACTERS:
@@ -1099,6 +1213,8 @@ class Turn:
         self.turn_id = turn_id
         profile = sessions.me(User(id=project["user_id"], email=""))
         self.user = User(id=project["user_id"], email=profile["email"])
+        # What this turn may spend and how many steps it may take: its person's limits as the turn began
+        self.limits: dict[str, Any] = profile["limits"]
         self.stopped = threading.Event()
         self.done = threading.Event()
         self.heartbeat_seconds = heartbeat_seconds
@@ -1248,7 +1364,7 @@ class Agent:
                 if definition["approval"] != APPROVAL_ASK or project["permissions"].get(name) == ALWAYS
             ]
             brief = Brief(
-                system=system_prompt(catalog, project, config.tiers),
+                system=system_prompt(catalog, project, config.tiers, [skill.name for skill in offered]),
                 prompt=prompt,
                 tools=[
                     ToolSpec(name, definition["description"], definition["input_schema"], definition["activity"], definition["read_only"])
@@ -1263,7 +1379,7 @@ class Agent:
                 workspace=workspace,
             )
             activities = {name: definition["activity"] for name, definition in SPECS.items()}
-            await TurnLoop(self, turn, brief, loop_settings(config), activities).run(self.loop)
+            await TurnLoop(self, turn, brief, loop_settings(config, turn.limits), activities).run(self.loop)
 
     def session(self, turn: Turn, store: Transcript, workspace: Workspace) -> tuple[str, bool]:
         """The loop's session that is the project's conversation, and whether it is resumed or begins now.
@@ -1297,11 +1413,13 @@ class Agent:
         locked = said.get("ui")
         if locked:
             shown = self.store.rows("project_events", project_id=f"eq.{turn.project_id}", kind="eq.ui")
-            title = next((row["data"].get("title", "") for row in shown if row["data"].get("ui_id") == locked["ui_id"]), "")
-            words += (
-                f"\n\n[The person locked in the card {json.dumps(title or locked['ui_id'])} (ui_id {locked['ui_id']}) "
-                f"with these values: {json.dumps(locked.get('value'))}]"
-            )
+            card = next((row["data"] for row in shown if row["data"].get("ui_id") == locked["ui_id"]), {})
+            title = json.dumps(card.get("title") or locked["ui_id"])
+            if card.get("sets") == KIND_FIELD:
+                line = f"[The person chose this project's kind on the card {title}: {turn.project['format']}]"
+            else:
+                line = f"[The person locked in the card {title} (ui_id {locked['ui_id']}) with these values: {json.dumps(locked.get('value'))}]"
+            words = "\n\n".join(filter(None, (words, line)))
 
         def history() -> list[dict[str, Any]]:
             if not resume:
@@ -1384,14 +1502,18 @@ class Agent:
             + (f", streaming {' and '.join(STREAMS[engine['app']])}" if engine["app"] in STREAMS else "")
             for engine in open_engines
         ]
-        credits = self.sessions.me(turn.user)["credits"]
+        account = self.sessions.me(turn.user)
+        credits = account["credits"]
+        editor = self.code_editor(account["settings"])
         always = sorted(name for name, value in project["permissions"].items() if value == ALWAYS)
         return "\n".join(
             [
                 "The project's state at the start of this turn:",
                 f"Name: {project['name']}",
+                f"Kind: {project['format'] or 'not chosen yet'}",
                 f"GitHub: {linked}",
                 f"Generation: {'available' if self.generator else 'not configured on this deployment'}",
+                *([f"A video edited by code is made in: {self.app_name(editor)} (app `{editor}`)"] if editor else []),
                 f"Credits the person has: {credits}",
                 f"The person no longer wants to be asked before: {', '.join(always) or '(nothing; they are asked each time)'}",
                 "Plan:",
@@ -1405,6 +1527,24 @@ class Agent:
                 *self.unreal_state(turn, open_engines, history),
             ]
         )
+
+    def code_editor(self, settings: dict[str, Any]) -> str | None:
+        """The engine a video is edited by code in for this person, as an app's id, or nothing where the catalog has none.
+
+        The catalog's setting (`CODE_EDITOR_SETTING`) names the app each of
+        its values stands for (`setting_app`). The one the person's value
+        stands for where that app can be started, and the one the setting's
+        default stands for otherwise. Either is an app of the catalog or it is
+        not named: a turn is told of no engine it could not start.
+        """
+        catalog = self.sessions.catalog
+        setting = catalog.settings.get(CODE_EDITOR_SETTING)
+        if setting is None:
+            return None
+        chosen = setting_app(setting, settings.get(CODE_EDITOR_SETTING, setting["default"]))
+        default = setting_app(setting, setting["default"])
+        startable = [app for app in (chosen, default) if app and catalog.apps.get(app, {}).get("status") in STARTABLE]
+        return startable[0] if startable else None
 
     def unreal_state(
         self, turn: Turn, engines: list[dict[str, Any]], history: Callable[[], list[dict[str, Any]]]
@@ -1572,6 +1712,7 @@ class Agent:
                 pass
         app = apps.get(arguments.get("app", ""), {}).get("name", arguments.get("app", ""))
         count = arguments.get("count", 1)
+        sound = INSTRUMENTAL_NOUN if arguments.get("instrumental") else AUDIO_NOUNS.get(arguments.get("kind", ""), "sound")
         return {
             "ask_user": "Asking you",
             "update_plan": "Updating the plan",
@@ -1581,6 +1722,7 @@ class Agent:
             "library_upsert": f"Saving {arguments.get('tag') or arguments.get('name', '')} to the library",
             "generate_image": f"Generating {count} image{'s' if count != 1 else ''}",
             "generate_video": "Generating a video",
+            "generate_audio": f"Generating {count} {sound}{'s' if count != 1 else ''}",
             "engine_start": f"Starting {app}",
             "engine_list": "Checking the engines",
             "engine_stop": "Stopping an engine",
@@ -1605,12 +1747,36 @@ class Agent:
 
     # The person
 
-    def tool_ask_user(self, turn: Turn, question: str, options: list[str]) -> Result:
-        """Put a question to the person and end the turn: their answer is the next turn's message."""
+    def tool_ask_user(self, turn: Turn, question: str, options: list[str], recommended: str | None = None) -> Result:
+        """Put a question to the person, with the option the agent would choose where it has a view, and end the turn.
+
+        The person's answer is the next turn's message. The page marks the
+        recommendation itself, so it is named apart from the options and has
+        to be one of them, and an option that carries the mark in its own
+        text is sent back to be written without it. A question the agent has
+        no preference on carries none.
+
+        Raises:
+            Refused: 409 for a second question in one turn, 400 for a recommendation that is none of
+                the options or an option that says it is recommended.
+        """
         if turn.asked:
             raise Refused(409, "Ask one question at a time; ask this one after the person answers.")
+        chosen = None if recommended is None else next((option for option in options if option.strip() == recommended.strip()), None)
+        if recommended is not None and chosen is None:
+            raise Refused(
+                400,
+                f"recommended has to be one of the options, written exactly as it is there: {' / '.join(options)}. "
+                "Ask again with the one you would choose.",
+            )
+        if any(RECOMMENDED_MARK in option.lower() for option in options):
+            raise Refused(
+                400,
+                "An option's text is only the option: take the words that say it is recommended out of it, and name "
+                "that option in recommended. Ask again.",
+            )
         turn.asked = True
-        turn.event("ask", {"question": question, "options": options})
+        turn.event("ask", {"question": question, "options": options, **({} if chosen is None else {"recommended": chosen})})
         return Result(
             "The question is with the person now, and this turn is over. Their answer is the next message you get.",
             "Asked",
@@ -1858,7 +2024,7 @@ class Agent:
         text = f"Generated {made}. {kept} The person sees the results in the conversation.\n{json.dumps(facts)}"
         return Result(
             [*pictures, {"type": "text", "text": text}] if pictures else text,
-            summary + (f", about ${cost:.2f}" if cost is not None else ""),
+            summary + ("" if cost is None else f", about ${cost:.2f}" if cost >= 0.01 else ", under $0.01"),
             media=media,
         )
 
@@ -1920,6 +2086,97 @@ class Agent:
             units["1000 token"] = video_kilotokens(resolution, aspect_ratio, duration_seconds)
         cost = generator.cost(endpoint, units)
         return self.generated("video", endpoint, media, target, output.get("seed"), cost, self.pictured(files) if look else None)
+
+    def tool_generate_audio(
+        self,
+        turn: Turn,
+        prompt: str,
+        kind: str,
+        lyrics: str | None = None,
+        instrumental: bool = False,
+        voice: str | None = None,
+        style: str | None = None,
+        seconds: float | None = None,
+        count: int = 1,
+        save_to: dict[str, Any] | None = None,
+    ) -> Result:
+        """Generate a song or an instrumental, a sound effect, or a spoken line, and show each take with a player.
+
+        What a kind does not take is refused, in words the model can act on,
+        before anything is paid for. The takes are that many calls of the
+        kind's model, run at once (`takes`); the ones that came back are kept
+        and shown, and one that did not is told with why.
+
+        Raises:
+            Refused: 400 for a piece of music that is given neither lyrics nor `instrumental` or both, for
+                what belongs to another kind, a description or a length its model does not take; and as
+                `save_target` and `require_generator` do.
+        """
+        generator = self.require_generator()
+        sung = bool(lyrics and lyrics.strip())
+        if kind == "music" and sung == bool(instrumental):
+            raise Refused(
+                400,
+                "A piece of music is sung or it is instrumental: give lyrics, each structure tag such as [verse] or "
+                "[chorus] on a line of its own, or instrumental: true, and not both.",
+            )
+        if kind != "music" and (sung or instrumental):
+            raise Refused(400, "lyrics and instrumental are for kind music.")
+        if kind != "speech" and (voice or style):
+            raise Refused(400, f"voice and style are for kind speech. Say how a {AUDIO_NOUNS[kind]} sounds in prompt.")
+        if kind == "speech" and seconds is not None:
+            raise Refused(400, "A spoken line is as long as its words: leave seconds out, and set the pace in style.")
+        if kind == "sound" and len(prompt) > SOUND_PROMPT_CHARACTERS:
+            raise Refused(400, f"A sound's description is at most {SOUND_PROMPT_CHARACTERS} characters; this one is {len(prompt)}.")
+        if seconds is not None and not AUDIO_SECONDS[kind][0] <= seconds <= AUDIO_SECONDS[kind][1]:
+            raise Refused(400, f"seconds is from {AUDIO_SECONDS[kind][0]:g} to {AUDIO_SECONDS[kind][1]:g} for kind {kind}.")
+        target = self.save_target(turn, save_to)
+        endpoint, arguments = audio_arguments(kind, prompt, lyrics if sung else None, voice, style, seconds)
+        outputs, failed = self.takes(generator, endpoint, arguments, count, turn.alive)
+        noun = INSTRUMENTAL_NOUN if instrumental else AUDIO_NOUNS[kind]
+        stem = ((target or {}).get("tag") or noun.replace(" ", "-")).lstrip("@")
+        target, media, _ = self.keep(turn, [output["audio"]["url"] for output in outputs], target, stem)
+        costs = [generator.cost(endpoint, audio_units(kind, prompt, output.get("duration") or seconds)) for output in outputs]
+        cost = round(sum(costs), 4) if all(one is not None for one in costs) else None
+        seeds = [output["seed"] for output in outputs if output.get("seed") is not None]
+        seed = seeds[0] if len(seeds) == 1 else seeds or None
+        result = self.generated(noun, endpoint, media, target, seed, cost, None)
+        if failed:
+            told = f"{len(failed)} of {count} takes did not come back, and nothing was kept of them: {failed[0]}"
+            result = Result(f"{result.content}\n{told}", f"{result.summary}; {len(failed)} failed", media=result.media)
+        return result
+
+    @staticmethod
+    def takes(
+        generator: Generator, endpoint: str, arguments: dict[str, Any], count: int, alive: Callable[[], bool]
+    ) -> tuple[list[dict[str, Any]], list[Exception]]:
+        """Run `count` generations of one input at once: fal's results, and why any take did not come back.
+
+        Each call of a sound model makes one file, so several takes are
+        several calls, and waiting for them one after another would multiply
+        the wait. A take that fails does not fail the ones that came back,
+        which are paid for.
+
+        Raises:
+            GenerationStopped: The turn was stopped; every take was canceled.
+            Exception: What the first take raised, where none came back.
+        """
+        with ThreadPoolExecutor(max_workers=count) as pool:
+            running = [pool.submit(generator.run, endpoint, arguments, alive, AUDIO_WAIT_SECONDS) for _ in range(count)]
+        outputs, failed = [], []
+        for take in running:
+            error = take.exception()
+            if isinstance(error, GenerationStopped):
+                raise error
+            if error is None:
+                outputs.append(take.result())
+            elif isinstance(error, Exception):
+                failed.append(error)
+            else:
+                raise error
+        if not outputs:
+            raise failed[0]
+        return outputs, failed
 
     # Engines
 
@@ -1999,18 +2256,25 @@ class Agent:
 
     # Previews
 
-    def show_preview(self, turn: Turn, engine_id: str, caption: str, files: list[Shown], compare: bool) -> None:
+    def show_preview(
+        self, turn: Turn, engine_id: str, caption: str, files: list[Shown], compare: bool, version: str | None = None
+    ) -> None:
         """Store a preview's files under the project's `previews/` folder and put its card in the conversation.
 
         The event keeps each file's path in the bucket, which a reading of the
         log signs (`Sessions.shown_events`); nothing is written to the library.
+        `version` marks what is shown as a version of the piece itself, by a
+        short label the event carries, which is how the page knows the latest
+        one from a step along the way.
         """
         items = []
         for shown in files:
             path = f"{turn.project['user_id']}/{turn.project_id}/{PREVIEWS}/{uuid.uuid4().hex[:12]}-{safe_name(shown.stored_as)}"
             self.store.upload(LIBRARY_BUCKET, path, shown.data, shown.content_type)
             items.append({**shown.item, "path": path})
-        turn.event("preview", {"engine_id": engine_id, "caption": caption, "items": items, "compare": compare})
+        data = {"engine_id": engine_id, "caption": caption, "items": items, "compare": compare}
+        label = " ".join((version or "").split())[:VERSION_CHARACTERS]
+        turn.event("preview", {**data, "version": label} if label else data)
 
     def tool_preview(
         self,
@@ -2022,6 +2286,7 @@ class Agent:
         kind: str | None = None,
         compare: bool = False,
         look: bool = False,
+        version: str | None = None,
     ) -> Result:
         """Show files of the project's folder on an engine as one work-in-progress card (`preview`).
 
@@ -2051,7 +2316,7 @@ class Agent:
         if compare and files[0].item["kind"] != files[1].item["kind"]:
             raise Refused(400, "A before and after pair is two files of one kind.")
         words = caption.strip()[:300]
-        self.show_preview(turn, engine_id, words, files, compare)
+        self.show_preview(turn, engine_id, words, files, compare, version)
         answer = {
             "shown": words,
             "files": [shown.facts for shown in files],
@@ -2197,6 +2462,7 @@ class Agent:
         waits: bool = False,
         media: list[dict[str, Any]] | None = None,
         height: int | None = None,
+        instant: bool = False,
     ) -> Result:
         """Show an interactive card (`ui`), checked against the catalog before any of its files is read (`genui.py`).
 
@@ -2206,7 +2472,9 @@ class Agent:
         check the card, so it is read from the entry or from the file's name first, and an
         engine's files are fetched only once the card is valid: a card that is refused costs no
         upload. The event keeps each file's path, which a reading of the log signs
-        (`Sessions.shown_events`). A card that waits ends the turn (`Result.ends_turn`).
+        (`Sessions.shown_events`). A card that waits ends the turn (`Result.ends_turn`). An
+        `instant` card has no lock-in button: the person's choice locks it, and comes back the
+        same way.
 
         Raises:
             Refused: 400 with what to fix for a card the catalog does not allow, 404 for a tag no
@@ -2240,7 +2508,7 @@ class Agent:
         try:
             data, inputs = genui.card(
                 catalog, uuid.uuid4().hex[:12], title, components, html, submit, waits, height,
-                {file["name"]: file["kind"] for file in files},
+                {file["name"]: file["kind"] for file in files}, instant,
             )
         except genui.Invalid as invalid:
             raise Refused(400, invalid.message) from None
@@ -2261,16 +2529,18 @@ class Agent:
                 self.sessions.launcher.exec(sandbox, f"rm -rf {shlex.quote(scratch)}", EXEC_SECONDS)
         turn.event("ui", {**data, "media": files})
         ends = bool(waits)
-        if data["submit"] is None:
+        # An instant card is locked by the choice itself, any other by its button
+        locks = "choose" if data.get("instant") else "lock it in"
+        if data["submit"] is None and not data.get("instant"):
             note = "The person sees the card in the conversation. It has no lock-in button, so nothing comes back from it."
         elif ends:
             note = (
-                "The person sees the card in the conversation. Your turn ends here: when they lock it in, their next "
+                f"The person sees the card in the conversation. Your turn ends here: when they {locks}, their next "
                 "message carries what they chose, and you go on from it."
             )
         else:
             note = (
-                "The person sees the card in the conversation and may lock it in whenever they like; what they chose then "
+                f"The person sees the card in the conversation and may {locks} whenever they like; what they chose then "
                 "arrives in a message of theirs. Go on meanwhile."
             )
         answer = {"shown": data["title"], "ui_id": data["ui_id"], "kind": data["kind"], "files": [file["name"] for file in files], "note": note}

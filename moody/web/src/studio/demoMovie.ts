@@ -20,19 +20,45 @@
  *    events of one `group`), which work at different speeds, change what they are doing as they
  *    go, and finish at different times. Each subagent's own tool calls and notes carry its
  *    `agent_id`, so they show inside its card; the references they generate arrive in the library
- *    as they are made. One of them fails a generation and resolves it. Then the agent sums up and,
- *    before starting FilmCraft, asks (`approval`): the turn waits for the answer, starts the engine
- *    or goes on without it, and ends with what it cost (`usage`).
+ *    as they are made. One of them fails a generation and resolves it. Then, before starting
+ *    FilmCraft, the agent asks (`approval`): the turn waits for the answer, starts the engine or
+ *    goes on without it, and ends on a report and what it cost (`usage`).
+ * 5. It runs a long job of its own, the first animation tests, which needs no engine, and ends on
+ *    a report too.
  *
- * No engine exists until that approval is given: planning, writing, and generating need none.
+ * A turn of many steps ends the way the contract asks ("a long job ends with a report"): its last
+ * message is organized under short headings, each a few bullets, the most important first.
+ *
+ * The long job spends what the account's limits for a turn allow. Where one is reached the turn
+ * stops at that step with an `error` that names the limit, and the next message goes on from
+ * there with both limits fresh, as the real loop does. With the demo's defaults the job fits in
+ * one turn; `/app/?demo=limit` opens the film with everything up to the job already said, on an
+ * account that set its spend for a turn low, so the job has stopped at it ({@link movieSoFar}).
+ *
+ * No engine exists until the approval is given: planning, writing, and generating need none.
  * The pictures are the site's own artwork.
  * @module
  */
-import type { AgentData, AgentInfo, Asset, Media, PlanItem, Project, TurnId } from '../lib/api';
+import type {
+  AgentData,
+  AgentInfo,
+  Asset,
+  Media,
+  PlanItem,
+  Project,
+  TurnId,
+  TurnLimit,
+  TurnLimits,
+  UserMessageData,
+} from '../lib/api';
 import { catalog, findApp, findTier, IDLE_SHUTDOWN_MINUTES } from '../lib/catalog';
+import { usd } from '../lib/format';
+import { describeAnswer, inputsOf, startState } from './ui/answer';
 import { EXAMPLES } from './ui/gallery/examples';
+import { readTree } from './ui/tree';
 import {
   asset,
+  MINUTE,
   SECOND,
   snapshot,
   still,
@@ -95,7 +121,7 @@ export function movieProject(now: number): Project {
     id: MOVIE_PROJECT,
     name: 'Untitled movie',
     discipline: 'media',
-    format: 'Movie',
+    format: 'Film & TV',
     pinned: false,
     created_at: time,
     updated_at: time,
@@ -209,7 +235,7 @@ function afterwards(turn: TurnId, start: number): Script {
     1.4,
     'text',
     `${turn}-a`,
-    'That is as far as this scene is scripted. In a real project I would generate the first animation tests now and check in with you before any decision that is yours.',
+    'That is as far as this scene is scripted. In a real project I would cut the tests into an animatic now and check in with you before any decision that is yours.',
   );
   line.add(2.4, { kind: 'usage', data: { input_tokens: 9120, output_tokens: 148, cost_usd: 0.05, seconds: 2.4, agents: 0 } });
   line.add(2.6, { kind: 'turn_end', data: {} });
@@ -251,6 +277,8 @@ function asking(stage: number, turn: TurnId, start: number): Script {
           'I have a script to paste',
           'Pitch me three ideas',
         ],
+        recommended:
+          'A young lamplighter and her lantern robot cross the drifting isles to relight the last lamp before the long night',
       },
     });
     ends = 6;
@@ -280,6 +308,7 @@ function asking(stage: number, turn: TurnId, start: number): Script {
           'Add her grandfather Theo, the tinkerer who built Wick',
           'Suggest a cast for me',
         ],
+        recommended: 'Iris, nineteen, the last lamplighter, and Wick, her lantern robot, who speaks in clicks',
       },
     });
     ends = 5.2;
@@ -305,6 +334,7 @@ function asking(stage: number, turn: TurnId, start: number): Script {
                 'Stop-motion felt and paper',
                 'Clean stylized 3D with soft light',
               ],
+              recommended: 'Cinematic and painterly: warm lamplight against violet dusk',
             },
           }
         : { kind: 'ui', data: STYLE_CARD },
@@ -355,8 +385,8 @@ const JOBS: readonly Pick<AgentData, 'name' | 'task' | 'activity' | 'detail'>[] 
 ];
 
 /**
- * The scene's fourth turn: pre-production handed to five subagents at once, the agent's summary,
- * and the approval before FilmCraft.
+ * The scene's fourth turn: pre-production handed to five subagents at once, the approval before
+ * FilmCraft, and the report the turn ends on.
  *
  * @param turn The turn.
  * @param start When it starts.
@@ -634,8 +664,35 @@ function delegating(turn: TurnId, start: number): Script {
     3.4,
     'text',
     `${turn}-a2`,
-    'Pre-production is in the library.\n\n- **Story.** Three acts, fourteen beats: the lamps fail, the crossing, the last lamp.\n- **Characters.** @iris and @wick, each with a reference.\n- **World.** @workshop-isle and @drifting-isles, in one palette: warm lamplight against violet dusk.\n\nNext I would generate the first animation tests and cut them into an animatic. The cut needs FilmCraft, which runs on a cloud machine billed by the minute, so starting it is yours to decide.',
+    'All five are done. Next come the first animation tests, and then the animatic they are cut into. The cut needs FilmCraft, which runs on a cloud machine billed by the minute, so starting it is yours to decide.',
   );
+  /**
+   * The report the turn ends on, once the person has decided about the engine.
+   *
+   * @param engine What became of FilmCraft, which is what the person just decided and so comes first.
+   * @param next What the agent does on the person's word.
+   * @returns The report.
+   */
+  const report = (engine: string, next: string): string =>
+    [
+      '### Done',
+      `- ${engine}`,
+      '- **Story.** The outline, in three acts and fourteen beats: the lamps fail, the crossing, the last lamp.',
+      '- **References.** Twelve kept. They agree that the lamps are the only saturated light in frame.',
+      '',
+      '### In the library now',
+      '- **Characters.** @iris and @wick, each with a reference. Wick’s first one came out with the lantern unlit and was painted again.',
+      '- **Environments.** @workshop-isle and @drifting-isles, in one palette: warm lamplight against violet dusk.',
+      '',
+      '### Yours to decide',
+      '- Whether @wick keeps to clicks until the end or says one word at the last lamp. The outline works both ways; I would keep the clicks.',
+      '',
+      '### What I need from you',
+      `- ${next}`,
+      '',
+      '### Not known yet',
+      '- How long the film runs. The outline reads as four to five minutes; the animatic will tell.',
+    ].join('\n');
   line.add(26.9, { kind: 'plan', data: { items: moviePlan(4) } });
 
   const tier = findTier(ENGINE_TIER);
@@ -657,16 +714,19 @@ function delegating(turn: TurnId, start: number): Script {
         if (decision === 'deny') {
           rest.write(
             0.8,
-            1.8,
+            3.2,
             'text',
             `${turn}-a3`,
-            'Nothing was started and nothing is billed. I will generate the animation tests first and keep them in the library; say the word when you want them cut in FilmCraft.',
+            report(
+              `**${app}** was not started, as you decided, and nothing is billed.`,
+              'A word to go on. I will generate the first animation tests, which need no engine, and keep them with the project’s files until you want them cut.',
+            ),
           );
-          rest.add(2.8, {
+          rest.add(4.2, {
             kind: 'usage',
-            data: { input_tokens: 48210, output_tokens: 6932, cost_usd: 0.84, seconds: spent(2.8), agents: cards.size },
+            data: { input_tokens: 48210, output_tokens: 7104, cost_usd: 0.85, seconds: spent(4.2), agents: cards.size },
           });
-          rest.add(3, { kind: 'turn_end', data: {} });
+          rest.add(4.4, { kind: 'turn_end', data: {} });
           return { events: rest.events };
         }
         const engine: Simulation = {
@@ -694,35 +754,302 @@ function delegating(turn: TurnId, start: number): Script {
         rest.add(16.6, { kind: 'screen', data: { engine_id: engine.id, stream: 'Desktop' } });
         rest.write(
           17,
-          1.8,
+          3.2,
           'text',
           `${turn}-a3`,
-          `${app} is up on the project’s folder, and your screen shows it. I will generate the first animation test of @iris and @wick on the workshop isle and bring it into the timeline.`,
+          report(
+            `**${app}** is running on a ${tier?.name ?? ENGINE_TIER} machine, open on the project’s folder, and your screen shows it. It costs ${tier?.credits_per_minute ?? 0} credits a minute and stops by itself after ${IDLE_SHUTDOWN_MINUTES} idle minutes.`,
+            'A word to go on. I will generate the first animation tests and bring them into the timeline.',
+          ),
         );
-        rest.add(19, {
+        rest.add(20.4, {
           kind: 'usage',
-          data: { input_tokens: 51870, output_tokens: 7214, cost_usd: 0.91, seconds: spent(19), agents: cards.size },
+          data: { input_tokens: 51870, output_tokens: 7386, cost_usd: 0.92, seconds: spent(20.4), agents: cards.size },
         });
-        rest.add(19.2, { kind: 'turn_end', data: {} });
+        rest.add(20.6, { kind: 'turn_end', data: {} });
         return { events: rest.events, engines: [engine] };
       },
     },
   };
 }
 
+/** One step of the scene's long job: a call of a tool, and what the model's part of it takes. */
+interface JobStep {
+  /** The tool. */
+  tool: string;
+  /** What the call is, as its card says. */
+  title: string;
+  /** What the agent is doing meanwhile. */
+  activity: string;
+  /** What the call came to. */
+  summary: string;
+  /** How long the call takes, in seconds. */
+  took: number;
+  /** What the model costs for the step, in US dollars. */
+  cost: number;
+  /** The tokens the model reads for the step. */
+  input: number;
+  /** The tokens it writes. */
+  output: number;
+}
+
+/** The scene's long job, the first animation tests, as the steps it takes. None needs an engine. */
+const TESTS: readonly JobStep[] = [
+  {
+    tool: 'github_read',
+    title: 'Read act one of the outline',
+    activity: 'analyzing',
+    summary: '5 beats, 4 of them with movement worth testing',
+    took: 1.2,
+    cost: 0.21,
+    input: 11840,
+    output: 236,
+  },
+  {
+    tool: 'github_save',
+    title: 'Prompts for four tests',
+    activity: 'focused',
+    summary: 'tests.md · 4 shots · 6 s each',
+    took: 1.5,
+    cost: 0.27,
+    input: 12910,
+    output: 904,
+  },
+  {
+    tool: 'generate_video',
+    title: 'Test 1: @iris lights the workshop lamp',
+    activity: 'creating',
+    summary: '6 s · the flame catches on the second strike',
+    took: 2.6,
+    cost: 0.29,
+    input: 14230,
+    output: 412,
+  },
+  {
+    tool: 'generate_video',
+    title: 'Test 2: @wick wakes',
+    activity: 'creating',
+    summary: '6 s · his eyes warm before he moves, on twos',
+    took: 2.4,
+    cost: 0.28,
+    input: 14870,
+    output: 388,
+  },
+  {
+    tool: 'generate_video',
+    title: 'Test 3: the far lamps go out',
+    activity: 'creating',
+    summary: '6 s · one isle at a time, left to right',
+    took: 2.5,
+    cost: 0.31,
+    input: 15420,
+    output: 431,
+  },
+  {
+    tool: 'generate_video',
+    title: 'Test 4: the rope bridge in the wind',
+    activity: 'creating',
+    summary: '6 s · the fog reads blue, not violet',
+    took: 2.3,
+    cost: 0.3,
+    input: 15990,
+    output: 405,
+  },
+  {
+    tool: 'library_look',
+    title: 'Compare the tests with the style frames',
+    activity: 'analyzing',
+    summary: 'Tests 1 to 3 hold the palette; test 4 drifts blue',
+    took: 1.6,
+    cost: 0.34,
+    input: 19650,
+    output: 512,
+  },
+  {
+    tool: 'github_save',
+    title: 'Notes on each test',
+    activity: 'processing',
+    summary: 'tests.md · what worked, and what to change',
+    took: 1.1,
+    cost: 0.22,
+    input: 16480,
+    output: 730,
+  },
+];
+
+/** The report the long job ends on. */
+const TESTS_REPORT_TEXT = [
+  '### Done',
+  '- Four animation tests from act one, six seconds each: @iris lighting the workshop lamp, @wick waking, the far lamps going out, and the rope bridge in the wind.',
+  '- Each checked against the style frames. Tests 1 to 3 hold the palette; test 4 drifts blue in the fog.',
+  '',
+  '### What there is now',
+  '- The four clips, in `tests/` among the project’s files.',
+  '- `tests.md`, with each test’s prompt and a note on what worked.',
+  '',
+  '### Yours to decide',
+  '- **The motion.** Test 2 moves on twos, like stop-motion; the others are smooth. I would take test 2’s rhythm for the whole film.',
+  '- **Test 4.** Generate it again with the violet fog, or leave the bridge out of the tests. I would generate it again.',
+  '',
+  '### What I need from you',
+  '- Your pick on the motion before I generate more, since every later shot follows it.',
+  '',
+  '### Not known yet',
+  '- Whether the glow of @wick’s lantern holds across a cut. Four tests cannot show it; the animatic will.',
+].join('\n');
+
+/** How the call ids of the long job's steps start, by which a later turn counts the steps done. */
+const TEST_CALL = 'animation-test-';
+
+/** How the block of the long job's report is named, by which a later turn knows the job is over. */
+const TESTS_REPORT = 'animation-tests-report';
+
+/**
+ * How far the long job has come.
+ *
+ * @param history What was written in the project so far.
+ * @returns How many of its steps are done, and whether its report is written.
+ */
+function testsProgress(history: readonly Scheduled[]): { done: number; reported: boolean } {
+  let done = 0;
+  let reported = false;
+  for (const { event } of history) {
+    if (event.kind === 'tool_end' && event.data.ok && event.data.call_id.startsWith(TEST_CALL)) {
+      done += 1;
+    } else if (event.kind === 'text' && event.data.partial !== true && event.data.block?.startsWith(TESTS_REPORT) === true) {
+      reported = true;
+    }
+  }
+  return { done, reported };
+}
+
+/**
+ * A turn of the scene's long job: the first animation tests, from the step the turns before it
+ * reached, for as long as the account's limits allow.
+ *
+ * A limit is counted from zero in each turn. The steps are counted before one starts, so a turn
+ * takes no more of them than its limit; the spend is known only once a step is paid for, so the
+ * turn stops after the step that reached it. Either way the turn ends with an `error` that names
+ * the limit, in the words the control plane uses, and the next turn goes on from the next step.
+ * A turn that reaches the end of the job writes the report.
+ *
+ * @param turn The turn.
+ * @param start When it starts.
+ * @param limits The account's limits for a turn.
+ * @param done How many of the job's steps earlier turns finished.
+ * @returns The turn.
+ */
+function animating(turn: TurnId, start: number, limits: TurnLimits, done: number): Script {
+  const line = timeline(turn, start);
+  let at = 2.2;
+  let taken = 0;
+  let cost = 0.05;
+  let input = 9240;
+  let output = 61;
+  /**
+   * Ends the turn on what it cost.
+   *
+   * @returns The turn.
+   */
+  const end = (): Script => {
+    line.add(at + 0.2, {
+      kind: 'usage',
+      data: {
+        input_tokens: input,
+        output_tokens: output,
+        cost_usd: Math.round(cost * 100) / 100,
+        seconds: Math.round(at),
+        agents: 0,
+      },
+    });
+    line.add(at + 0.4, { kind: 'turn_end', data: {} });
+    return { events: line.events };
+  };
+  /**
+   * Stops the turn at one of the account's limits.
+   *
+   * @param limit The limit reached.
+   * @returns The turn.
+   */
+  const stop = (limit: TurnLimit): Script => {
+    line.add(at, {
+      kind: 'error',
+      data: {
+        message: `This turn reached your ${
+          limit === 'budget'
+            ? `spending limit of ${usd(limits.turn_budget_usd)}`
+            : `limit of ${limits.turn_limit} ${limits.turn_limit === 1 ? 'step' : 'steps'}`
+        } and stopped. You can change the limit in your settings. Send a message to go on.`,
+        limit,
+      },
+    });
+    return end();
+  };
+  const outOfSteps = (): boolean => taken >= limits.turn_limit;
+
+  line.write(
+    0.6,
+    1.2,
+    'text',
+    `${turn}-a`,
+    done === 0
+      ? 'Starting the first animation tests: four shots from act one, six seconds each, generated through fal.'
+      : `Going on with the animation tests from where the last turn stopped: ${done} of ${TESTS.length} steps are done.`,
+  );
+  for (const [index, step] of TESTS.entries()) {
+    if (index < done) {
+      continue;
+    }
+    if (outOfSteps()) {
+      return stop('steps');
+    }
+    const callId = `${TEST_CALL}${index + 1}-${turn}`;
+    line.add(at, {
+      kind: 'tool_start',
+      data: { call_id: callId, tool: step.tool, title: step.title, activity: step.activity },
+    });
+    at += step.took;
+    line.add(at, { kind: 'tool_end', data: { call_id: callId, ok: true, summary: step.summary } });
+    at += 0.4;
+    taken += 1;
+    cost += step.cost;
+    input += step.input;
+    output += step.output;
+    if (cost >= limits.turn_budget_usd) {
+      return stop('budget');
+    }
+  }
+  if (outOfSteps()) {
+    return stop('steps');
+  }
+  line.add(at, { kind: 'plan', data: { items: moviePlan(5) } });
+  line.write(at + 0.2, 3.2, 'text', `${TESTS_REPORT}-${turn}`, TESTS_REPORT_TEXT);
+  at += 3.6;
+  cost += 0.12;
+  input += 17200;
+  output += 348;
+  return end();
+}
+
 /**
  * What the scene's agent answers a message with.
  *
- * @param said How many messages the person had sent before this one.
+ * @param history What was written in the project before the message.
  * @param turn The turn the message starts.
  * @param start When it starts.
+ * @param limits The account's limits for a turn.
  * @returns The turn.
  */
-export function movieTurn(said: number, turn: TurnId, start: number): Script {
+export function movieTurn(history: readonly Scheduled[], turn: TurnId, start: number, limits: TurnLimits): Script {
+  const said = history.filter((scheduled) => scheduled.event.kind === 'user_message').length;
   if (said < 3) {
     return asking(said, turn, start);
   }
-  return said === 3 ? delegating(turn, start) : afterwards(turn, start);
+  if (said === 3) {
+    return delegating(turn, start);
+  }
+  const tests = testsProgress(history);
+  return tests.reported ? afterwards(turn, start) : animating(turn, start, limits, tests.done);
 }
 
 /**
@@ -733,11 +1060,82 @@ export function movieTurn(said: number, turn: TurnId, start: number): Script {
  */
 export function movieOpening(now: number): Script {
   const turn = 'movie-1';
-  const answer = movieTurn(0, turn, now);
+  const answer = asking(0, turn, now);
   return {
     ...answer,
     events: [{ at: now, event: { turn_id: turn, kind: 'user_message', data: { text: OPENING_MESSAGE } } }, ...answer.events],
   };
+}
+
+/**
+ * The scene with everything up to its long job already said (`/app/?demo=limit`): the person
+ * agreed with each recommendation, locked the style card in as it opened, allowed the engine, and
+ * asked for the animation tests, which ran as far as the account's limits let them.
+ *
+ * @param now The time the demo opens at.
+ * @param limits The account's limits for a turn.
+ * @returns Every turn so far, all of it in the past, and the engine the fourth started.
+ */
+export function movieSoFar(now: number, limits: TurnLimits): Script {
+  const events: Scheduled[] = [];
+  const engines: Simulation[] = [];
+  let turns = 0;
+  /**
+   * Adds a turn: a message of the person's, and the agent's answer to it. A turn that asks before
+   * a tool is allowed a few seconds later.
+   *
+   * @param ago How long before now the turn started, in milliseconds.
+   * @param data The message.
+   */
+  const say = (ago: number, data: UserMessageData): void => {
+    turns += 1;
+    const turn = `movie-${turns}`;
+    const start = now - ago;
+    const answer = movieTurn(events, turn, start, limits);
+    events.push({ at: start, event: { turn_id: turn, kind: 'user_message', data } }, ...answer.events);
+    const { pause } = answer;
+    if (pause !== undefined) {
+      const answered = pause.at + 6 * SECOND;
+      const rest = pause.resume('once', answered);
+      events.push(
+        { at: pause.at, event: { turn_id: turn, kind: 'approval', data: pause.approval } },
+        {
+          at: answered,
+          event: {
+            turn_id: turn,
+            kind: 'approval_result',
+            data: { approval_id: pause.approval.approval_id, decision: 'once' },
+          },
+        },
+        ...rest.events,
+      );
+      engines.push(...(rest.engines ?? []));
+    }
+  };
+  /**
+   * What the person answers the question the last turn ended on: the agent's own recommendation,
+   * or the card as it opened.
+   *
+   * @returns The message.
+   */
+  const agree = (): UserMessageData => {
+    const asked = events.findLast(({ event }) => event.kind === 'ask' || event.kind === 'ui')?.event;
+    if (asked?.kind === 'ask') {
+      return { text: asked.data.recommended ?? asked.data.options[0] ?? 'Go on.' };
+    }
+    if (asked?.kind === 'ui') {
+      const root = readTree(asked.data.spec);
+      const value = root === null ? {} : startState(inputsOf(root));
+      return { text: describeAnswer(asked.data, value), ui: { ui_id: asked.data.ui_id, value } };
+    }
+    return { text: 'Go on.' };
+  };
+  say(11 * MINUTE, { text: OPENING_MESSAGE });
+  say(10 * MINUTE, agree());
+  say(9 * MINUTE, agree());
+  say(8 * MINUTE, agree());
+  say(6 * MINUTE, { text: 'Go on with the animation tests.' });
+  return { events, engines };
 }
 
 /** The disciplines whose projects have the film's subagents and its skill. */

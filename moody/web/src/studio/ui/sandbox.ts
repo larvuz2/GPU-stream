@@ -61,12 +61,19 @@ export const THEME: Readonly<Record<string, string>> = {
   '--moody-mono': '--font-mono',
 };
 
+/**
+ * The clear band around a card's document, in pixels: room for a focus ring on a control that
+ * sits at the document's edge, which the frame would otherwise cut off. The page widens the frame
+ * by as much on every side (`HtmlCard.tsx`), so the document still lines up with the card.
+ */
+export const FRAME_GUTTER = 4;
+
 /** The sheet under a card's own styles: the conversation's type, and its look for native controls. */
 const BASE_STYLE = `
 :root{color-scheme:dark}
 *,*::before,*::after{box-sizing:border-box}
 html{background:transparent;color:var(--moody-fg);font-family:var(--moody-font);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
-body{margin:0}
+body{margin:0;padding:${FRAME_GUTTER}px}
 canvas,img,svg,video{max-width:100%}
 button{height:2.1rem;padding:0 .8rem;border:1px solid var(--moody-line-strong);border-radius:.5rem;background:var(--moody-raised);color:var(--moody-fg);font:inherit;font-weight:600;cursor:pointer}
 button:hover{border-color:var(--moody-muted)}

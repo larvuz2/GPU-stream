@@ -307,7 +307,12 @@ def opening(real: bool, sent: float) -> dict[str, Any]:
             suite.AGENT,
             reply(
                 say(f"I will remember {WORD}."),
-                use("ask_user", question="Which color?", options=["Blue", "Red"]),
+                use(
+                    "ask_user",
+                    question="Which color?",
+                    options=["Blue", "Red"],
+                    recommended="Blue",
+                ),
             ),
         )
         log = trial.turn(client, project_id, "question")

@@ -15,8 +15,13 @@
  * - It takes messages only from the card's own window, the shell's one child frame, and only
  *   those that carry this card's id.
  * - `state` is kept as the card's value, which the lock-in button sends; `submit` locks in at
- *   once, but only while the card can be answered and the person is in it (the frame holds the
- *   focus), so a document cannot answer for someone who never touched it.
+ *   once, but only on a card that has a lock-in button, while it can be answered, and while the
+ *   person is in it (the frame holds the focus), so a document cannot answer for someone who
+ *   never touched it.
+ * - A value the document reports before the person has done anything in it is how the card
+ *   opened. Once a value reported after that differs, the foot offers "Back to default", which
+ *   builds the frame anew: the document's own first state is the default, and the page cannot
+ *   reach into the document to set one.
  * - `load` is answered with one of the card's own files as bytes, fetched here, since the frame
  *   cannot fetch. A name the card does not carry is refused.
  * - `height` sizes the frame to the document, within the catalog's limits.
@@ -35,9 +40,18 @@ import { isNumber, isRecord, isString } from '../../lib/narrow';
 import { summarizeValue } from './answer';
 import { limit } from './catalog';
 import { LockBar } from './LockBar';
-import { cardDocument, mediaAddresses, policy, readPageFont, shellDocument, themeDeclarations, type FrameFont } from './sandbox';
+import {
+  cardDocument,
+  FRAME_GUTTER,
+  mediaAddresses,
+  policy,
+  readPageFont,
+  shellDocument,
+  themeDeclarations,
+  type FrameFont,
+} from './sandbox';
 import type { UiCardProps } from './UiCard';
-import { clamp } from './values';
+import { clamp, sameValue } from './values';
 
 /** How long the frame waits for the page's font before it is built without it. */
 const FONT_WAIT_MS = 1200;
@@ -73,8 +87,13 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
   const [font, setFont] = useState<FrameFont | null | undefined>(undefined);
   const [height, setHeight] = useState(() => clamp(ui.height ?? limit('height_default', 360), least, most));
   const [value, setValue] = useState<unknown>(first.locked?.value ?? null);
+  // The value the card opened with: the last one its document reported before the person did anything in it.
+  const [opened, setOpened] = useState<unknown>(null);
+  const [touched, setTouched] = useState(false);
   const [reported, setReported] = useState(false);
   const [gone, setGone] = useState(false);
+  // Which building of the frame this is: going back to the default builds it anew.
+  const [run, setRun] = useState(0);
   const html = ui.html ?? '';
 
   useEffect(() => {
@@ -109,10 +128,10 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
   }, [html, id, first, font, ui.title]);
 
   const files = useRef(ui.media);
-  const answerable = useRef({ live, open: locked === null, onSubmit });
+  const answerable = useRef({ live: live && ui.submit !== null, open: locked === null, onSubmit });
   useEffect(() => {
     files.current = ui.media;
-    answerable.current = { live, open: locked === null, onSubmit };
+    answerable.current = { live: live && ui.submit !== null, open: locked === null, onSubmit };
   });
 
   useEffect(() => {
@@ -154,15 +173,19 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
       if (message.type === 'height' && isNumber(message.height)) {
         // The document may be shorter than the least a card may ask to start at, down to a line of text.
         setHeight(clamp(message.height, limit('frame_min', 40), most));
-      } else if (message.type === 'state') {
-        setValue(message.value);
+      } else if (message.type === 'state' || message.type === 'submit') {
+        const told: unknown = message.value;
+        setValue(told);
         setReported(true);
-      } else if (message.type === 'submit') {
-        setValue(message.value);
-        setReported(true);
+        // What the document says before the person has done anything in it is how the card opened.
+        if (message.touched === true) {
+          setTouched(true);
+        } else {
+          setOpened(told);
+        }
         const { live: canAnswer, open, onSubmit: submit } = answerable.current;
-        if (canAnswer && open && document.activeElement === frame.current) {
-          submit(message.value);
+        if (message.type === 'submit' && canAnswer && open && document.activeElement === frame.current) {
+          submit(told);
         }
       } else if (message.type === 'load' && isString(message.name)) {
         void load(message.name, message.request);
@@ -186,6 +209,8 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
     }
   }, [nowLocked, lockedValue, id]);
 
+  // The frame reaches past the card's content by the document's own gutter, so the two line up.
+  const box = { height, width: `calc(100% + ${FRAME_GUTTER * 2}px)`, margin: -FRAME_GUTTER };
   return (
     <>
       <div className="ui-body">
@@ -194,15 +219,16 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
             This card stopped: its document tried to leave its frame, which a card may not do. Nothing was sent.
           </p>
         ) : srcdoc === null ? (
-          <div className="ui-html-frame" style={{ height }} role="status" aria-label={`Opening ${ui.title}`} />
+          <div className="ui-html-frame" style={box} role="status" aria-label={`Opening ${ui.title}`} />
         ) : (
           <iframe
+            key={run}
             ref={frame}
             title={ui.title}
             className="ui-html-frame"
             sandbox="allow-scripts"
             srcDoc={srcdoc}
-            style={{ height }}
+            style={box}
             inert={locked !== null}
           />
         )}
@@ -213,6 +239,14 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
         live={live}
         blocked={gone ? 'This card stopped, so there is nothing to lock in.' : reported || value !== null ? null : 'Change something in the card first.'}
         summary={locked === null ? [] : summarizeValue(locked.value)}
+        changed={locked === null && !gone && touched && !sameValue(value, opened)}
+        onDefault={() => {
+          setValue(null);
+          setOpened(null);
+          setTouched(false);
+          setReported(false);
+          setRun((count) => count + 1);
+        }}
         onLock={() => {
           onSubmit(value);
         }}

@@ -38,9 +38,11 @@ engines' work on the same project folder: see [Hand-offs](#hand-offs).
 
 ## The loop: propose, decide, execute
 
-1. **Propose.** Two to four options, your recommendation first and marked "(recommended)", each
+1. **Propose.** Two to four options, your recommendation first, each
    with one line of why. Say what it costs in engine time when it is more than a few minutes.
-2. **Ask.** `ask_user(question, options)` ends your turn. One decision per question; the last
+2. **Ask.** `ask_user(question, options, recommended)` ends your turn. `recommended` is the
+   option you would choose, in its own words: the page marks it, so no option's text says it is
+   recommended. One decision per question; the last
    option is a way out ("Something else"). Never ask a question you can answer yourself: track
    layout, codecs, file names, and command details are yours to decide and report.
 3. **Execute** exactly what was chosen, and read the result back (`sequence.inspect`).
@@ -102,12 +104,15 @@ Color, Titles and captions, Delivery.
 
 The recipes for each stage, mapped from Premiere practice, are in editing.md.
 
-| Format | Sequence | Frame rate | Delivery |
+| Kind | Sequence | Frame rate | Delivery |
 |---|---|---|---|
-| Movie (short) | 1920x1080 | 24 | YouTube 1080p, ProRes 422 HQ master |
-| Commercial | one per aspect: 16:9, 9:16, 1:1 | 24 or 30 | per platform, -14 LUFS for social |
-| Episode | 1920x1080 | 24 | YouTube 1080p, ProRes master |
-| Vertical drama | 1080x1920 | 24 or 30 | TikTok, Reels, Shorts presets (-14 LUFS) |
+| Film & TV, a short film | 1920x1080 | 24 | YouTube 1080p, ProRes 422 HQ master |
+| Film & TV, an episode | 1920x1080 | 24 | YouTube 1080p, ProRes master |
+| Vertical Shows | 1080x1920 | 24 or 30 | TikTok, Reels, Shorts presets (-14 LUFS) |
+| Commercials | one per aspect: 16:9, 9:16, 1:1 | 24 or 30 | per platform, -14 LUFS for social |
+
+A music video takes the row of the frame it was shot in, with its track as the sound the cut is
+made to.
 
 A self-contained stage (an assembly of selected takes, a set of exports) can be handed to the
 editor's operator subagent once the engine runs: give it the engine's id, the tags in order, the

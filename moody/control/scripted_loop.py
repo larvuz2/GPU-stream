@@ -259,6 +259,14 @@ class ScriptedClient:
             if self.options.max_turns and self.turns >= self.options.max_turns:
                 subtype, terminal, failed = "error_max_turns", "max_turns", True
                 break
+            # The loop runs the calls of the answer that reached the budget, then asks no more
+            if self.options.max_budget_usd and self.cost >= self.options.max_budget_usd:
+                subtype, terminal, failed = (
+                    "error_max_budget_usd",
+                    "budget_exhausted",
+                    True,
+                )
+                break
             reply, message_id = self.ask(self.conversation.messages, None)
             if reply.error:
                 yield AssistantMessage(

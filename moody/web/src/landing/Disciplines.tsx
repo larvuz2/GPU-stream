@@ -24,6 +24,7 @@
 import { ArrowRight, ArrowUpRight } from 'lucide-react';
 import { ArtImage } from '../components/Art';
 import { DisciplineIcon } from '../components/DisciplineIcon';
+import { FormatLine } from '../components/FormatLine';
 import { MoodyFace } from '../components/Moody';
 import { catalog, isAvailable, type Discipline } from '../lib/catalog';
 import { cx } from '../lib/cx';
@@ -150,7 +151,9 @@ function DisciplineCard({ discipline, featured }: DisciplineCardProps) {
             </ul>
           </>
         ) : (
-          <p className="mt-1 text-xs text-faint">{discipline.formats.join(' · ')}</p>
+          <p className="mt-1 text-xs text-faint">
+            <FormatLine formats={discipline.formats} />
+          </p>
         )}
         <ul className="mt-4 flex flex-wrap gap-1.5" aria-label="Engines">
           {engines.map((app) => (
