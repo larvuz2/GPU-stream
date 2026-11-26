@@ -541,9 +541,19 @@ the conversation itself.
   input takes a file from the person into the project's library and answers
   with the entry it made (`{tag, name, kind}`).
 - **Sound is generated like pictures.** `generate_audio(prompt, kind:
-  "music" | "sound", lyrics?, instrumental?, seconds?, count?, save_to?)`
-  makes a song, an instrumental, or a sound effect through fal, shows each
-  result with a player, and keeps it in the library where `save_to` says.
+  "music" | "sound" | "speech", lyrics?, instrumental?, voice?, style?,
+  seconds?, count?, save_to?)` makes a song, an instrumental, a sound effect,
+  or a spoken line through fal, shows each result with a player, and keeps it
+  in the library where `save_to` says.
+- **Video is also edited by code.** The Cut Room engine (`cutroom`) is a
+  machine with no application to click: FFmpeg, speech-to-text with word
+  timings, voice mastering, captions, and the scripts that find the moments
+  in footage, cut vertical clips and horizontal explainers, lay narration,
+  music, and titles, and check the result. The agent drives it with
+  `engine_exec`, by the recipes of its skill, and shows each cut with
+  `preview`. It is the default way a Social Media or an Education video is
+  made, as FilmCraft's timeline is for Film & TV; a default, which the agent
+  leaves when the work or the person calls for something else.
 - **The latest version is always at hand.** `preview` takes an optional
   `version`, a short label ("Rough cut", "v3") that marks what it shows as a
   version of the piece itself, and the event carries it. The page's right
