@@ -13,9 +13,9 @@ The app is three panes, the layout of a coding agent's workspace:
 
 | Pane | Holds |
 | --- | --- |
-| Left sidebar | New project, **Create** (the short list of things to start, which is `catalog.json`'s `shortcuts`: each starts a project of a discipline, with a format where it means one, and one that is not available yet shows what is coming instead), **Pinned** and **Recent** projects with search opened from the Recent row, the account (credits, turn limits, Connect Claude, sign out) |
+| Left sidebar | New project, **Create** (the short list of things to start, which is `catalog.json`'s `shortcuts`: each starts a project of a discipline, with a format where it means one, and one that is not available yet shows what is coming instead), **Pinned** and **Recent** projects with search opened from the Recent row, the account (**Settings**, the balance, sign out; Settings is a dialog of tabs: Profile, Billing, Agent, Video editing, Connections, API keys) |
 | Center | The project's conversation with the agent: messages, tool activity, the agent's questions as choices, generated images and videos inline, the composer |
-| Right pane | Modular panels the project shows as it needs them: **Screen** (the live stream of an engine), **Environment** (the engines running, start and stop, **Connect GitHub**, and, for Unreal Engine, **Connect Epic**), **Plan** (the agent's tasks and their state), **Library** (the project's characters, environments, props, products, or whatever sections the project has) |
+| Right pane | Modular panels the project shows as it needs them, each folded and unfolded by a quiet arrow: **Screen** (the live stream of an engine), **Latest** (the newest version of the piece, to play, to open full screen, and to download, with the versions before it), **Environment** (the engines running, start and stop, **Connect GitHub**, and, for Unreal Engine, **Connect Epic**), **Plan** (the agent's tasks and their state), **Library** (the project's characters, environments, props, products, or whatever sections the project has) |
 
 Clicking the screen rearranges the panes: the stream becomes the largest area,
 above the conversation, which stays visible below it. The library's sections are
@@ -589,8 +589,10 @@ the conversation itself.
   version of the piece itself, and the event carries it, trimmed and at most
   forty characters; a preview without one has no `version`. The page's right
   pane has a **Latest** module that plays the newest version (failing one,
-  the newest video or sound the session showed), full screen on request, and
-  lists the versions before it.
+  the newest video or sound the session showed), full screen on request,
+  hands its file to the person to keep, and lists the versions before it. The
+  file is handed over by the address the control plane signed with `download`
+  added, which the storage serves as an attachment under the file's name.
 - **Every module of the right pane folds**, and so does each section inside
   Environment, by a quiet arrow that shows on hover and focus.
 

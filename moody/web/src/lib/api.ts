@@ -362,6 +362,25 @@ export interface Media {
   name?: string;
 }
 
+/**
+ * The address that hands a media file to the person as a file to keep.
+ *
+ * A link's own `download` attribute saves only a file of the page's origin, which a signed
+ * address is not. The storage that signs the address serves the file as an attachment where the
+ * address carries `download`, under the name given there or under the file's own. An address
+ * that is not a full one (a file the page itself serves or holds) is returned as it is, and the
+ * link's attribute does the rest.
+ *
+ * @param media The file.
+ * @returns Its address, asking to be saved under `media.name` where it has one.
+ */
+export function downloadAddress(media: Media): string {
+  if (!/^https?:\/\//i.test(media.url)) {
+    return media.url;
+  }
+  return `${media.url}${media.url.includes('?') ? '&' : '?'}download=${encodeURIComponent(media.name ?? '')}`;
+}
+
 /** An entry of a project's library: a character, an environment, a prop, a product, a shot. */
 export interface Asset {
   /** The asset's identifier. */

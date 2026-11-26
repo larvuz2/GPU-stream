@@ -17,7 +17,7 @@
  */
 import { isRecord } from '../../lib/narrow';
 import { COMPONENTS } from './registry';
-import { flag, holds, idOf, readTree, show, text, walk, type UiData, type UiNode, type UiState } from './tree';
+import { flag, holds, idOf, instantOf, readTree, show, text, walk, type UiData, type UiNode, type UiState } from './tree';
 import { isEmpty, sameValue } from './values';
 
 /** One input's value, in words. */
@@ -181,14 +181,22 @@ export function summarizeValue(value: unknown): AnswerLine[] {
 /**
  * A locked-in card as one sentence, for the message that carries its answer.
  *
+ * An instant card is a question answered by one press, so its sentence is the choice alone, as
+ * the person would have said it; naming the card and its input would repeat the question above.
+ *
  * @param ui The card.
  * @param value What was locked in.
- * @returns Words such as "Locked in The look of shot 3: Warmth 20, Grain 12."
+ * @returns Words such as "Locked in The look of shot 3: Warmth 20, Grain 12.", or "Film & TV." for
+ *   an instant card.
  */
 export function describeAnswer(ui: UiData, value: unknown): string {
   const root = ui.kind === 'components' ? readTree(ui.spec) : null;
   const lines =
     root !== null && isRecord(value) ? summarize(root, inputsOf(root), value) : summarizeValue(value);
+  const only = lines.length === 1 ? lines[0] : undefined;
+  if (instantOf(ui) && only !== undefined) {
+    return `${only.words}.`;
+  }
   const said = lines.map((line) => `${line.label} ${line.words}`).join(', ');
   return said === '' ? `Locked in ${ui.title}.` : `Locked in ${ui.title}: ${said}.`;
 }

@@ -11,8 +11,9 @@
  * It plays the newest version the session showed and names it (`versions` in `transcript.ts`:
  * the previews the agent called a version, or failing one the newest video or sound). The
  * versions before it are listed under it, each one press away: the one pressed plays in the
- * newest one's place, until the person goes back or a newer version arrives. A second control
- * leads to where the version was shown in the conversation.
+ * newest one's place, until the person goes back or a newer version arrives. Beside its name,
+ * one control leads to where the version was shown in the conversation and one hands its file to
+ * the person to keep ({@link downloadAddress}).
  *
  * Full screen is the browser's own, asked of the player's frame: a video or a picture fills the
  * screen, and a sound, which has nothing to fill it with, is shown under the version's name and
@@ -21,8 +22,8 @@
  * @module
  */
 import { useRef, useState } from 'react';
-import { AudioLines, Film, Image, Maximize2, MessageSquare, type LucideIcon } from 'lucide-react';
-import type { Media } from '../lib/api';
+import { AudioLines, Download, Film, Image, Maximize2, MessageSquare, type LucideIcon } from 'lucide-react';
+import { downloadAddress, type Media } from '../lib/api';
 import { MediaView } from './MediaView';
 import type { Version } from './transcript';
 
@@ -92,6 +93,15 @@ export function LatestBody({ versions, onShow }: LatestBodyProps) {
         >
           <MessageSquare aria-hidden="true" />
         </button>
+        <a
+          className="icon-btn icon-btn-sm"
+          href={downloadAddress(playing.media)}
+          download={playing.media.name ?? ''}
+          aria-label="Download"
+          title="Download"
+        >
+          <Download aria-hidden="true" />
+        </a>
         {document.fullscreenEnabled ? (
           <button
             type="button"
