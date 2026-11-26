@@ -61,7 +61,7 @@ import { MoodyEyes } from '../components/MoodyEyes';
 import type { ApprovalDecision, Asset, PlanItem, Project, Session, TurnLimit, UiData } from '../lib/api';
 import { findApp, findTier } from '../lib/catalog';
 import { cx } from '../lib/cx';
-import { price, spanText, tokenCount } from '../lib/format';
+import { midSentence, price, spanText, tokenCount } from '../lib/format';
 import { showActivity } from './activity';
 import { AgentsBlock } from './AgentsBlock';
 import { ApprovalCard } from './ApprovalCard';
@@ -502,7 +502,8 @@ function Welcome({ project, canSend, onSuggest }: WelcomeProps) {
       </span>
       <h2 className="display mt-5 text-2xl sm:text-3xl">{project.name}</h2>
       <p className="lede mt-2 max-w-md text-sm">
-        A {project.format.toLowerCase()} in {disciplineName(project.discipline)}. Bring what you have, or start from an
+        {/^[aeiou]/i.test(project.format) ? 'An' : 'A'} {midSentence(project.format)} in{' '}
+        {disciplineName(project.discipline)}. Bring what you have, or start from an
         idea, and the agent builds it with you, asking at every decision that is yours.
       </p>
       <ul className="mt-7 grid grid-cols-1 w-full max-w-md gap-2">

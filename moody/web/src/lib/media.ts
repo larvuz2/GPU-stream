@@ -55,6 +55,16 @@ export function appImage(appId: string): string {
 }
 
 /**
+ * A picture the catalog names by its file, such as a card of a shortcut's preview, 3:2.
+ *
+ * @param file The file's name under the site's media.
+ * @returns The address the image is served from.
+ */
+export function catalogImage(file: string): string {
+  return `/media/${encodeURIComponent(file)}`;
+}
+
+/**
  * The art of a discipline's card, 3:2.
  *
  * @param disciplineId The catalog identifier of the discipline.

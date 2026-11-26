@@ -12,7 +12,8 @@
  * message for the agent, and the engines the discipline works in. A link into the studio
  * (`/app/?discipline=…&format=…&prompt=…`) opens the dialog at the details with all three filled;
  * a format the catalog does not list for the discipline is kept as one more choice, since the
- * format is the project's own text.
+ * format is the project's own text. A shortcut of the sidebar's Create list opens it the same way,
+ * at the details of its discipline, on its format where it names one.
  *
  * A Games project can also be imported from GitHub: "Import from GitHub" lists the repositories of
  * the control plane's GitHub App the person reaches, and the project is made already linked to
@@ -27,8 +28,10 @@ import { Dialog } from '../components/Dialog';
 import type { NewProject } from '../lib/api';
 import { catalog, findApp, findDiscipline, type Discipline } from '../lib/catalog';
 import { cx } from '../lib/cx';
+import { midSentence } from '../lib/format';
 import { ErrorNotice } from './Notice';
 import { DisciplineIcon } from '../components/DisciplineIcon';
+import { FormatLine } from '../components/FormatLine';
 import { GitHubMark } from './Menu';
 import { appStatusLabel } from './present';
 import { RepoList } from './RepoList';
@@ -163,7 +166,9 @@ function DisciplinePicker({ titleId, onPick }: DisciplinePickerProps) {
                   />
                   {candidate.name}
                 </span>
-                <span className="text-xs leading-snug text-faint">{candidate.formats.join(' · ')}</span>
+                <span className="text-xs leading-snug text-faint">
+                  <FormatLine formats={candidate.formats} />
+                </span>
               </button>
             </li>
           );
@@ -218,7 +223,7 @@ function Details({ titleId, discipline, draft, github, onBack, onCreate }: Detai
   const fallbackName =
     importing && repo !== null
       ? (repo.split('/').pop() ?? repo)
-      : `Untitled ${format.toLowerCase() || discipline.name.toLowerCase()}`;
+      : `Untitled ${midSentence(format) || discipline.name.toLowerCase()}`;
   const engines = discipline.engines.map(findApp).filter((app) => app !== undefined);
   const nameField = useRef<HTMLInputElement>(null);
 

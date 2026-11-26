@@ -325,6 +325,133 @@
     color: var(--color-faint);
   }
 
+  /*
+   * The row of a sidebar list's heading. It is as tall as the search field that opens in the
+   * Recent heading's place, so opening and closing the search moves nothing under it.
+   */
+  .section-head {
+    display: flex;
+    align-items: center;
+    height: 1.75rem;
+    margin-bottom: 0.125rem;
+    padding-inline: 0.5rem;
+  }
+
+  /* A shortcut of the Create list: a project row's look, closer set, with nothing at its end. */
+  .create-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 2rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 0.7rem;
+    color: var(--color-muted);
+    font-size: 0.875rem;
+    text-align: left;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .create-row svg {
+    color: var(--color-faint);
+    transition: color 0.15s ease;
+  }
+
+  button.create-row:not(:disabled):hover,
+  button.create-row:focus-visible {
+    background: rgb(255 255 255 / 0.045);
+    color: var(--color-fg);
+  }
+
+  button.create-row:not(:disabled):hover svg,
+  button.create-row:focus-visible svg {
+    color: var(--color-fg);
+  }
+
+  button.create-row:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /*
+   * A shortcut the catalog does not offer yet is dimmed, as a row and as the rail's icon. Where it
+   * is a control (it has a preview to show) the pointer lifts it a little; it never looks ready.
+   */
+  .create-row[data-soon],
+  .icon-btn[data-soon] {
+    opacity: 0.45;
+  }
+
+  button.create-row[data-soon]:hover,
+  button.create-row[data-soon]:focus-visible,
+  button.icon-btn[data-soon]:hover,
+  button.icon-btn[data-soon]:focus-visible {
+    opacity: 0.8;
+  }
+
+  /*
+   * A card of what is coming: a picture with rounded corners under a black layer that deepens
+   * toward the foot, where the name and its line are read. It is not a control and does not react.
+   */
+  .coming-card {
+    position: relative;
+    overflow: hidden;
+    aspect-ratio: 3 / 2;
+    border: 1px solid var(--color-line);
+    border-radius: 1rem;
+    background: var(--color-ink-900);
+    isolation: isolate;
+  }
+
+  .coming-card img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .coming-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, rgb(0 0 0 / 0.1) 0%, rgb(0 0 0 / 0.3) 45%, rgb(0 0 0 / 0.9) 100%);
+  }
+
+  .coming-text {
+    position: absolute;
+    z-index: 1;
+    inset: auto 0 0;
+    padding: 0.9rem 1rem;
+  }
+
+  .coming-tag {
+    position: absolute;
+    z-index: 1;
+    top: 0.75rem;
+    left: 0.75rem;
+    padding: 0.2rem 0.45rem;
+    border: 1px solid rgb(255 255 255 / 0.14);
+    border-radius: 0.375rem;
+    background: rgb(0 0 0 / 0.55);
+    color: var(--color-muted);
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  /* On a phone the cards are one to a row, and wider than tall enough to keep four in reach. */
+  @media (max-width: 639.98px) {
+    .coming-card {
+      aspect-ratio: 2 / 1;
+    }
+  }
+
   /* A popover menu, anchored by its container. */
   .menu {
     position: absolute;
@@ -429,6 +556,11 @@
   select.field-sm {
     padding-right: 2rem;
     background-position: right 0.6rem center;
+  }
+
+  /* A search field has its own way to close, so the browser's clear button would be a second one. */
+  .field[type='search']::-webkit-search-cancel-button {
+    appearance: none;
   }
 
   /* A row of a list in the Environment panel: a repository, a connector, a subagent, a permission. */
