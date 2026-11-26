@@ -81,6 +81,8 @@ export function disciplineImage(disciplineId: string): string {
  */
 const ENGINE_ART: Readonly<Record<string, string>> = {
   filmcraft: '/media/engine-filmcraft.webp',
+  cutroom: '/media/engine-cutroom.webp',
+  hyperframes: '/media/engine-hyperframes.webp',
   blender: '/media/engine-blender.webp',
   photocraft: '/media/engine-photocraft.webp',
   unreal: appImage('unreal'),

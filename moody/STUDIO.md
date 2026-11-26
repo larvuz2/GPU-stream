@@ -616,7 +616,10 @@ the conversation itself.
   CSS, and seekable animation, rendered by a headless browser and FFmpeg, with
   its live preview on the engine's Screen. It follows upstream: a machine
   takes the newest release and that release's own skills as it starts, and
-  falls back on the ones its image was built with. Which engine the agent
+  falls back on the ones its image was built with. A release is switched to
+  only once it has installed whole and rendered on that machine, and the
+  update has two minutes; `MOODY_HYPERFRAMES_VERSION` in the control plane's
+  environment holds every session on one release. Which engine the agent
   reaches for when a video is edited by code is the person's setting
   (`video_hyperframes`, a switch on the Video editing tab, off by default, so
   the Cut Room unless they turn it on); the turn's state names the one that

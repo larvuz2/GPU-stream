@@ -1,0 +1,27 @@
+#!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Run by the Selkies window manager once it is up, as the session's
+# application, installed as /etc/xdg/openbox/autostart, which both backends
+# read: the HyperFrames session's log, in a terminal that fills the screen,
+# and the session's update of the CLI behind it.
+#
+# HyperFrames is driven by commands, so there is no application to open at
+# start. The screen shows the log: which release the session settled on and
+# why (`hyperframes-release update`, release.sh, started here so it is under
+# way before the first command asks), and then each `hyperframes` command as
+# it is run. When the agent starts a live preview (`hyperframes-preview`,
+# preview.sh), the preview's browser window opens over this terminal and the
+# person watches the composition instead.
+folder="$(selkies-modal-project)" || exit 1
+cd "${folder}" || exit 1
+
+log="${HYPERFRAMES_LOG:-/tmp/selkies-modal/hyperframes.log}"
+mkdir -p "$(dirname "${log}")"
+[ -s "${log}" ] || printf 'HyperFrames: video written as HTML and rendered by a browser.\nProject folder: %s\n' "${folder}" > "${log}"
+
+hyperframes-release update >> "${log}" 2>&1 &
+
+exec xterm -T "HyperFrames" -fa Hack -fs 15 -bg '#0d0d0f' -fg '#e8e8ea' -bc -e tail -n 200 -F "${log}"

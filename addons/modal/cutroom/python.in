@@ -1,0 +1,27 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# What the Cut Room's scripts import, as the workflow they come from lists it,
+# with Pillow, which it used without listing. NumPy, Pillow, and Pedalboard are
+# held at the versions that workflow's settings were settled on (the voice
+# masters, the keying, and the headline's measured width); the others are the
+# newest that resolve, yt-dlp above all, which the sites it reads outdate
+# within weeks. `python.lock` is this file resolved to exact versions, every
+# wheel with its hash, for the Python of the base image (3.14, on glibc 2.39
+# or newer); the image installs the lock and nothing else (`install.sh
+# python`). To move a pin, edit this file or leave it and run, in this folder:
+#
+#     uv pip compile python.in --python-version 3.14 --python-platform x86_64-manylinux_2_39 \
+#         --only-binary :all: --generate-hashes --no-header --no-annotate -o python.lock
+#
+# then build the image, whose last step loads every package and model.
+faster-whisper>=1.1
+numpy==2.5.3
+requests>=2.31
+yt-dlp[default]>=2026.10.26
+deep-translator>=1.11
+edge-tts>=6.1
+opencv-python-headless>=4.9
+pedalboard==0.9.26
+pillow==12.3.0

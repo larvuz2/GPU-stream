@@ -1065,21 +1065,28 @@ def test_settings_are_the_persons_each_one_of_the_catalogs_and_on_its_default_un
 
     # A turn's state names the engine a video is edited by code in, of the engines the catalog has
     film = new_project(client)
-    model.script(*[reply(say("Hello."))] * 6)
+    model.script(*[reply(say("Hello."))] * 8)
 
     def editor() -> str | None:
         message(client, film["id"], "Hi")
         line = next((line for line in said(model.requests[-1])[1].splitlines() if line.startswith("A video edited by code")), None)
         return line and line.removeprefix("A video edited by code is made in: ")
 
+    assert editor() == "Cut Room (app `cutroom`)", "the catalog's own two engines: the Cut Room while the setting is off"
+    change(settings={"video_hyperframes": True})
+    assert editor() == "HyperFrames (app `hyperframes`)", "and HyperFrames once it is on"
+    change(settings={"video_hyperframes": None})
+    cut_room, hyperframes = CATALOG.apps["cutroom"], CATALOG.apps["hyperframes"]
+    monkeypatch.delitem(CATALOG.apps, "cutroom")
+    monkeypatch.delitem(CATALOG.apps, "hyperframes")
     assert editor() is None, "nothing is said of an engine the catalog does not have"
-    monkeypatch.setitem(CATALOG.apps, "cutroom", {"id": "cutroom", "name": "Cut Room", "status": "available"})
+    monkeypatch.setitem(CATALOG.apps, "cutroom", cut_room)
     assert editor() == "Cut Room (app `cutroom`)"
     change(settings={"video_hyperframes": True})
     assert editor() == "Cut Room (app `cutroom`)", "switched on, but the catalog has no such engine"
-    monkeypatch.setitem(CATALOG.apps, "hyperframes", {"id": "hyperframes", "name": "HyperFrames", "status": "soon"})
+    monkeypatch.setitem(CATALOG.apps, "hyperframes", {**hyperframes, "status": "soon"})
     assert editor() == "Cut Room (app `cutroom`)", "nor one that cannot be started yet"
-    monkeypatch.setitem(CATALOG.apps, "hyperframes", {"id": "hyperframes", "name": "HyperFrames", "status": "available"})
+    monkeypatch.setitem(CATALOG.apps, "hyperframes", hyperframes)
     assert editor() == "HyperFrames (app `hyperframes`)"
     change(settings={"video_hyperframes": None})
     assert editor() == "Cut Room (app `cutroom`)", "off is the default"
@@ -3914,7 +3921,7 @@ def test_subagents_are_read_from_files_offered_by_discipline_and_given_their_too
     model.script(reply(say("Hello.")), reply(say("Hello.")), reply(say("Hello.")))
     message(client, film["id"], "Hi")
     offered = model.options[0].agents
-    assert list(offered) == ["research", "filmcraft", "photocraft", "nuke"], (
+    assert list(offered) == ["research", "filmcraft", "cutroom", "hyperframes", "photocraft", "nuke"], (
         "the defined ones that fit, then an operator for each of the discipline's engines that can be started"
     )
     research, operator = offered["research"], offered["filmcraft"]
@@ -4263,6 +4270,9 @@ def test_the_real_definitions_offer_a_film_its_skills_its_subagents_and_an_agent
     film = {agent.name: agent for agent in agents_for(agents, derived, offered["media"], CATALOG, "media")}
     assert {"research", "story", "art-direction", "character-design", "production-design", "librarian", "animation", "review"} <= set(film)
     assert film["filmcraft"].title == "FilmCraft agent" and film["filmcraft"].skills == ("filmcraft",)
+    for engine, title in (("cutroom", "Cut Room agent"), ("hyperframes", "HyperFrames agent")):
+        assert [discipline for discipline, chosen in names.items() if engine in chosen] == ["media"], f"{engine} is a skill of video alone"
+        assert (film[engine].title, film[engine].skills) == (title, (engine,)), "and its operator reads it"
     assert all(name in TOOL_NAMES or name.endswith("*") or name in ("web_search", "web_fetch")
                for agent in film.values() for name in agent.tools), "a definition names only tools the agent has"
     assert not any(name in ("ask_user", "show_ui", "engine_start", "engine_stop") for agent in film.values() for name in agent.tools), \
@@ -4287,6 +4297,8 @@ def test_the_environment_lists_what_a_projects_agent_can_use(studio):
     assert found["agents"] == [
         {"name": "research", "title": "Research agent", "description": "Looks things up on the web and in the library."},
         {"name": "filmcraft", "title": "FilmCraft agent", "description": "Drives FilmCraft for one job in a running engine."},
+        {"name": "cutroom", "title": "Cut Room agent", "description": "Drives Cut Room for one job in a running engine."},
+        {"name": "hyperframes", "title": "HyperFrames agent", "description": "Drives HyperFrames for one job in a running engine."},
         {"name": "photocraft", "title": "PhotoCraft agent", "description": "Drives PhotoCraft for one job in a running engine."},
         {"name": "nuke", "title": "Nuke agent", "description": "Drives Nuke for one job in a running engine."},
     ]
