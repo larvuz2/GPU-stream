@@ -102,6 +102,7 @@
       "engines": [
         "filmcraft",
         "cutroom",
+        "hyperframes",
         "photocraft",
         "nuke",
         "effectcraft"
@@ -613,6 +614,18 @@
         "media"
       ],
       "source": "https://github.com/larvuz2/GPU-stream/tree/main/addons/modal/cutroom"
+    },
+    {
+      "id": "hyperframes",
+      "name": "HyperFrames",
+      "version": "",
+      "status": "available",
+      "tagline": "Video written as HTML and animation and rendered frame by frame: titles, captions, charts, and motion your agent composes in code, with a live preview.",
+      "accent": "#14b8a6",
+      "disciplines": [
+        "media"
+      ],
+      "source": "https://github.com/heygen-com/hyperframes"
     },
     {
       "id": "blender",

@@ -967,6 +967,89 @@ them: 13 s after a write in the running SoundCraft session, a restarted
 FilmCraft session listed the file and imported the WAV. Without a restart,
 `send` carries the file across (Files, "Between two running sessions").
 
+## Cut Room
+
+`--app cutroom` starts a session with no application to click: a machine for
+editing video by code. Its image holds FFmpeg (the base image's, with libass,
+Rubber Band, and x264, each checked when the image is built), a Python
+environment locked wheel by wheel (`cutroom/python.lock`: faster-whisper,
+NumPy, OpenCV, Pedalboard, Pillow, yt-dlp), the Inter and Archivo Black fonts,
+two Whisper speech models and a face detector already downloaded, and the
+scripts of `cutroom/scripts`, each run as `cutroom NAME` from any directory:
+
+```bash
+addons/modal/selkies-modal up --app cutroom --name cuts --gpu none --env SELKIES_MODAL_PROJECT=projects/clips
+addons/modal/selkies-modal exec --name cuts -- cutroom
+addons/modal/selkies-modal exec --name cuts -- cutroom sheet footage/clip.mp4
+addons/modal/selkies-modal exec --name cuts -- cutroom moments footage/clip.mp4
+addons/modal/selkies-modal exec --name cuts -- cutroom cut jobs/clip-1a2b3c4d --pick 1 --hook "TEXT"
+```
+
+A script runs in the session's project folder, so the paths it takes are
+relative to that folder and what it writes is where the project's other
+engines look. `cutroom` alone lists the scripts, `cutroom NAME --help` prints
+one's parameters, and `cutroom versions` prints what the image holds, each
+part with where it came from and its checksum. The session's screen is a
+terminal on the log of every `cutroom` command, since there is nothing else to
+watch; the scripts read footage (contact sheets, scene cuts, a transcript with
+word times, the moments worth cutting), cut vertical clips and horizontal
+explainers with captions, titles, voices, and music, master a voice, mute
+swearing, check a finished cut, and fit one to a size
+(`moody/skills/cutroom` has every command as it was run).
+
+The scripts are adapted from
+[gtavi-claudecode](https://github.com/larvuz2/gtavi-claudecode) (MIT), whose
+notice each adapted file carries. They call no paid service: a narration is
+laid from sound files that already exist. A cut and its check take about six
+and four times the clip's length on two cores, most of it two speech models
+listening for swear words, so a long one is started with `selkies-modal-job`.
+`pytest addons/modal/cutroom` runs the tests of the scripts' own logic.
+
+## HyperFrames
+
+`--app hyperframes` starts another session with no application to click:
+[HyperFrames](https://github.com/heygen-com/hyperframes) (HeyGen's, Apache
+2.0), in which a video is written as HTML, CSS, and animation, a headless
+browser is stepped through its frames, and FFmpeg encodes them. Its image
+holds Node.js and Chrome for Testing by version and checksum, the Cut Room's
+fonts, the base image's FFmpeg, and the `hyperframes` command line with the
+skills its release ships:
+
+```bash
+addons/modal/selkies-modal up --app hyperframes --name frames --gpu none --env SELKIES_MODAL_PROJECT=projects/film
+addons/modal/selkies-modal exec --name frames -- hyperframes-release status
+addons/modal/selkies-modal exec --name frames -- ls /opt/hyperframes/skills
+addons/modal/selkies-modal exec --name frames -- bash -c 'cd "$(selkies-modal-project)" && hyperframes init film --non-interactive'
+addons/modal/selkies-modal exec --name frames -- bash -c 'cd "$(selkies-modal-project)" && hyperframes-preview film'
+addons/modal/selkies-modal exec --name frames -- bash -c 'cd "$(selkies-modal-project)" && hyperframes render film --quiet -o renders/film.mp4'
+```
+
+The command line is the one part of any image here that is not pinned. It
+follows its upstream: an image is built with the newest release of the npm
+package, and a session takes the newest again as it starts, with that
+release's skills, so what upstream adds is there the same day. The risk is a
+release nobody here has run, and three things bound it
+(`hyperframes/release.sh`): a release is switched to only after it installed
+whole and rendered half a second of its own starting project on that machine;
+the update has 120 seconds, of which the registry has 15 to answer, and a
+session that cannot have the newest runs the release its image was built
+with; and `MOODY_HYPERFRAMES_VERSION` in the environment of whoever defines
+the image (a version, or `built`) holds every session on one release.
+`hyperframes-release status` prints which release runs and why.
+
+`hyperframes-preview DIR` puts a project's live preview, the command line's
+own studio, on the session's screen in one browser window, and
+`hyperframes-preview --stop` closes it; until then the screen is a terminal on
+the session's log. Chrome keeps its own sandbox in a Modal Sandbox, so neither
+browser is started with a flag that turns it off, and a render captures with
+the software renderer on a machine without a GPU. A render of type and motion
+took a little over its own length on two cores, and one with a 720p clip as a
+layer about twice that. The command line reports its use to its makers unless
+told not to; a session tells it not to (`HYPERFRAMES_NO_TELEMETRY`), and
+neither its update check nor its skills installer runs, since the release and
+its skills are the session's to settle (`moody/skills/hyperframes` has the
+commands as they were run).
+
 ## The session
 
 The image is the base container by digest with three additions: Blender's
