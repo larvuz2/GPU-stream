@@ -150,7 +150,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
-from typing import Any, Callable, Iterator, get_args
+from typing import Any, Callable, Collection, Iterator, get_args
 from urllib.parse import quote
 
 import anyio
@@ -230,6 +230,8 @@ READ_LIMIT = 100000
 IMAGE_SECONDS = 300
 VIDEO_SECONDS = 1200
 AUDIO_WAIT_SECONDS = 600
+# The longest label a preview's version carries
+VERSION_CHARACTERS = 40
 # What a generated sound is called, by its kind, where the page and the model are told how many were made
 AUDIO_NOUNS = {"music": "song", "sound": "sound", "speech": "spoken line"}
 INSTRUMENTAL_NOUN = "instrumental"
@@ -311,17 +313,30 @@ def project_folder(project_id: str) -> str:
     return f"{WORKSPACE}/projects/{project_id}"
 
 
-def system_prompt(catalog: Catalog, project: dict[str, Any], tiers: frozenset[str]) -> str:
+def system_prompt(catalog: Catalog, project: dict[str, Any], tiers: frozenset[str], skills: Collection[str] = ()) -> str:
     """The project's system prompt: what does not change with the work.
 
-    It is built from the project's discipline and format, the catalog, and
-    the machine tiers the deployment switched on. What changes between turns
-    arrives with each message (`Agent.prompt`), and the skills and subagents
-    the project is offered are listed by the loop, which loads a skill's text
-    only when the agent opens it.
+    It is built from the project's discipline, the catalog, and the machine
+    tiers the deployment switched on. What changes between turns arrives
+    with each message (`Agent.prompt`), the project's kind among it, and the
+    skills and subagents the project is offered are listed by the loop, which
+    loads a skill's text only when the agent opens it. `skills` names the
+    skills the project is offered: a discipline whose kinds each open with a
+    card of their own names the skill that holds those cards
+    (`opening_skill` in the catalog), and the prompt sends the agent to it
+    only where the project has that skill.
     """
     brand = catalog.data["brand"]
     discipline = catalog.disciplines.get(project["discipline"], {"name": project["discipline"], "blurb": "", "engines": []})
+    opening = discipline.get("opening_skill")
+    first_turn = (
+        f"""
+- A project begins with its kind, which its state names. On its first turn, the kind just chosen, open the
+  `{opening}` skill and show that kind's opening card from it, in place of questions in words: it gathers what
+  the work needs in as few and as easy answers as it can."""
+        if opening and opening in skills
+        else ""
+    )
     engines = []
     for app_id in discipline.get("engines", []):
         app = catalog.apps.get(app_id)
@@ -366,6 +381,9 @@ The machines an engine runs on (`tier`):
 
 # How you work
 
+- Your job is to keep the project moving. End every turn on a next step you have already prepared, or on one
+  decision made easy to make; where the person has no direction, propose one; never leave them at an empty box.
+  Someone who has to work out what to ask for next has stopped making their thing.{first_turn}
 - The person decides what is theirs: the story, the look, which take to keep, what to spend. Ask with `ask_user`
   and two to five short options. Asking ends your turn: the question is shown to the person, and their answer, an
   option or their own words, is the next message you get. Decide the craft questions yourself, as a professional
@@ -801,6 +819,12 @@ TOOLS = [
                 "type": "boolean",
                 "description": "Also return a small picture of each file to you: an image itself, four frames of a "
                 "video, the waveform of a sound.",
+            },
+            "version": {
+                "type": "string",
+                "description": "A short label, such as Rough cut or v3, where what this shows is a version of the piece "
+                "itself and not a detail or a step. The person's Latest panel plays the newest version and lists the "
+                "ones before it.",
             },
         },
         ["engine_id", "caption"],
@@ -1332,7 +1356,7 @@ class Agent:
                 if definition["approval"] != APPROVAL_ASK or project["permissions"].get(name) == ALWAYS
             ]
             brief = Brief(
-                system=system_prompt(catalog, project, config.tiers),
+                system=system_prompt(catalog, project, config.tiers, [skill.name for skill in offered]),
                 prompt=prompt,
                 tools=[
                     ToolSpec(name, definition["description"], definition["input_schema"], definition["activity"], definition["read_only"])
@@ -2203,18 +2227,25 @@ class Agent:
 
     # Previews
 
-    def show_preview(self, turn: Turn, engine_id: str, caption: str, files: list[Shown], compare: bool) -> None:
+    def show_preview(
+        self, turn: Turn, engine_id: str, caption: str, files: list[Shown], compare: bool, version: str | None = None
+    ) -> None:
         """Store a preview's files under the project's `previews/` folder and put its card in the conversation.
 
         The event keeps each file's path in the bucket, which a reading of the
         log signs (`Sessions.shown_events`); nothing is written to the library.
+        `version` marks what is shown as a version of the piece itself, by a
+        short label the event carries, which is how the page knows the latest
+        one from a step along the way.
         """
         items = []
         for shown in files:
             path = f"{turn.project['user_id']}/{turn.project_id}/{PREVIEWS}/{uuid.uuid4().hex[:12]}-{safe_name(shown.stored_as)}"
             self.store.upload(LIBRARY_BUCKET, path, shown.data, shown.content_type)
             items.append({**shown.item, "path": path})
-        turn.event("preview", {"engine_id": engine_id, "caption": caption, "items": items, "compare": compare})
+        data = {"engine_id": engine_id, "caption": caption, "items": items, "compare": compare}
+        label = " ".join((version or "").split())[:VERSION_CHARACTERS]
+        turn.event("preview", {**data, "version": label} if label else data)
 
     def tool_preview(
         self,
@@ -2226,6 +2257,7 @@ class Agent:
         kind: str | None = None,
         compare: bool = False,
         look: bool = False,
+        version: str | None = None,
     ) -> Result:
         """Show files of the project's folder on an engine as one work-in-progress card (`preview`).
 
@@ -2255,7 +2287,7 @@ class Agent:
         if compare and files[0].item["kind"] != files[1].item["kind"]:
             raise Refused(400, "A before and after pair is two files of one kind.")
         words = caption.strip()[:300]
-        self.show_preview(turn, engine_id, words, files, compare)
+        self.show_preview(turn, engine_id, words, files, compare, version)
         answer = {
             "shown": words,
             "files": [shown.facts for shown in files],

@@ -1430,6 +1430,13 @@ def test_a_project_made_without_its_kind_opens_on_the_card_that_asks_it_and_lock
     words, state = said(model.requests[-1])
     assert words.startswith("A lesson on tides\n\n[The person chose this project's kind") and "Kind: Education" in state
     assert "Library sections: Lessons" in state
+    assert "opening card" not in model.requests[-1]["system"][0]["text"], "this project has no skill that holds its kinds' cards"
+    monkeypatch.setitem(CATALOG.disciplines["media"], "opening_skill", "filmcraft")
+    model.script(reply(say("Hello.")))
+    message(client, plain["id"], "And now?")
+    assert "open the `filmcraft` skill and show that kind's opening card" in " ".join(model.requests[-1]["system"][0]["text"].split()), (
+        "a turn's prompt names the skill where the project is offered it"
+    )
 
 
 def test_every_discipline_that_asks_its_kind_has_a_card_the_page_renders_and_a_line_for_each_kind():
@@ -2315,8 +2322,17 @@ def test_a_screenshot_is_shown_as_a_preview_card_and_previews_are_signed_at_each
         reply(say("Seen.")),
     )
     message(client, film["id"], "What is on screen?")
+    studio.launcher.answers += [probe("previews/frame.png", 240_000, PNG)] * 2
+    model.script(
+        reply(use("preview", engine_id=eid, path="previews/frame.png", caption="The whole cut", version="  Rough   cut "),
+              use("preview", engine_id=eid, path="previews/frame.png", caption="The whole cut", version="x" * 90)),
+        reply(say("Shown.")),
+    )
+    message(client, film["id"], "Show the cut")
 
-    screen, twice = previews(client, film["id"])
+    screen, twice, rough, long = previews(client, film["id"])
+    assert "version" not in screen and "version" not in twice, "a step along the way is no version of the piece"
+    assert rough["version"] == "Rough cut" and long["version"] == "x" * 40, "a version carries its label, kept short"
     assert screen["caption"] == "FilmCraft's screen" and [(i["kind"], i["name"]) for i in screen["items"]] == [("image", "screen.jpg")]
     ended = [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "tool_end"]
     assert not any("media" in end for end in ended), "the card is the preview, not a second picture under the call"
@@ -2326,7 +2342,7 @@ def test_a_screenshot_is_shown_as_a_preview_card_and_previews_are_signed_at_each
         "the log keeps where a file is, never a link that expires"
     )
     del store.files[rows[1]["items"][0]["path"]]
-    assert [len(p["items"]) for p in previews(client, film["id"])] == [1, 1], "a file that is gone is left out of its preview"
+    assert [len(p["items"]) for p in previews(client, film["id"])] == [1, 1, 1, 1], "a file that is gone is left out of its preview"
     client.delete(f"/v1/projects/{film['id']}", headers=auth("alice-token"))
     assert not store.files, "a project's previews go with it"
 
@@ -3790,9 +3806,17 @@ def test_the_system_prompt_carries_no_skill_and_says_how_the_agent_works_with_en
                       "Where a decision is the person's and you have a view, say which way you would go",
                       "`ask_user`'s `recommended`", "Keep interactive cards clean",
                       "A long job (many steps, subagents, or minutes of work) ends with a report",
+                      "Your job is to keep the project moving", "never leave them at an empty box",
                       "A short exchange gets a short answer in plain sentences, with no headings"):
         assert flat.count(said_once) == 1, said_once
     assert "recap" not in flat and "Keep messages short" not in flat, "how to close is said once, by the kind of work it closes"
+    assert "Its kinds: Film & TV, Social Media" in flat and "Kind: " not in flat, "which kind it is can change, so the state says it"
+
+    # A project's first turn opens with its kind's card, from the skill the catalog names, where the project has that skill
+    assert CATALOG.disciplines["media"]["opening_skill"] == "video" and "opening card" not in flat
+    opened = " ".join(system_prompt(CATALOG, project, frozenset({"cpu"}), ["studio", "video"]).split())
+    assert opened.count("open the `video` skill and show that kind's opening card from it, in place of questions in words") == 1
+    assert "opening card" not in system_prompt(CATALOG, {**project, "discipline": "music"}, frozenset({"cpu"}), ["studio", "video"])
 
 
 def test_subagents_are_read_from_files_offered_by_discipline_and_given_their_tools_skills_and_model(studio, tmp_path):
