@@ -60,6 +60,14 @@ export interface CatalogApp {
   requires_gpu?: boolean;
 }
 
+/** What a discipline's opening card says of one of its formats, the project's kind. */
+export interface Kind {
+  /** What the kind is, in a line. */
+  line: string;
+  /** Its icon, by name in the catalog's {@link Catalog.icons}. */
+  icon: string;
+}
+
 /**
  * A top-level creative discipline: what a person makes, independent of the software that makes it.
  *
@@ -76,6 +84,13 @@ export interface Discipline {
   blurb: string;
   /** The apps it uses, by {@link CatalogApp} identifier, the first the main one. */
   engines: string[];
+  /**
+   * What a project of the discipline is asked first when it starts without a format: the title of
+   * the card that asks its kind. A discipline without one asks nothing.
+   */
+  opening?: string;
+  /** What that card says of each format, by the format's name. */
+  kinds?: Record<string, Kind>;
 }
 
 /** One card of what a shortcut will offer: a tool that may come, and what it is for. */
@@ -204,6 +219,11 @@ export interface Catalog {
   regions: Region[];
   /** Every credit pack, smallest first. */
   credit_packs: CreditPack[];
+  /**
+   * Pixel icons by name, each twelve rows of twelve cells written as `0` and `1`. A discipline's
+   * kinds name theirs here, and the control plane puts the rows on the card that asks the kind.
+   */
+  icons: Record<string, string[]>;
 }
 
 /** The catalog. */
@@ -338,6 +358,16 @@ export function activityLabel(id: string): string | undefined {
  */
 export function findDiscipline(id: string): Discipline | undefined {
   return catalog.disciplines.find((discipline) => discipline.id === id);
+}
+
+/**
+ * Whether a project of a discipline is asked its kind when it starts without a format.
+ *
+ * @param discipline The discipline.
+ * @returns `true` for one the catalog gives an opening question and formats to answer it with.
+ */
+export function asksKind(discipline: Discipline): boolean {
+  return discipline.opening !== undefined && discipline.formats.length > 0;
 }
 
 /**
