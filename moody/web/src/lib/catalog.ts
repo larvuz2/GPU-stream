@@ -78,13 +78,26 @@ export interface Discipline {
   engines: string[];
 }
 
+/** One card of what a shortcut will offer: a tool that may come, and what it is for. */
+export interface ShortcutPreview {
+  /** The tool's name. */
+  name: string;
+  /** What it is for, in a line. */
+  line: string;
+  /** Where it stands, in a word: "Soon" for one being prepared, "Exploring" for one still looked into. */
+  tag: string;
+  /** The card's picture, by its file under the site's media. */
+  image: string;
+}
+
 /**
  * A shortcut into a new project: a kind of work by its everyday name, which the studio's sidebar
  * lists under Create.
  *
  * One that is `available` names the discipline its project belongs to and, where its name means
  * one, the format; one that names no format leaves that choice to the person. One that is `soon`
- * is announced with nothing behind it yet, and starts nothing.
+ * is announced with nothing behind it yet and starts nothing; what it shows instead is its
+ * `preview`, where it has one.
  */
 export interface Shortcut {
   /** The identifier, which also picks the icon of a shortcut that has one of its own. */
@@ -97,6 +110,8 @@ export interface Shortcut {
   discipline?: string;
   /** The format its project starts with, for a shortcut whose name means one. */
   format?: string;
+  /** What to expect of one that is not available yet, as cards. */
+  preview?: ShortcutPreview[];
 }
 
 /** One of the finer creative categories, each under a {@link Discipline}. */

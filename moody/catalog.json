@@ -273,7 +273,33 @@
     {
       "id": "immersive",
       "label": "Immersive",
-      "status": "soon"
+      "status": "soon",
+      "preview": [
+        {
+          "name": "TouchDesigner",
+          "line": "Node-based real-time visuals for installations and live shows.",
+          "tag": "Exploring",
+          "image": "immersive-light-wall.webp"
+        },
+        {
+          "name": "cables",
+          "line": "Open-source, node-based real-time visuals for the web.",
+          "tag": "Soon",
+          "image": "immersive-nodes.webp"
+        },
+        {
+          "name": "ossia score",
+          "line": "An open-source sequencer for interactive shows: media, light, and sound on one timeline.",
+          "tag": "Soon",
+          "image": "immersive-stage.webp"
+        },
+        {
+          "name": "Splash",
+          "line": "Open-source projection mapping for domes and any surface with a 3D model.",
+          "tag": "Soon",
+          "image": "immersive-dome.webp"
+        }
+      ]
     }
   ],
   "categories": [

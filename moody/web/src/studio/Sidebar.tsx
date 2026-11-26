@@ -11,7 +11,8 @@
  * Create lists the catalog's shortcuts (`catalog.shortcuts`): a kind of work by its everyday name.
  * Each opens the new-project dialog on its discipline, and on its format where it names one, so a
  * project of that kind is two clicks away and the first of them makes nothing. A shortcut the
- * catalog does not offer yet is drawn dimmed with "Soon" and is not a control.
+ * catalog does not offer yet is drawn dimmed with "Soon": it starts nothing, and where the catalog
+ * says what to expect of it, choosing it shows that (`ComingDialog.tsx`).
  *
  * Each project row has a menu to pin, rename, or delete it; a rename is edited in the row itself,
  * and a delete asks first. The search is a quiet icon at the end of the Recent heading's row (the
@@ -52,6 +53,7 @@ import { useNow } from './hooks';
 import { Menu } from './Menu';
 import { ErrorNotice } from './Notice';
 import { DisciplineIcon, ShortcutIcon } from '../components/DisciplineIcon';
+import { ComingDialog } from './ComingDialog';
 import type { ProjectDraft } from './NewProjectDialog';
 import { ago, disciplineName, limitText } from './present';
 import type { Projects } from './useAccount';
@@ -99,6 +101,7 @@ export function Sidebar(props: SidebarProps) {
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [deleting, setDeleting] = useState<Project | null>(null);
+  const [coming, setComing] = useState<Shortcut | null>(null);
   const ready = projects.status === 'ready';
   const search: ProjectSearch = {
     open: searching,
@@ -114,16 +117,27 @@ export function Sidebar(props: SidebarProps) {
   };
 
   /**
-   * Opens the new-project dialog on what a shortcut starts.
+   * Opens the new-project dialog on what a shortcut starts, or, for one that starts nothing yet,
+   * what to expect of it.
    *
    * @param shortcut The shortcut chosen.
    */
-  const start = (shortcut: Shortcut): void => {
+  const choose = (shortcut: Shortcut): void => {
     const discipline = shortcutDiscipline(shortcut);
-    if (discipline !== undefined) {
+    if (discipline === undefined) {
+      setComing(shortcut);
+    } else {
       onNewProject({ discipline: discipline.id, format: shortcut.format });
     }
   };
+  const comingDialog = (
+    <ComingDialog
+      shortcut={coming}
+      onClose={() => {
+        setComing(null);
+      }}
+    />
+  );
 
   const filtered = useMemo(() => {
     const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -182,10 +196,11 @@ export function Sidebar(props: SidebarProps) {
           </button>
         )}
         <span className="h-px w-5 flex-none bg-line" aria-hidden="true" />
-        <CreateList ready={ready} compact onStart={start} />
+        <CreateList ready={ready} compact onChoose={choose} />
         <div className="mt-auto">
           <AccountMenu {...props} compact />
         </div>
+        {comingDialog}
       </nav>
     );
   }
@@ -238,7 +253,7 @@ export function Sidebar(props: SidebarProps) {
       </div>
 
       <div className="thin-scroll mt-3 grid min-h-0 flex-1 grid-cols-1 content-start gap-4 overflow-y-auto px-3 pb-3">
-        <CreateList ready={ready} compact={false} onStart={start} />
+        <CreateList ready={ready} compact={false} onChoose={choose} />
         <ProjectLists {...props} pinned={pinned} recent={recent} search={search} onDelete={setDeleting} />
       </div>
 
@@ -253,6 +268,7 @@ export function Sidebar(props: SidebarProps) {
         }}
         onDelete={projects.remove}
       />
+      {comingDialog}
     </nav>
   );
 }
@@ -263,81 +279,95 @@ interface CreateListProps {
   ready: boolean;
   /** Whether the sidebar is a rail, where a shortcut is its icon alone. */
   compact: boolean;
-  /** Opens the new-project dialog on what a shortcut starts. */
-  onStart: (shortcut: Shortcut) => void;
+  /** Takes the shortcut the person chose. */
+  onChoose: (shortcut: Shortcut) => void;
 }
 
 /**
  * Renders the Create list: the catalog's shortcuts, each a way into a new project of its kind.
  *
+ * A shortcut that starts a project is a control once the account's projects have loaded. One that
+ * starts nothing yet is dimmed and says "Soon"; it is a control only where the catalog has a
+ * preview of it to show, which needs nothing loaded.
+ *
  * @param props The component's props.
  * @returns The list, as rows under their heading or, in the rail, as icons.
  */
-function CreateList({ ready, compact, onStart }: CreateListProps) {
+function CreateList({ ready, compact, onChoose }: CreateListProps) {
+  const items = catalog.shortcuts.map((shortcut) => {
+    const soon = shortcutDiscipline(shortcut) === undefined;
+    const icon = <ShortcutIcon shortcut={shortcut} className="size-3" />;
+    const choose = (): void => {
+      onChoose(shortcut);
+    };
+    if (soon && (shortcut.preview ?? []).length === 0) {
+      return (
+        <li key={shortcut.id}>
+          {compact ? (
+            <span
+              className="icon-btn"
+              data-soon="true"
+              role="img"
+              aria-label={`${shortcut.label}: soon`}
+              title={`${shortcut.label}: soon`}
+            >
+              {icon}
+            </span>
+          ) : (
+            <span className="create-row" data-soon="true">
+              {icon}
+              <span className="min-w-0 flex-1 truncate">{shortcut.label}</span>
+              <span className="text-[0.6875rem]">Soon</span>
+            </span>
+          )}
+        </li>
+      );
+    }
+    const name = soon ? `${shortcut.label}: soon` : `New project: ${shortcut.label}`;
+    return (
+      <li key={shortcut.id}>
+        {compact ? (
+          <button
+            type="button"
+            className="icon-btn"
+            data-soon={soon ? true : undefined}
+            aria-label={name}
+            title={name}
+            disabled={!soon && !ready}
+            onClick={choose}
+          >
+            {icon}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="create-row"
+            data-soon={soon ? true : undefined}
+            disabled={!soon && !ready}
+            onClick={choose}
+          >
+            {icon}
+            <span className="min-w-0 flex-1 truncate">{shortcut.label}</span>
+            {soon ? <span className="text-[0.6875rem]">Soon</span> : null}
+          </button>
+        )}
+      </li>
+    );
+  });
   if (compact) {
     return (
       <ul
         className="flex min-h-0 flex-col items-center gap-1 overflow-y-auto [scrollbar-width:none]"
         aria-label="Create"
       >
-        {catalog.shortcuts.map((shortcut) => (
-          <li key={shortcut.id}>
-            {shortcutDiscipline(shortcut) === undefined ? (
-              <span
-                className="icon-btn opacity-40"
-                role="img"
-                aria-label={`${shortcut.label}: soon`}
-                title={`${shortcut.label} · Soon`}
-              >
-                <ShortcutIcon shortcut={shortcut} className="size-3" />
-              </span>
-            ) : (
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label={`New project: ${shortcut.label}`}
-                title={`New project: ${shortcut.label}`}
-                disabled={!ready}
-                onClick={() => {
-                  onStart(shortcut);
-                }}
-              >
-                <ShortcutIcon shortcut={shortcut} className="size-3" />
-              </button>
-            )}
-          </li>
-        ))}
+        {items}
       </ul>
     );
   }
   return (
     <section aria-label="Create">
       <h2 className="section-label section-head">Create</h2>
-      <ul className="grid grid-cols-2 gap-x-2 gap-y-0.5 sm:grid-cols-4 lg:grid-cols-1">
-        {catalog.shortcuts.map((shortcut) => (
-          <li key={shortcut.id}>
-            {shortcutDiscipline(shortcut) === undefined ? (
-              <span className="create-row" data-soon="true">
-                <ShortcutIcon shortcut={shortcut} className="size-3" />
-                <span className="min-w-0 flex-1 truncate">{shortcut.label}</span>
-                <span className="text-[0.6875rem]">Soon</span>
-              </span>
-            ) : (
-              <button
-                type="button"
-                className="create-row"
-                disabled={!ready}
-                onClick={() => {
-                  onStart(shortcut);
-                }}
-              >
-                <ShortcutIcon shortcut={shortcut} className="size-3" />
-                <span className="min-w-0 flex-1 truncate">{shortcut.label}</span>
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
+      <ul className="grid grid-cols-2 gap-x-2 gap-y-0.5 sm:grid-cols-4 lg:grid-cols-1">{items}</ul>
     </section>
   );
 }
