@@ -20,6 +20,9 @@ import { IDLE_SHUTDOWN_MINUTES } from '../lib/catalog';
 /** The status of a request the account lacks the credits for. */
 export const OUT_OF_CREDITS = 402;
 
+/** The status of an account the control plane does not serve: one outside its invite list. */
+export const NOT_SERVED = 403;
+
 /** The status of a request that ran into a limit. */
 const LIMIT_REACHED = 409;
 

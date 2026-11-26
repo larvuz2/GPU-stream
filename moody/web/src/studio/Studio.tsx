@@ -42,6 +42,7 @@ import { SettingsDialog } from './settings/SettingsDialog';
 import { AGENT, BILLING, PROFILE, targetInAddress, writeTabToAddress, type SettingsTarget } from './settings/tabs';
 import { Sidebar } from './Sidebar';
 import type { StreamStandIn } from './Stage';
+import { Uninvited } from './Uninvited';
 import { connected, useAccount, useEpic, useGitHub, useProjects } from './useAccount';
 import { Workspace, type MobileTab } from './Workspace';
 
@@ -212,6 +213,10 @@ export function Studio({
   const takeFirstMessage = useCallback(() => {
     setFirstMessage(null);
   }, []);
+
+  if (account.refused !== null) {
+    return <Uninvited message={account.refused} onRetry={account.refreshMe} onSignOut={onSignOut} />;
+  }
 
   const clampedWidth = Math.min(PANE_MAX, Math.max(PANE_MIN, paneWidth));
   return (

@@ -10,17 +10,21 @@
  *
  * All four go through Supabase and end on the dashboard: the providers and the email links return
  * there, and a password sign-in navigates there itself. A sign-up that Supabase holds for email
- * confirmation shows a "check your inbox" state instead. A build without a Supabase project has no
- * form to offer, so the dialog says that sign-ups open soon rather than showing one that cannot
- * work.
+ * confirmation shows a "check your inbox" state instead. The dialog offers the ways the Supabase
+ * project has turned on and no other (`signInWays`), so a project that takes Google alone shows
+ * one button; the read starts when the page mounts the dialog, and a visitor who opens it before
+ * the answer sees the form wait rather than change under their hand. A build without a Supabase
+ * project has no form to offer, so the dialog says that sign-ups open soon rather than showing one
+ * that cannot work.
  * @module
  */
-import { useId, useRef, useState, type SubmitEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type SubmitEvent, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ArrowRight, MailCheck, Sparkles, TriangleAlert, WandSparkles } from 'lucide-react';
 import { brand, catalog } from '../lib/catalog';
+import { cx } from '../lib/cx';
 import { supabaseConfig } from '../lib/env';
-import { DASHBOARD_PATH, dashboardUrl, loadSupabase } from '../lib/supabase';
+import { DASHBOARD_PATH, dashboardUrl, loadSupabase, signInWays, type SignInWays } from '../lib/supabase';
 import { BrandMark } from './Brand';
 import { Dialog } from './Dialog';
 
@@ -59,15 +63,40 @@ interface AuthDialogProps {
  */
 export function AuthDialog({ mode, onClose, onModeChange }: AuthDialogProps) {
   const titleId = useId();
+  const ways = useSignInWays();
   return (
     <Dialog open={mode !== null} onClose={onClose} labelledBy={titleId}>
       {mode === null ? null : supabaseConfig === null ? (
         <OpeningSoon titleId={titleId} onClose={onClose} />
       ) : (
-        <AuthForm mode={mode} titleId={titleId} onModeChange={onModeChange} />
+        <AuthForm mode={mode} ways={ways} titleId={titleId} onModeChange={onModeChange} />
       )}
     </Dialog>
   );
+}
+
+/**
+ * Reads the ways to sign in that are on, once, for as long as the component is mounted.
+ *
+ * @returns The ways, or `null` until the project has answered.
+ */
+function useSignInWays(): SignInWays | null {
+  const [ways, setWays] = useState<SignInWays | null>(null);
+  useEffect(() => {
+    if (supabaseConfig === null) {
+      return;
+    }
+    let current = true;
+    void signInWays().then((read) => {
+      if (current) {
+        setWays(read);
+      }
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
+  return ways;
 }
 
 /** Props of {@link OpeningSoon}. */
@@ -116,6 +145,8 @@ function OpeningSoon({ titleId, onClose }: OpeningSoonProps) {
 interface AuthFormProps {
   /** Whether the form creates an account or signs in to one. */
   mode: AuthMode;
+  /** The ways to sign in the project has on, or `null` until it has said. */
+  ways: SignInWays | null;
   /** The `id` the dialog is titled by. */
   titleId: string;
   /** Called when the visitor switches to the other form. */
@@ -142,12 +173,18 @@ async function attempt(run: (supabase: SupabaseClient) => Promise<Outcome>): Pro
 
 /**
  * Renders the form of a configured build: the provider buttons, the email and password fields,
- * the magic-link request, and the state after an email was sent.
+ * the magic-link request, and the state after an email was sent, each only where the project has
+ * that way to sign in turned on.
+ *
+ * A dialog opens with focus on its first control. One that opened before the project had said
+ * which ways are on had only the switch to the other form to give it, so when the ways arrive the
+ * focus moves to the first of them, unless the visitor has moved it since: Enter then signs in,
+ * as it does in a dialog that opened with the ways known.
  *
  * @param props The component's props.
  * @returns The form.
  */
-function AuthForm({ mode, titleId, onModeChange }: AuthFormProps) {
+function AuthForm({ mode, ways, titleId, onModeChange }: AuthFormProps) {
   const emailId = useId();
   const passwordId = useId();
   const emailInput = useRef<HTMLInputElement>(null);
@@ -156,7 +193,20 @@ function AuthForm({ mode, titleId, onModeChange }: AuthFormProps) {
   const [busy, setBusy] = useState<Provider | 'password' | 'magic-link' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState<'confirmation' | 'magic-link' | null>(null);
+  const offered = useRef<HTMLDivElement>(null);
+  const modeSwitch = useRef<HTMLButtonElement>(null);
+  const waited = useRef(ways === null);
   const signingUp = mode === 'sign-up';
+
+  useEffect(() => {
+    if (ways === null || !waited.current) {
+      return;
+    }
+    waited.current = false;
+    if (document.activeElement === modeSwitch.current) {
+      offered.current?.querySelector<HTMLElement>('button, input')?.focus();
+    }
+  }, [ways]);
 
   /**
    * Shows what an attempt came to.
@@ -283,6 +333,14 @@ function AuthForm({ mode, titleId, onModeChange }: AuthFormProps) {
   }
 
   const disabled = busy !== null;
+  const providers = ways !== null && (ways.google || ways.github);
+  const problem =
+    error === null ? null : (
+      <p className="notice notice-bad" role="alert">
+        <TriangleAlert className="mt-0.5 size-4 flex-none" aria-hidden="true" />
+        <span>{error}</span>
+      </p>
+    );
   return (
     <div>
       <BrandMark className="h-6 text-fg" />
@@ -295,113 +353,135 @@ function AuthForm({ mode, titleId, onModeChange }: AuthFormProps) {
           : 'Sign in to open your studio.'}
       </p>
 
-      <div className="mt-6 grid gap-2.5">
-        <ProviderButton
-          label="Continue with Google"
-          busy={busy === 'google'}
-          disabled={disabled}
-          onClick={() => {
-            void continueWith('google');
-          }}
-        >
-          <GoogleGlyph />
-        </ProviderButton>
-        <ProviderButton
-          label="Continue with GitHub"
-          busy={busy === 'github'}
-          disabled={disabled}
-          onClick={() => {
-            void continueWith('github');
-          }}
-        >
-          <GitHubGlyph />
-        </ProviderButton>
+      {ways === null ? (
+        <p className="mt-6 flex items-center gap-2.5 text-sm text-muted" role="status">
+          <span className="spinner" aria-hidden="true" />
+          Getting sign-in ready
+        </p>
+      ) : null}
+
+      <div ref={offered}>
+        {providers ? (
+          <div className="mt-6 grid gap-2.5">
+            {ways.google ? (
+              <ProviderButton
+                label="Continue with Google"
+                busy={busy === 'google'}
+                disabled={disabled}
+                onClick={() => {
+                  void continueWith('google');
+                }}
+              >
+                <GoogleGlyph />
+              </ProviderButton>
+            ) : null}
+            {ways.github ? (
+              <ProviderButton
+                label="Continue with GitHub"
+                busy={busy === 'github'}
+                disabled={disabled}
+                onClick={() => {
+                  void continueWith('github');
+                }}
+              >
+                <GitHubGlyph />
+              </ProviderButton>
+            ) : null}
+            {ways.email ? null : problem}
+          </div>
+        ) : null}
+
+        {providers && ways.email ? (
+          <div className="my-5 flex items-center gap-3 text-xs font-medium tracking-wider text-faint uppercase">
+            <span className="h-px flex-1 bg-line" />
+            or with email
+            <span className="h-px flex-1 bg-line" />
+          </div>
+        ) : null}
+
+        {ways?.email === true ? (
+          <form
+            className={cx('grid gap-3.5', !providers && 'mt-6')}
+            onSubmit={(event) => {
+              void submit(event);
+            }}
+          >
+            <div>
+              <label htmlFor={emailId} className="mb-1.5 block text-sm font-medium">
+                Email
+              </label>
+              <input
+                ref={emailInput}
+                id={emailId}
+                type="email"
+                name="email"
+                autoComplete="email"
+                inputMode="email"
+                required
+                placeholder="you@example.com"
+                className="field"
+                value={email}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                }}
+              />
+            </div>
+            <div>
+              <label htmlFor={passwordId} className="mb-1.5 block text-sm font-medium">
+                Password
+              </label>
+              <input
+                id={passwordId}
+                type="password"
+                name="password"
+                autoComplete={signingUp ? 'new-password' : 'current-password'}
+                required
+                minLength={signingUp ? MIN_PASSWORD_LENGTH : undefined}
+                placeholder={signingUp ? `At least ${MIN_PASSWORD_LENGTH} characters` : 'Your password'}
+                className="field"
+                value={password}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                }}
+              />
+            </div>
+
+            {problem}
+
+            <button type="submit" className="btn btn-primary mt-1 w-full" disabled={disabled}>
+              {busy === 'password' ? <span className="spinner" aria-hidden="true" /> : null}
+              {signingUp ? 'Create account' : 'Sign in'}
+              {busy === 'password' ? null : <ArrowRight className="size-4" aria-hidden="true" />}
+            </button>
+            <button
+              type="button"
+              className="btn btn-quiet w-full"
+              disabled={disabled}
+              onClick={() => {
+                void sendMagicLink();
+              }}
+            >
+              {busy === 'magic-link' ? (
+                <span className="spinner" aria-hidden="true" />
+              ) : (
+                <WandSparkles className="size-4" aria-hidden="true" />
+              )}
+              Email me a magic link instead
+            </button>
+          </form>
+        ) : null}
       </div>
 
-      <div className="my-5 flex items-center gap-3 text-xs font-medium tracking-wider text-faint uppercase">
-        <span className="h-px flex-1 bg-line" />
-        or with email
-        <span className="h-px flex-1 bg-line" />
-      </div>
-
-      <form
-        className="grid gap-3.5"
-        onSubmit={(event) => {
-          void submit(event);
-        }}
-      >
-        <div>
-          <label htmlFor={emailId} className="mb-1.5 block text-sm font-medium">
-            Email
-          </label>
-          <input
-            ref={emailInput}
-            id={emailId}
-            type="email"
-            name="email"
-            autoComplete="email"
-            inputMode="email"
-            required
-            placeholder="you@example.com"
-            className="field"
-            value={email}
-            onChange={(event) => {
-              setEmail(event.target.value);
-            }}
-          />
-        </div>
-        <div>
-          <label htmlFor={passwordId} className="mb-1.5 block text-sm font-medium">
-            Password
-          </label>
-          <input
-            id={passwordId}
-            type="password"
-            name="password"
-            autoComplete={signingUp ? 'new-password' : 'current-password'}
-            required
-            minLength={signingUp ? MIN_PASSWORD_LENGTH : undefined}
-            placeholder={signingUp ? `At least ${MIN_PASSWORD_LENGTH} characters` : 'Your password'}
-            className="field"
-            value={password}
-            onChange={(event) => {
-              setPassword(event.target.value);
-            }}
-          />
-        </div>
-
-        {error === null ? null : (
-          <p className="notice notice-bad" role="alert">
-            <TriangleAlert className="mt-0.5 size-4 flex-none" aria-hidden="true" />
-            <span>{error}</span>
-          </p>
-        )}
-
-        <button type="submit" className="btn btn-primary mt-1 w-full" disabled={disabled}>
-          {busy === 'password' ? <span className="spinner" aria-hidden="true" /> : null}
-          {signingUp ? 'Create account' : 'Sign in'}
-          {busy === 'password' ? null : <ArrowRight className="size-4" aria-hidden="true" />}
-        </button>
-        <button
-          type="button"
-          className="btn btn-quiet w-full"
-          disabled={disabled}
-          onClick={() => {
-            void sendMagicLink();
-          }}
-        >
-          {busy === 'magic-link' ? (
-            <span className="spinner" aria-hidden="true" />
-          ) : (
-            <WandSparkles className="size-4" aria-hidden="true" />
-          )}
-          Email me a magic link instead
-        </button>
-      </form>
+      {ways !== null && !providers && !ways.email ? (
+        <p className="notice notice-info mt-6" role="status">
+          No way to sign in is switched on yet.
+        </p>
+      ) : null}
 
       <p className="mt-5 text-center text-sm text-muted">
         {signingUp ? 'Already have an account?' : `New to ${brand}?`}{' '}
         <button
+          ref={modeSwitch}
           type="button"
           className="link font-semibold"
           onClick={() => {

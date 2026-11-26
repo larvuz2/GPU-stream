@@ -620,6 +620,15 @@ opens each kind with a card of its own.
 - **Every module of the right pane folds**, and so does each section inside
   Environment, by a quiet arrow that shows on hover and focus.
 
+- **A deployment may be open by invitation.** Where `MOODY_INVITE_ONLY` is
+  set, the control plane authenticates a request only for an account whose
+  address the database's `invites` names, and answers any other with 403 and a
+  sentence that names the address. It does so where it authenticates, so that
+  no route, the agent's endpoint included, serves an account outside the list.
+  The site reads the account first; on that 403 it shows the sentence on a
+  page of its own, with a way to ask again and to sign out, and no studio
+  around it. An invite may name the credits its account starts with.
+
 - **Settings are the person's, and one place holds them.** The account menu
   opens Settings: Profile (name, email), Billing (credits, buying more),
   Agent (what a turn may spend and how many steps it may take), Video editing,

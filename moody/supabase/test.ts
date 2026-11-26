@@ -20,6 +20,8 @@
  * once, that an approval is answered once and "always" is remembered, that an
  * account's limits of a turn are unset until it sets them and are never zero,
  * that an account has no name and has changed no setting until it does,
+ * that an address is invited only by a row of the list, however it is
+ * capitalized, and its account starts on the credits that row names,
  * and that the keys a browser holds reach no row and no function. The migrations also
  * apply to a database with no Storage at all, as the first did, moving to the
  * GitHub App drops the OAuth App's grants a database already held, and moving
@@ -120,7 +122,23 @@ p = await one("select * from moody_ensure_profile($1,$2,$3)", [A, "a@x.test", 60
 check("what it changed comes back with it", p.name === "Mara" && JSON.stringify(p.settings) === '{"video_hyperframes":true}', p);
 check("settings are an object", /check/.test(await refused(`update profiles set settings = '[]' where id='${A}'`) ?? ""));
 await db.exec(`update profiles set name = '', settings = '{}' where id='${A}'`);
-await one("select * from moody_ensure_profile($1,$2,$3)", [B, "b@x.test", 60]);
+
+const D = "00000000-0000-0000-0000-00000000000d";
+await db.exec(`insert into auth.users values ('${D}','Dee@X.test'); insert into invites (email, credits) values ('dee@x.test', 300), ('b@x.test', null)`);
+check("an address is invited by a row of the list and by nothing else",
+  (await one("select moody_invited($1,$2) ok", [A, "a@x.test"])).ok === false && (await one("select moody_invited($1,$2) ok", [B, "b@x.test"])).ok === true);
+check("however the person's sign-in capitalizes it", (await one("select moody_invited($1,$2) ok", [D, "Dee@X.test"])).ok === true);
+check("the list keeps an address in lowercase", /check/.test(await refused("insert into invites (email) values ('Mixed@x.test')") ?? ""));
+p = await one("select * from moody_ensure_profile($1,$2,$3)", [D, "Dee@X.test", 60]);
+check("an invite's credits are what its account starts with",
+  p.credits === 300 && (await one("select delta from credit_ledger where user_id=$1 and reason='signup'", [D])).delta === 300, p);
+await db.exec("update invites set credits = 900 where email='dee@x.test'");
+p = await one("select * from moody_ensure_profile($1,$2,$3)", [D, "Dee@X.test", 60]);
+check("and changing the invite later moves no balance", p.credits === 300, p);
+check("an API key names no address, so its account is invited by its profile's",
+  (await one("select moody_invited($1,'') ok", [D])).ok === true && (await one("select moody_invited($1,'') ok", [A])).ok === false);
+p = await one("select * from moody_ensure_profile($1,$2,$3)", [B, "b@x.test", 60]);
+check("an invite that names no credits starts its account on the sign-up credits", p.credits === 60, p);
 await one("select * from moody_ensure_profile($1,$2,$3)", [C, "c@x.test", 0]);
 
 check("no credits, no session", (await refused("select * from moody_request_session($1,'blender','cpu','auto',1,2)", [C])) === "insufficient_credits");
@@ -325,6 +343,9 @@ check("an account from before limits were its own has set none", earlier.credits
 await upgraded.exec(migrations[migration("settings")] ?? "");
 const unnamed = (await upgraded.query<Row>("select * from moody_ensure_profile($1,$2,$3)", [A, "a@x.test", 60])).rows[0] ?? {};
 check("nor a name or a setting, once it can", unnamed.credits === 60 && unnamed.name === "" && JSON.stringify(unnamed.settings) === "{}", unnamed);
+await upgraded.exec(migrations[migration("invites")] ?? "");
+const uninvited = (await upgraded.query<Row>("select p.credits, moody_invited(p.id, p.email) ok from moody_ensure_profile($1,$2,$3) p", [A, "a@x.test", 60])).rows[0] ?? {};
+check("an account from before there was a list keeps what it has, and is on no list", uninvited.credits === 60 && uninvited.ok === false, uninvited);
 const bare = new PGlite();
 await bare.exec(SUPABASE);
 check("the migrations apply where there is no Storage", await (async () => {
@@ -342,7 +363,7 @@ for (const role of ["anon", "authenticated"]) {
   check(`${role} sees no profile rows`, (await one("select count(*)::int n from profiles")).n === 0);
   check(`${role} sees no session rows`, (await one("select count(*)::int n from sessions")).n === 0);
   check(`${role} sees no api key rows`, (await one("select count(*)::int n from api_keys")).n === 0);
-  for (const table of ["projects", "assets", "project_events", "agent_transcripts", "github_connections", "epic_connections"]) {
+  for (const table of ["projects", "assets", "project_events", "agent_transcripts", "github_connections", "epic_connections", "invites"]) {
     check(`${role} sees no ${table} rows`, (await one(`select count(*)::int n from ${table}`)).n === 0);
   }
   check(`${role} cannot start a turn`, /permission denied/.test(await refused("select moody_begin_turn($1,$2,'x',120)", [pa.id, A]) ?? ""));
@@ -351,6 +372,8 @@ for (const role of ["anon", "authenticated"]) {
     && /permission denied/.test(await refused("select * from moody_transcript_sessions($1,'-work')", [pa.id]) ?? "")
     && /permission denied/.test(await refused("select * from moody_transcript_subkeys($1,'-work','s-1')", [pa.id]) ?? ""));
   check(`${role} cannot start an engine`, /permission denied/.test(await refused("select * from moody_request_session($1,'blender','cpu','auto',1,5,$2)", [A, pa.id]) ?? ""));
+  check(`${role} cannot ask who is invited, or invite anyone`, /permission denied/.test(await refused("select moody_invited($1,'b@x.test')", [B]) ?? "")
+    && /row-level security/.test(await refused("insert into invites (email) values ('stranger@x.test')") ?? ""));
   check(`${role} cannot grant itself credits`, /permission denied/.test(await refused("select moody_add_credits($1,999,'grant',null)", [A]) ?? ""));
   check(`${role} cannot insert a profile`, /row-level security/.test(await refused(`insert into profiles (id) values ('${C}')`) ?? "") || /duplicate/.test(await refused(`insert into profiles (id) values ('${C}')`) ?? "x") === false);
   await db.exec("reset role");
