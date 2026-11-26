@@ -14,6 +14,9 @@
  * by its label, or by its id as words where the card gave none. A control writes its value to the
  * card's state (`context.ts`) on every change, which is what lets a picture follow a slider as it
  * is dragged; on a locked card the controls are disabled and show what was chosen.
+ *
+ * On an instant card a press is the answer, so there a segmented choice is a row of buttons: the
+ * arrow keys of a radio group would choose, and so lock the card, on the way to the option meant.
  * @module
  */
 import type { ReactNode } from 'react';
@@ -215,6 +218,27 @@ function Group({ input, className, children }: GroupProps) {
  */
 export function Segmented({ node }: ViewProps) {
   const input = useInput(node);
+  if (input.instant) {
+    // A press is the answer on an instant card, so each option is a button, not a radio to move through.
+    return (
+      <Group input={input} className="ui-segmented">
+        {options(node).map((choice) => (
+          <button
+            key={String(choice.value)}
+            type="button"
+            className="ui-segment"
+            data-chosen={input.value === choice.value ? 'true' : undefined}
+            aria-current={input.value === choice.value ? 'true' : undefined}
+            onClick={() => {
+              input.set(choice.value);
+            }}
+          >
+            <span>{choice.label}</span>
+          </button>
+        ))}
+      </Group>
+    );
+  }
   return (
     <Group input={input} className="ui-segmented">
       {options(node).map((choice) => (

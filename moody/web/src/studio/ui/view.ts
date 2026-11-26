@@ -35,6 +35,8 @@ export interface InputBinding {
   set: (value: unknown) => void;
   /** Whether the card is locked in, so the control shows its value and takes no change. */
   frozen: boolean;
+  /** Whether choosing locks the card at once, so a choice is a button to press. */
+  instant: boolean;
   /** The `id` of its control in the document, unique to this card. */
   domId: string;
   /** The words that name it: its label, else its id as words. */
@@ -61,6 +63,7 @@ export function useInput(node: UiNode): InputBinding {
       }
     },
     frozen: card.frozen,
+    instant: card.instant,
     domId: `${card.uid}-${id ?? node.path}`,
     label: label ?? (id ?? node.type).replaceAll('_', ' '),
     labeled: label !== null,

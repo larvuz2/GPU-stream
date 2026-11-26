@@ -24,6 +24,7 @@ import { Grid, Row, Stack, Tab, Tabs } from './components/layout';
 import { Model } from './components/Model';
 import { Pick, Reorder } from './components/pick';
 import { Table } from './components/Table';
+import { Upload } from './components/Upload';
 import type { UiNode } from './tree';
 import { STARTS, WORDS } from './values';
 import type { View } from './view';
@@ -66,4 +67,5 @@ export const COMPONENTS: Record<ComponentType, ComponentDef> = {
   color: { view: ColorInput, start: STARTS.color },
   pick: { view: Pick, start: STARTS.pick, words: WORDS.pick },
   reorder: { view: Reorder, start: STARTS.reorder, words: WORDS.reorder },
+  upload: { view: Upload, start: STARTS.upload, words: WORDS.upload },
 };

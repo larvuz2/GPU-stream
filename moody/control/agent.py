@@ -2459,6 +2459,7 @@ class Agent:
         waits: bool = False,
         media: list[dict[str, Any]] | None = None,
         height: int | None = None,
+        instant: bool = False,
     ) -> Result:
         """Show an interactive card (`ui`), checked against the catalog before any of its files is read (`genui.py`).
 
@@ -2468,7 +2469,9 @@ class Agent:
         check the card, so it is read from the entry or from the file's name first, and an
         engine's files are fetched only once the card is valid: a card that is refused costs no
         upload. The event keeps each file's path, which a reading of the log signs
-        (`Sessions.shown_events`). A card that waits ends the turn (`Result.ends_turn`).
+        (`Sessions.shown_events`). A card that waits ends the turn (`Result.ends_turn`). An
+        `instant` card has no lock-in button: the person's choice locks it, and comes back the
+        same way.
 
         Raises:
             Refused: 400 with what to fix for a card the catalog does not allow, 404 for a tag no
@@ -2502,7 +2505,7 @@ class Agent:
         try:
             data, inputs = genui.card(
                 catalog, uuid.uuid4().hex[:12], title, components, html, submit, waits, height,
-                {file["name"]: file["kind"] for file in files},
+                {file["name"]: file["kind"] for file in files}, instant,
             )
         except genui.Invalid as invalid:
             raise Refused(400, invalid.message) from None
@@ -2523,16 +2526,18 @@ class Agent:
                 self.sessions.launcher.exec(sandbox, f"rm -rf {shlex.quote(scratch)}", EXEC_SECONDS)
         turn.event("ui", {**data, "media": files})
         ends = bool(waits)
-        if data["submit"] is None:
+        # An instant card is locked by the choice itself, any other by its button
+        locks = "choose" if data.get("instant") else "lock it in"
+        if data["submit"] is None and not data.get("instant"):
             note = "The person sees the card in the conversation. It has no lock-in button, so nothing comes back from it."
         elif ends:
             note = (
-                "The person sees the card in the conversation. Your turn ends here: when they lock it in, their next "
+                f"The person sees the card in the conversation. Your turn ends here: when they {locks}, their next "
                 "message carries what they chose, and you go on from it."
             )
         else:
             note = (
-                "The person sees the card in the conversation and may lock it in whenever they like; what they chose then "
+                f"The person sees the card in the conversation and may {locks} whenever they like; what they chose then "
                 "arrives in a message of theirs. Go on meanwhile."
             )
         answer = {"shown": data["title"], "ui_id": data["ui_id"], "kind": data["kind"], "files": [file["name"] for file in files], "note": note}

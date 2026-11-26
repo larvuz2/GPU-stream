@@ -16,6 +16,27 @@
 import { createContext, useContext } from 'react';
 import type { UiMedia, UiState } from './tree';
 
+/** A file the person gave, as the project's library holds it: its entry, and where the page reads it. */
+export interface Uploaded {
+  /** The entry's tag. */
+  tag: string;
+  /** The file's name. */
+  name: string;
+  /** What the file is: `image`, `video`, `audio`, or `file`. */
+  kind: string;
+  /** An address the page can show or play it from. */
+  url: string;
+}
+
+/**
+ * Takes a file from the person into the project's library.
+ *
+ * @param file The file.
+ * @param into Where in the library it goes: a section's name, or `null` for the library's own choice.
+ * @returns The entry it became. A file that could not be taken rejects with the reason, in words the person can read.
+ */
+export type UploadFile = (file: File, into: { section: string | null }) => Promise<Uploaded>;
+
 /** A card, as its components see it. */
 export interface Card {
   /** The card's values, by input id. */
@@ -26,6 +47,23 @@ export interface Card {
   media: (name: unknown) => UiMedia | null;
   /** Whether the card is locked in: its inputs show what was chosen and no longer change. */
   frozen: boolean;
+  /**
+   * Whether choosing locks the card at once: it has no lock-in button, and its one input shows its
+   * choices as buttons to press rather than as a selection to move through.
+   */
+  instant: boolean;
+  /** Takes a file from the person, or `null` where the page showing the card has no way to. */
+  upload: UploadFile | null;
+  /**
+   * Keeps the card from being locked in while an input is at work on something its value depends
+   * on, such as a file on its way to the library, and releases it again.
+   *
+   * @param key What holds the card, unique to the input.
+   * @param why Why it cannot be locked in yet, as the card says it, or `null` to release it.
+   */
+  hold: (key: string, why: string | null) => void;
+  /** The card's sounds, so that starting one pauses the others. */
+  sounds: Set<HTMLAudioElement>;
   /** One input's value in words, for a text that shows it. */
   words: (id: string) => string;
   /** A prefix that makes element ids unique to this card. */

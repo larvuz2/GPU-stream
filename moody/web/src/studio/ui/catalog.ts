@@ -66,6 +66,8 @@ export interface AdjustmentSpec {
 /** The catalog's shape, as far as the app reads it. */
 export interface UiCatalog {
   limits: Record<string, number>;
+  /** The endings of the names of the files of each kind a card shows or takes. */
+  media_kinds: Record<string, string[]>;
   adjustments: Record<string, AdjustmentSpec>;
   finishes: Record<string, { doc: string }>;
   blends: string[];
