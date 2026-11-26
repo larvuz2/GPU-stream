@@ -183,6 +183,7 @@ from looking import LOOK_BYTES, NoPicture, look_arguments, picture_of
 from loop import BUILT_INS, PREFIX, Brief, Loop, Settings, Subagent, ToolSpec, TurnLoop, Workspace, sdk_loop
 from service import (
     DESKTOP,
+    KIND_FIELD,
     LIBRARY_BUCKET,
     MEGABYTE,
     OPEN,
@@ -333,7 +334,7 @@ engines on cloud machines and drive them, and you ask the person at every decisi
 # The project
 
 Discipline: {discipline['name']}. {discipline.get('blurb', '')}
-Format: {project['format'] or 'not chosen yet'}.
+Its kinds: {', '.join(discipline.get('formats', [])) or 'none'}. Which one this project is, is in the project's state.
 
 The engines of this discipline:
 {chr(10).join(engines) or '- none yet'}
@@ -1326,11 +1327,13 @@ class Agent:
         locked = said.get("ui")
         if locked:
             shown = self.store.rows("project_events", project_id=f"eq.{turn.project_id}", kind="eq.ui")
-            title = next((row["data"].get("title", "") for row in shown if row["data"].get("ui_id") == locked["ui_id"]), "")
-            words += (
-                f"\n\n[The person locked in the card {json.dumps(title or locked['ui_id'])} (ui_id {locked['ui_id']}) "
-                f"with these values: {json.dumps(locked.get('value'))}]"
-            )
+            card = next((row["data"] for row in shown if row["data"].get("ui_id") == locked["ui_id"]), {})
+            title = json.dumps(card.get("title") or locked["ui_id"])
+            if card.get("sets") == KIND_FIELD:
+                line = f"[The person chose this project's kind on the card {title}: {turn.project['format']}]"
+            else:
+                line = f"[The person locked in the card {title} (ui_id {locked['ui_id']}) with these values: {json.dumps(locked.get('value'))}]"
+            words = "\n\n".join(filter(None, (words, line)))
 
         def history() -> list[dict[str, Any]]:
             if not resume:
@@ -1419,6 +1422,7 @@ class Agent:
             [
                 "The project's state at the start of this turn:",
                 f"Name: {project['name']}",
+                f"Kind: {project['format'] or 'not chosen yet'}",
                 f"GitHub: {linked}",
                 f"Generation: {'available' if self.generator else 'not configured on this deployment'}",
                 f"Credits the person has: {credits}",

@@ -168,7 +168,7 @@ check("a revoked key names nobody", (await one("select moody_use_api_key('h2') u
 check("an unknown key names nobody", (await one("select moody_use_api_key('nope') u")).u === null);
 
 // Projects, and the engines started in them.
-const pa = await one(`insert into projects (user_id,name,discipline,format,library_sections) values ($1,'Mara','media','Movie','["Characters"]') returning *`, [A]);
+const pa = await one(`insert into projects (user_id,name,discipline,format,library_sections) values ($1,'Mara','media','Film & TV','["Characters"]') returning *`, [A]);
 const pb = await one("insert into projects (user_id,name,discipline) values ($1,'Other','music') returning *", [B]);
 check("a project starts with an empty plan and no turn", JSON.stringify(pa.plan) === "[]" && pa.turn_id === null && pa.pinned === false, pa);
 check("an engine in another user's project is refused", (await refused("select * from moody_request_session($1,'filmcraft','cpu','auto',1,5,$2)", [A, pb.id])) === "no_project");

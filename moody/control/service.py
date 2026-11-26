@@ -97,6 +97,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import httpx
 
+import genui
 from github_client import EPIC_FLOW, EPIC_SCOPE, GitHub, GitHubError, Grant, read_state, seal, sign_state, unseal
 import unreal
 
@@ -159,6 +160,8 @@ PROJECT_FIELDS = (
     "plan",
     "permissions",
 )
+# What of a project the card that asks its kind sets, which is also the id of that card's one input
+KIND_FIELD = "format"
 # The limits of one turn an account sets for itself, as `profiles` and `Config` name them
 LIMITS = ("turn_budget_usd", "turn_limit")
 ASSET_FIELDS = ("id", "section", "name", "tag", "description", "metadata", "created_at", "updated_at")
@@ -666,13 +669,15 @@ def with_query(url: str, **params: str) -> str:
     return urlunsplit(parts._replace(query=urlencode(query)))
 
 
-def default_sections(discipline: str, project_format: str) -> list[str]:
-    """The library sections a new project starts with: a film's cast and world, a commercial's products and shots."""
-    if discipline != "media":
-        return []
-    if project_format == "Commercial":
-        return ["Products", "Shots"]
-    return ["Characters", "Environments", "Props"]
+def default_sections(discipline: dict[str, Any], project_format: str) -> list[str]:
+    """The library sections a project of a discipline and a kind starts with, as the catalog gives them.
+
+    A kind's own (`kinds.<format>.sections`: a commercial's products and
+    shots) where it has any, else the discipline's (`sections`: a film's cast
+    and world), else none.
+    """
+    kind = discipline.get("kinds", {}).get(project_format, {})
+    return list(kind.get("sections") or discipline.get("sections") or [])
 
 
 def clean_sections(sections: list[str]) -> list[str]:
@@ -1058,6 +1063,9 @@ class Sessions:
     ) -> dict[str, Any]:
         """Make a project of one of the catalog's disciplines, in one of its formats, with that format's first sections.
 
+        A project made without a format, in a discipline that asks its kind, opens on the card that
+        asks it (`opening_card`): the project's first event, written here with no turn and no model.
+
         With `github_repo`, the project starts linked to that repository (and `github_branch`, where
         given), which is checked as `link_repo` checks it before anything is made: what the studio's
         "Import from GitHub" makes.
@@ -1080,12 +1088,73 @@ class Sessions:
                 "name": " ".join(name.split())[:120] or "Untitled project",
                 "discipline": discipline,
                 "format": project_format,
-                "library_sections": default_sections(discipline, project_format),
+                "library_sections": default_sections(offered, project_format),
                 "github_repo": linked[0],
                 "github_branch": linked[1],
             },
         )
+        card = None if project_format else self.opening_card(offered)
+        if card is not None:
+            self.add_event(row["id"], None, "ui", card)
         return self.public_project(row)
+
+    def opening_card(self, discipline: dict[str, Any]) -> dict[str, Any] | None:
+        """The card that asks a new project's kind, as its `ui` event, or nothing for a discipline that does not ask.
+
+        A discipline asks where the catalog gives it an `opening`, the card's
+        title, and formats to choose from. The card is one `pick` of the
+        formats, in the catalog's order, each with the line and the icon its
+        `kinds` entry names: the icon is looked up in the catalog's `icons`
+        and left out where there is none, or where the catalog of cards has
+        no icon on an option. Choosing locks the card (`instant`), and `sets`
+        names what of the project the choice sets, which is also the pick's
+        id, so the message that locks it carries `{format: <the kind>}`
+        (`chosen_kind`). The card is built and checked as any other is
+        (`genui.card`), so it is one the page renders.
+
+        Raises:
+            genui.Invalid: The catalog describes a card the catalog of cards does not allow.
+        """
+        formats = discipline.get("formats") or []
+        if not discipline.get("opening") or not formats:
+            return None
+        cards = genui.catalog()
+        icons = self.catalog.data.get("icons", {}) if "icon" in cards.shapes["option"]["props"] else {}
+        options = []
+        for name in formats:
+            kind = discipline.get("kinds", {}).get(name, {})
+            option = {"value": name, "label": name}
+            if kind.get("note"):
+                option["note"] = kind["note"]
+            if icons.get(kind.get("icon")):
+                option["icon"] = icons[kind["icon"]]
+            options.append(option)
+        spec = {"type": "pick", "id": KIND_FIELD, "options": options}
+        data, _ = genui.card(cards, uuid.uuid4().hex[:12], discipline["opening"], spec, None, None, False, None, {})
+        return {**data, "waits": True, "instant": True, "sets": KIND_FIELD, "media": []}
+
+    def chosen_kind(self, project: dict[str, Any], card: dict[str, Any], value: Any) -> str | None:
+        """The kind a message that locks a card chooses for the project, or nothing where the card sets none.
+
+        Raises:
+            Refused: 400 for a kind the project's discipline does not offer.
+        """
+        if card.get("sets") != KIND_FIELD:
+            return None
+        discipline = self.catalog.disciplines.get(project["discipline"], {})
+        chosen = value.get(KIND_FIELD) if isinstance(value, dict) else None
+        if not isinstance(chosen, str) or chosen not in discipline.get("formats", []):
+            raise Refused(400, f"{discipline.get('name', project['discipline'])} has no format {chosen!r}.")
+        return chosen
+
+    def set_kind(self, project: dict[str, Any], chosen: str) -> None:
+        """Make a project one of its discipline's kinds, with that kind's first sections where the library is untouched."""
+        discipline = self.catalog.disciplines.get(project["discipline"], {})
+        changes: dict[str, Any] = {"format": chosen, "updated_at": now()}
+        untouched = project["library_sections"] == default_sections(discipline, project["format"])
+        if untouched and not self.project_assets(project):
+            changes["library_sections"] = default_sections(discipline, chosen)
+        self.store.update("projects", changes, id=f"eq.{project['id']}")
 
     def update_project(
         self,
@@ -1580,7 +1649,8 @@ class Sessions:
         if len(text) > MESSAGE_LIMIT:
             raise Refused(413, "That message is too long.")
         project = self.owned_project(user, project_id)
-        locked = self.locked_card(project, ui) if ui is not None else None
+        locked, card = self.locked_card(project, ui) if ui is not None else (None, {})
+        kind = self.chosen_kind(project, card, locked["value"]) if locked else None
         turn_id = self.store.rpc(
             "moody_begin_turn",
             p_project=project["id"],
@@ -1589,6 +1659,9 @@ class Sessions:
             p_stale_seconds=TURN_STALE_SECONDS,
             p_ui=locked,
         )
+        if kind is not None:
+            # After the turn is the project's and before its job reads the project: the turn begins knowing its kind
+            self.set_kind(project, kind)
         try:
             self.jobs.turn(project["id"], turn_id)
         except Exception as error:
@@ -1598,8 +1671,8 @@ class Sessions:
             raise Refused(503, "The agent could not be started. Try again.") from error
         return turn_id
 
-    def locked_card(self, project: dict[str, Any], ui: dict[str, Any]) -> dict[str, Any]:
-        """A message's `ui` as the turn's first event keeps it: the card's ID and the state it was locked in with.
+    def locked_card(self, project: dict[str, Any], ui: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        """A message's `ui` as the turn's first event keeps it (the card's ID and the state it was locked in with), and the card.
 
         Raises:
             Refused: 400 for a `ui` without a card's ID or whose state is not JSON, 413 for a state
@@ -1615,9 +1688,10 @@ class Sessions:
         if size > UI_VALUE_LIMIT_BYTES:
             raise Refused(413, "That card's value is too large.")
         shown = self.store.rows("project_events", project_id=f"eq.{project['id']}", kind="eq.ui")
-        if not any(row["data"].get("ui_id") == ui_id for row in shown):
+        card = next((row["data"] for row in shown if row["data"].get("ui_id") == ui_id), None)
+        if card is None:
             raise Refused(404, "This project has no such card.")
-        return {"ui_id": ui_id, "value": ui["value"]}
+        return {"ui_id": ui_id, "value": ui["value"]}, card
 
     def answer_approval(self, user: User, project_id: str, approval_id: str, decision: str) -> bool:
         """Record the person's answer to an approval the agent of their project waits on; returns whether it stands.

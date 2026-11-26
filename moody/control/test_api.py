@@ -79,6 +79,7 @@ from loop import BUILT_INS, PREFIX, SDK_VARIABLES, Blocks, Settings, Workspace, 
 from scripted_loop import Reply, ScriptedLoop
 from transcript import Transcript
 from generation import IMAGE_MODELS, VIDEO_MODELS, Fal, GenerationStopped, video_kilotokens
+import genui
 from github_client import EPIC_FLOW, GitHub, GitHubError, Grant, read_state, seal, sign_state, unseal
 from launcher import ModalLauncher, origin
 from service import OPEN, Catalog, Clone, Config, OwnCopy, Refused, Sessions, Store, User, hash_key
@@ -907,7 +908,7 @@ def auth(token: str) -> dict[str, str]:
 
 def new_project(client: TestClient, token: str = "alice-token", asks: bool = False, **body: Any) -> dict[str, Any]:
     """Make a project. Its agent runs the tools the person approves without asking, unless `asks` leaves that on."""
-    response = client.post("/v1/projects", headers=auth(token), json={"name": "Mara", "discipline": "media", "format": "Movie", **body})
+    response = client.post("/v1/projects", headers=auth(token), json={"name": "Mara", "discipline": "media", "format": "Film & TV", **body})
     assert response.status_code == 200, response.text
     project = response.json()["project"]
     if not asks:
@@ -1271,8 +1272,10 @@ def test_a_project_is_made_listed_read_changed_and_deleted(studio):
     film = new_project(client)
     assert film["library_sections"] == ["Characters", "Environments", "Props"] and film["plan"] == []
     assert film["github_repo"] is None and film["pinned"] is False
-    ad = new_project(client, name="  Spot   30 ", format="Commercial")
-    assert ad["name"] == "Spot 30" and ad["library_sections"] == ["Products", "Shots"]
+    ad = new_project(client, name="  Spot   30 ", format="Commercials")
+    assert ad["name"] == "Spot 30" and ad["library_sections"] == ["Products", "Shots"], "a kind's own sections, from the catalog"
+    old = client.post("/v1/projects", headers=auth("alice-token"), json={"name": "Old", "discipline": "media", "format": "Movie"})
+    assert old.status_code == 400 and "Media has no format 'Movie'" in old.json()["detail"]
     assert [p["id"] for p in client.get("/v1/projects", headers=auth("alice-token")).json()["projects"]] == [ad["id"], film["id"]]
 
     pinned = client.patch(f"/v1/projects/{film['id']}", headers=auth("alice-token"), json={"pinned": True}).json()["project"]
@@ -1345,6 +1348,86 @@ def test_another_users_project_does_not_exist_for_this_one(studio):
     for strange in ("nope", "1,user_id.eq.x"):
         assert client.get(f"/v1/projects/{strange}", headers=auth("alice-token")).status_code == 404
         assert client.delete(f"{base}/library/{strange}", headers=auth("alice-token")).status_code == 404
+
+
+def test_a_project_made_without_its_kind_opens_on_the_card_that_asks_it_and_locking_the_card_sets_it(studio, monkeypatch):
+    client, model, store = studio.client, studio.model, studio.store
+    make = lambda **body: client.post("/v1/projects", headers=auth("alice-token"), json={"name": "Reel", **body})
+    made = make(discipline="media")
+    assert made.status_code == 200
+    reel = made.json()["project"]
+    assert reel["format"] == "" and reel["library_sections"] == ["Characters", "Environments", "Props"]
+    log = events(client, reel["id"])
+    assert log["running"] is False and [e["kind"] for e in log["events"]] == ["ui"], "the card is the project's first event"
+    assert log["events"][0]["turn_id"] is None and model.requests == [], "written with no turn and no model"
+    card = log["events"][0]["data"]
+    assert (card["title"], card["kind"], card["instant"], card["sets"], card["submit"], card["waits"], card["media"]) == (
+        "What kind of video are you making?", "components", True, "format", None, True, [])
+    pick = card["spec"]
+    assert (pick["type"], pick["id"]) == ("pick", "format") and set(pick) == {"type", "id", "options"}
+    assert [option["value"] for option in pick["options"]] == [
+        "Film & TV", "Social Media", "Vertical Shows", "Commercials", "Music Videos", "Education", "Other"], "the kinds, in the catalog's order"
+    assert all(option["label"] == option["value"] and option["note"] and len(option["note"]) < 70 for option in pick["options"])
+    assert [e["kind"] for e in events(client, new_project(client)["id"])["events"]] == [], "a project made with its kind is not asked it"
+    song = make(discipline="music").json()["project"]
+    assert [e["kind"] for e in events(client, song["id"])["events"]] == [] and song["library_sections"] == [], (
+        "nor is one of a discipline the catalog gives no opening, which starts with the sections the catalog gives it: none"
+    )
+
+    # An icon is the registry's rows, where the registry has the icon and the catalog of cards has icons on options
+    assert not any("icon" in option for option in pick["options"])
+    film_icon, social_icon = ["00111100", "01000010"], ["11110000", "00001111"]
+    monkeypatch.setitem(CATALOG.data, "icons", {"film": film_icon, "social": social_icon})
+    assert not any("icon" in option for option in studio.sessions.opening_card(CATALOG.disciplines["media"])["spec"]["options"])
+    cards = copy.deepcopy(genui.catalog().data)
+    cards["shapes"]["option"]["props"]["icon"] = {"kind": "any"}
+    monkeypatch.setattr(genui, "catalog", lambda: genui.UiCatalog(cards))
+    pictured = studio.sessions.opening_card(CATALOG.disciplines["media"])["spec"]["options"]
+    assert [option.get("icon") for option in pictured] == [film_icon, social_icon, None, None, None, None, None]
+    monkeypatch.undo()
+
+    # The message that locks the card sets the kind, or is refused and starts nothing
+    lock = lambda value: client.post(f"/v1/projects/{reel['id']}/messages", headers=auth("alice-token"),
+                                     json={"text": "", "ui": {"ui_id": card["ui_id"], "value": value}})
+    for refused in ({"format": "Movie"}, {"format": 3}, {}, "Social Media", None):
+        answer = lock(refused)
+        assert answer.status_code == 400 and "Media has no format" in answer.json()["detail"], refused
+    assert store.tables["projects"][reel["id"]]["format"] == "" and kinds(client, reel["id"]) == ["ui"] and model.requests == []
+    model.script(reply(say("A commercial. What does it sell?")))
+    assert lock({"format": "Commercials"}).status_code == 202
+    chosen = client.get(f"/v1/projects/{reel['id']}", headers=auth("alice-token")).json()["project"]
+    assert chosen["format"] == "Commercials" and chosen["library_sections"] == ["Products", "Shots"], "with that kind's first sections"
+    words, state = said(model.requests[-1])
+    assert words == '[The person chose this project\'s kind on the card "What kind of video are you making?": Commercials]'
+    assert "Kind: Commercials" in state and "Library sections: Products, Shots" in state, "the first turn already knows the kind"
+    opening = next(e["data"] for e in events(client, reel["id"])["events"] if e["kind"] == "user_message")
+    assert opening == {"text": "", "ui": {"ui_id": card["ui_id"], "value": {"format": "Commercials"}}}
+
+    # A project the person wrote to first has no kind until they choose, and keeps the library they arranged
+    plain = make(discipline="media").json()["project"]
+    model.script(reply(say("Hello.")), reply(say("Education it is.")))
+    message(client, plain["id"], "Hello")
+    assert "Kind: not chosen yet" in said(model.requests[-1])[1]
+    client.patch(f"/v1/projects/{plain['id']}", headers=auth("alice-token"), json={"library_sections": ["Lessons"]})
+    asked = next(e["data"] for e in events(client, plain["id"])["events"] if e["kind"] == "ui")
+    locked = client.post(f"/v1/projects/{plain['id']}/messages", headers=auth("alice-token"),
+                         json={"text": "A lesson on tides", "ui": {"ui_id": asked["ui_id"], "value": {"format": "Education"}}})
+    assert locked.status_code == 202
+    words, state = said(model.requests[-1])
+    assert words.startswith("A lesson on tides\n\n[The person chose this project's kind") and "Kind: Education" in state
+    assert "Library sections: Lessons" in state
+
+
+def test_every_discipline_that_asks_its_kind_has_a_card_the_page_renders_and_a_line_for_each_kind():
+    asking = [discipline for discipline in CATALOG.disciplines.values() if discipline.get("opening")]
+    assert [discipline["id"] for discipline in asking] == ["media"]
+    sessions = Sessions(config(), CATALOG, FakeStore(), FakeLauncher(), InlineJobs())
+    for discipline in asking:
+        card = sessions.opening_card(discipline)
+        assert len(card["title"]) <= genui.catalog().limits["title_chars"] and card["spec"]["options"]
+        assert set(discipline["kinds"]) == set(discipline["formats"]), "every kind has its line and its icon's name"
+        assert all(kind.get("note") and kind.get("icon") for kind in discipline["kinds"].values())
+    assert sessions.opening_card(CATALOG.disciplines["music"]) is None
 
 
 def test_the_library_keeps_entries_and_hands_out_their_files_as_signed_links(studio):
@@ -1597,7 +1680,8 @@ def test_the_agent_works_through_its_tools_and_its_conversation_is_one_session_i
     requests = model.requests
     assert len(requests) == 6
     prompt = requests[0]["system"][0]["text"]
-    assert "Discipline: Media" in prompt and "Format: Movie" in prompt and f"projects/{film['id']}" in prompt
+    assert "Discipline: Media" in prompt and "Its kinds: Film & TV, Social Media, Vertical Shows" in prompt and f"projects/{film['id']}" in prompt
+    assert "Kind: Film & TV" in said(requests[0])[1], "which kind the project is, is its state: it can be chosen after the project is made"
     assert "SKILL-TEXT" not in prompt, "no skill's text is in the prompt: the loop loads one when the work calls for it"
     assert all(r["system"] == requests[0]["system"] for r in requests)
     assert requests[0]["tools"] == ["Agent", "WebSearch", "WebFetch", "Skill", "Read", *(f"{PREFIX}{name}" for name in TOOL_NAMES)]
@@ -3590,7 +3674,7 @@ def test_the_program_that_reads_a_file_for_a_look_gets_nothing_of_the_worker(mon
 
 def test_the_system_prompt_carries_no_skill_and_says_how_the_agent_works_with_engines_approvals_and_subagents():
     skills = read_skills(skills_directory())
-    project = {"id": "p", "discipline": "media", "format": "Movie"}
+    project = {"id": "p", "discipline": "media", "format": "Film & TV"}
     prompt = system_prompt(CATALOG, project, frozenset({"cpu"}))
     offered = skills_for(skills, CATALOG, "media")
     assert len(offered) >= 2 and not any(skill.body[:200] in prompt for skill in offered)
@@ -3923,7 +4007,7 @@ def test_a_message_can_lock_in_a_card_the_agent_showed_and_the_model_reads_which
     assert words.startswith("This one.\n\n[The person locked in the card \"Pick a grade\" (ui_id ui-grade) with these values: ")
     assert json.loads(words[words.index("values: ") + 8:-1]) == value
     assert post({"ui": {"ui_id": "ui-grade", "value": None}}).status_code == 202, "a card can be locked in with no words"
-    assert said(model.requests[-1])[0].startswith("\n\n[The person locked in the card")
+    assert said(model.requests[-1])[0].startswith("[The person locked in the card")
 
 
 def test_a_card_that_waits_ends_the_turn_and_its_lock_resumes_the_session_with_what_was_chosen(studio):
