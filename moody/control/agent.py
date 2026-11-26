@@ -350,10 +350,11 @@ The machines an engine runs on (`tier`):
   and two to five short options. Asking ends your turn: the question is shown to the person, and their answer, an
   option or their own words, is the next message you get. Decide the craft questions yourself, as a professional
   would, and say what you chose.
-- Every decision you put to the person carries your own recommendation, chosen for this project's taste and
-  brief, in a question and in an interactive card alike: name the option you would choose in `ask_user`'s
-  `recommended`, and open a card on what you would choose. They work with you for your judgment, and with it in
-  front of them they agree in one click or see what they are deciding against.
+- Where a decision is the person's and you have a view, say which way you would go: in a question, name that
+  option in `ask_user`'s `recommended`, and in a report, say it in a few words beside the decision. They work with
+  you for your judgment, and with it in front of them they agree in a word or see what they are deciding
+  against. Leave it out where you have no real preference. Keep interactive cards clean: a card shows the thing
+  and its controls, and no recommendation is written on it.
 - Keep the plan current with `update_plan`: a few concrete tasks, one of them active at a time.
 - The library holds what the project is made of: characters, environments, props, products, shots, or whatever
   sections it needs (`set_library_sections`). Each entry has a tag such as `@mara`, and the person and the
@@ -485,9 +486,8 @@ LOOK = {
 TOOLS = [
     tool(
         "ask_user",
-        "Ask the person a question whose answer is theirs to give, with options they can pick, one of which you "
-        "recommend. This ends your turn: the question is shown to them, and their answer, an option or their own "
-        "words, is the next message you get.",
+        "Ask the person a question whose answer is theirs to give, with options they can pick. This ends your turn: "
+        "the question is shown to them, and their answer, an option or their own words, is the next message you get.",
         {
             "question": {"type": "string", "description": "The question, in a sentence or two."},
             "options": {
@@ -497,11 +497,12 @@ TOOLS = [
             },
             "recommended": {
                 "type": "string",
-                "description": "The option you would choose for this project, written exactly as it is in options. "
-                "The person sees it marked as your recommendation.",
+                "description": "The option you would choose for this project, where you have a view, written exactly "
+                "as it is in options. The person sees it marked as your recommendation. Leave it out where you have "
+                "no real preference.",
             },
         },
-        ["question", "options", "recommended"],
+        ["question", "options"],
         activity="curious", main_only=True,
     ),
     tool(
@@ -1633,13 +1634,14 @@ class Agent:
 
     # The person
 
-    def tool_ask_user(self, turn: Turn, question: str, options: list[str], recommended: str) -> Result:
-        """Put a question to the person, with the option the agent would choose, and end the turn.
+    def tool_ask_user(self, turn: Turn, question: str, options: list[str], recommended: str | None = None) -> Result:
+        """Put a question to the person, with the option the agent would choose where it has a view, and end the turn.
 
         The person's answer is the next turn's message. The page marks the
         recommendation itself, so it is named apart from the options and has
         to be one of them, and an option that carries the mark in its own
-        text is sent back to be written without it.
+        text is sent back to be written without it. A question the agent has
+        no preference on carries none.
 
         Raises:
             Refused: 409 for a second question in one turn, 400 for a recommendation that is none of
@@ -1647,8 +1649,8 @@ class Agent:
         """
         if turn.asked:
             raise Refused(409, "Ask one question at a time; ask this one after the person answers.")
-        chosen = next((option for option in options if option.strip() == recommended.strip()), None)
-        if chosen is None:
+        chosen = None if recommended is None else next((option for option in options if option.strip() == recommended.strip()), None)
+        if recommended is not None and chosen is None:
             raise Refused(
                 400,
                 f"recommended has to be one of the options, written exactly as it is there: {' / '.join(options)}. "
@@ -1661,7 +1663,7 @@ class Agent:
                 "that option in recommended. Ask again.",
             )
         turn.asked = True
-        turn.event("ask", {"question": question, "options": options, "recommended": chosen})
+        turn.event("ask", {"question": question, "options": options, **({} if chosen is None else {"recommended": chosen})})
         return Result(
             "The question is with the person now, and this turn is over. Their answer is the next message you get.",
             "Asked",

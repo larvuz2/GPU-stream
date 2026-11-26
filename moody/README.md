@@ -282,7 +282,7 @@ Modal, Anthropic, fal, and GitHub: who a credential names, what each route and
 tool returns and refuses, that one user's sessions, projects, and connections do not exist
 for another, the agent driven by a scripted model through every tool, its
 subagents, approvals, and skills, that `ask_user` ends a turn and a second
-message waits for the first, that a question names the option the agent
+message waits for the first, that a question may name the option the agent
 recommends, that a turn runs on its person's own limits and says which one
 stopped it, the pictures the agent looks at its generations
 and the library by (made by a real ffmpeg, so those tests skip where there is

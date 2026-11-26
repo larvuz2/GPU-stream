@@ -1666,26 +1666,31 @@ def test_one_question_ends_a_turn_and_a_second_in_it_is_refused(studio):
     assert kinds(client, film["id"]).count("ask") == 1
 
 
-def test_a_question_names_the_option_the_agent_would_choose_or_is_sent_back_to(studio):
+def test_a_question_may_name_the_option_the_agent_would_choose_and_one_named_wrongly_is_sent_back(studio):
     client, model = studio.client, studio.model
     film = new_project(client)
-    unnamed = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"])
     other = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended="Sepia")
     marked = use("ask_user", question="Color or black and white?", options=["Color (Recommended for a comedy)", "Black and white"],
                  recommended="Color (Recommended for a comedy)")
     spaced = use("ask_user", question="Color or black and white?", options=["Color", "Black and white"], recommended=" Black and white ")
-    model.script(reply(unnamed), reply(other), reply(marked), reply(spaced))
+    model.script(reply(other), reply(marked), reply(spaced))
     message(client, film["id"], "Hi")
     told = [next(iter(tool_results(request).values())) for request in model.requests[1:]]
-    assert all(result["is_error"] for result in told) and len(model.requests) == 4, "each is answered, and the turn goes on"
-    assert "recommended" in told[0]["content"], "the loop holds the input to the tool's schema, which requires it"
-    assert "recommended has to be one of the options, written exactly as it is there: Color / Black and white" in told[1]["content"]
-    assert "An option's text is only the option" in told[2]["content"] and "name that option in recommended" in told[2]["content"]
+    assert all(result["is_error"] for result in told) and len(model.requests) == 3, "each is answered, and the turn goes on"
+    assert "recommended has to be one of the options, written exactly as it is there: Color / Black and white" in told[0]["content"]
+    assert "An option's text is only the option" in told[1]["content"] and "name that option in recommended" in told[1]["content"]
     log = events(client, film["id"])["events"]
     assert [e["data"] for e in log if e["kind"] == "ask"] == [
         {"question": "Color or black and white?", "options": ["Color", "Black and white"], "recommended": "Black and white"}
     ], "one question reached the person, its recommendation as the option is written"
     assert [e["kind"] for e in log][-3:] == ["tool_end", "usage", "turn_end"]
+
+    # A question the agent has no preference on names none, and reaches the person as it is
+    model.steps.clear()
+    model.script(reply(use("ask_user", question="What is the story?", options=["I have a script", "I have an idea"])))
+    message(client, film["id"], "Black and white")
+    asked = [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "ask"]
+    assert asked[-1] == {"question": "What is the story?", "options": ["I have a script", "I have an idea"]}
 
 
 def test_a_tool_input_that_fails_its_schema_is_answered_not_run(studio):
@@ -3593,7 +3598,8 @@ def test_the_system_prompt_carries_no_skill_and_says_how_the_agent_works_with_en
     flat = " ".join(prompt.split())
     for said_once in ("none starts unless the work needs it or the person asked", "The person approves some steps", "Agent tool",
                       "Skill tool", "<project_state>", "mcp__moody__<name>", "the Moody agent",
-                      "Every decision you put to the person carries your own recommendation", "`ask_user`'s `recommended`",
+                      "Where a decision is the person's and you have a view, say which way you would go",
+                      "`ask_user`'s `recommended`", "Keep interactive cards clean",
                       "A long job (many steps, subagents, or minutes of work) ends with a report",
                       "A short exchange gets a short answer in plain sentences, with no headings"):
         assert flat.count(said_once) == 1, said_once

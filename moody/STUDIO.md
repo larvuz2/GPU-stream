@@ -381,18 +381,17 @@ a process the model steers.
   locks in a card names it (`ui_id`, which must be a `ui` event of the
   project) and carries its state (`value`, JSON of at most 64 KiB); the
   model reads them as a line after the person's words.
-- **The agent recommends.** Every decision it puts to the person carries the
-  answer it would give, chosen for the project's taste and brief. A question
-  (`ask_user`) names one of its options as `recommended`; one whose
-  `recommended` is none of its options, or one of whose options says in its
-  own text that it is recommended, is sent back to the agent and does not
-  reach the person, so an option's text is only the option. An interactive card
-  that sends an answer back opens on the agent's recommendation: an input that
-  chooses among options says which one is recommended, and an input that sets
-  a value (a slider, a color, an order) starts at the recommended value. The
-  page marks the recommendation with a quiet "(recommended)" and keeps the way
-  back to it one click away, so agreeing is one click and deciding otherwise
-  is never hidden.
+- **The agent recommends where a decision is the person's.** A question
+  (`ask_user`) may name one of its options as `recommended`, the one the agent
+  would choose for the project's taste and brief, and the page marks it with a
+  quiet "(recommended)"; a question the agent has no preference on names none.
+  One whose `recommended` is none of its options, or one of whose options says
+  in its own text that it is recommended, is sent back to the agent and does
+  not reach the person, so an option's text is only the option. In a report,
+  the agent says which way it would go beside each decision it leaves to the
+  person. Interactive cards carry no recommendation: a card shows the thing
+  and its controls, opens on the starting values the agent gave it, and once
+  the person has changed something offers one way back, "Back to default".
 - **A long job ends with a report.** After work of many steps the agent's last
   message is organized under short headings it chooses for what it has to
   say (what was done, what there is now, decisions that are the person's,
@@ -471,8 +470,8 @@ subagent it belongs to, absent for the agent itself.
 
 ```text
 user_message     {text, ui?: {ui_id, value}}
-ask              {question, options: [string], recommended}   `recommended` is the option the agent
-                                            would choose, one of `options`
+ask              {question, options: [string], recommended?}   `recommended` is the option the agent
+                                            would choose, one of `options`, where it has a view
 text             {text, block?, partial?}   `block` names the block of the answer this is; a later
                                             event with the same `block` replaces it, which is how an
                                             answer appears while it is written (`partial: true`).
