@@ -78,7 +78,7 @@ from looking import NoPicture, picture_of
 from loop import BUILT_INS, PREFIX, SDK_VARIABLES, Blocks, Settings, Workspace, child_environment, fetchable, inside, loop_name
 from scripted_loop import Reply, ScriptedLoop
 from transcript import Transcript
-from generation import IMAGE_MODELS, VIDEO_MODELS, Fal, GenerationStopped, video_kilotokens
+from generation import AUDIO_MODELS, IMAGE_MODELS, SPEECH_VOICES, VIDEO_MODELS, Fal, GenerationStopped, audio_arguments, audio_units, video_kilotokens
 import genui
 from github_client import EPIC_FLOW, GitHub, GitHubError, Grant, read_state, seal, sign_state, unseal
 from launcher import ModalLauncher, origin
@@ -792,19 +792,33 @@ class FakeFal:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         # What a result's file holds, by its suffix; a file of a suffix not here holds its own address
         self.files: dict[str, bytes] = {}
+        # What the next runs raise, one each, before any run answers again
+        self.failures: list[Exception] = []
 
     def run(self, model: str, arguments: dict[str, Any], alive: Callable[[], bool], limit_seconds: float) -> dict[str, Any]:
         self.calls.append((model, arguments))
+        if self.failures:
+            raise self.failures.pop(0)
         if model in VIDEO_MODELS.values():
             return {"video": {"url": "https://fal.example.test/files/shot.mp4"}, "seed": 7}
+        if model == AUDIO_MODELS["music"]:
+            # As the music model answers: how long the piece came out, which may be under what was allowed
+            return {"audio": {"url": f"https://fal.example.test/files/take-{len(self.calls)}.wav"}, "seed": 40 + len(self.calls), "duration": 42.5}
+        if model in AUDIO_MODELS.values():
+            return {"audio": {"url": f"https://fal.example.test/files/take-{len(self.calls)}{'.mp3' if model == AUDIO_MODELS['sound'] else '.wav'}"}}
         return {"images": [{"url": f"https://fal.example.test/files/image-{n}.png"} for n in range(arguments["num_images"])]}
 
     def download(self, url: str) -> tuple[bytes, str]:
-        return self.files.get(PurePosixPath(url).suffix, url.encode()), "video/mp4" if url.endswith(".mp4") else "image/png"
+        types = {".mp4": "video/mp4", ".wav": "audio/wav", ".mp3": "audio/mpeg"}
+        return self.files.get(PurePosixPath(url).suffix, url.encode()), types.get(PurePosixPath(url).suffix, "image/png")
 
     def cost(self, model: str, units: dict[str, float]) -> float | None:
         if model in VIDEO_MODELS.values():
             return round(0.473 * units["second"], 4) if "second" in units else None
+        if model == AUDIO_MODELS["speech"]:
+            return round(0.045 * units["1000 character"], 4)
+        if model in AUDIO_MODELS.values():
+            return round(0.002 * units["second"], 4) if "second" in units else None
         return round(0.15 * units["image"], 4)
 
 
@@ -3631,6 +3645,97 @@ def test_the_agent_is_handed_pictures_of_what_it_generates_and_of_the_library_wh
     assert [label.split(":")[0] for label in answer["looked_at"]] == ["@mara, image 1 of 2"]
     assert told[none["id"]]["is_error"] and told[many["id"]]["is_error"] and "at most 8" in told[many["id"]]["content"]
     assert told[lost["id"]]["is_error"] and "No library entry is tagged @nobody" in told[lost["id"]]["content"]
+
+
+def test_sound_is_generated_by_kind_shown_with_a_player_and_kept_like_pictures(studio):
+    client, fal, model, store = studio.client, studio.fal, studio.model, studio.store
+    film = new_project(client)
+    lyrics = "[verse]\nThe lamp turns over the water\n[chorus]\nCome home, come home"
+    song = use("generate_audio", kind="music", prompt="Genre: sea shanty. BPM: 96. A low male lead and a fiddle.", lyrics=lyrics, seconds=45,
+               save_to={"section": "Music", "name": "The keeper's song", "tag": "@song"})
+    bed = use("generate_audio", kind="music", prompt="Slow strings under a storm", instrumental=True, count=3)
+    door = use("generate_audio", kind="sound", prompt="A heavy wooden door creaks open in a stone hallway", seconds=3, count=2)
+    wave = use("generate_audio", kind="sound", prompt="One wave breaks on rock")
+    line = use("generate_audio", kind="speech", prompt="Three cuts, one hook, and you are done.", voice="Fenrir", style="Warm, at a brisk pace.")
+    plain = use("generate_audio", kind="speech", prompt="Keep the light.")
+    model.script(reply(song), reply(bed), reply(door), reply(wave), reply(line), reply(plain), reply(say("Listen.")))
+    message(client, film["id"], "Make the sound")
+
+    # Each model is asked as its own page on fal says, and a take is a call
+    asked = [(called, arguments) for called, arguments in fal.calls]
+    assert [called for called, _ in asked] == [
+        "minimax/music-3", *["minimax/music-3"] * 3, *["elevenlabs/sound-effects/v3"] * 2, "elevenlabs/sound-effects/v3",
+        "google/gemini-3.8-flash-tts", "google/gemini-3.8-flash-tts"]
+    assert asked[0][1] == {"prompt": "Genre: sea shanty. BPM: 96. A low male lead and a fiddle.", "lyrics": lyrics, "duration": 45}
+    assert asked[1][1] == {"prompt": "Slow strings under a storm", "lyrics": "[instrumental]"}, "the model requires lyrics, so no singing is a lyric sheet of one tag"
+    assert asked[4][1] == {"text": "A heavy wooden door creaks open in a stone hallway", "duration_seconds": 3} and asked[6][1] == {"text": "One wave breaks on rock"}
+    assert asked[7][1] == {"prompt": "Three cuts, one hook, and you are done.", "voice": "Fenrir", "style_instructions": "Warm, at a brisk pace."}
+    assert asked[8][1] == {"prompt": "Keep the light.", "voice": "Kore"}
+    assert set(AUDIO_MODELS) == {"music", "sound", "speech"} and len(SPEECH_VOICES) == 30 and {"Fenrir", "Puck", "Kore", "Charon"} <= set(SPEECH_VOICES)
+    assert audio_arguments("speech", "Hi", None, None, None, None) == ("google/gemini-3.8-flash-tts", {"prompt": "Hi", "voice": "Kore"})
+    assert audio_units("speech", "x" * 500, None) == {"1000 character": 0.5} and audio_units("sound", "x", None) == {} and audio_units("music", "x", 42.5) == {"second": 42.5}
+
+    # The person hears each take with a player, and what was saved is in the library
+    log = events(client, film["id"])["events"]
+    starts = [e["data"] for e in log if e["kind"] == "tool_start"]
+    assert [start["title"] for start in starts] == [
+        "Generating 1 song", "Generating 3 instrumentals", "Generating 2 sounds", "Generating 1 sound", "Generating 1 spoken line",
+        "Generating 1 spoken line"]
+    assert {start["activity"] for start in starts} == {"creating"} and not any(e["kind"] == "approval" for e in log)
+    ends = [e["data"] for e in log if e["kind"] == "tool_end"]
+    assert all(end["ok"] for end in ends), ends
+    assert [[item["kind"] for item in end["media"]] for end in ends] == [["audio"], ["audio"] * 3, ["audio"] * 2, ["audio"], ["audio"], ["audio"]]
+    assert all(item["url"].startswith("https://storage.example.test/") for end in ends for item in end["media"])
+    assert [end["summary"] for end in ends] == [
+        "1 song saved to @song, about $0.09", "3 instrumentals, about $0.26", "2 sounds, about $0.01", "1 sound", "1 spoken line, under $0.01",
+        "1 spoken line, under $0.01"], "a song is costed by the seconds fal says it made, a sound by those asked for, a line by its characters"
+    entry = next(e["data"]["asset"] for e in log if e["kind"] == "library")
+    assert (entry["tag"], entry["section"], [item["kind"] for item in entry["media"]]) == ("@song", "Music", ["audio"])
+    assert entry["media"][0]["name"].endswith(".wav") and sum("/generations/" in path for path in store.files) == 8
+    told = [tool_results(model.requests[index])[call["id"]]["content"] for index, call in enumerate((song, bed, door, wave, line, plain), start=1)]
+    assert "Generated 1 song. Saved to @song (Music)" in told[0] and '"seed": 41' in told[0] and '"cost_usd": 0.085' in told[0]
+    assert "Generated 3 instrumentals." in told[1] and '"model": "minimax/music-3"' in told[1]
+    assert '"cost_usd": null' in told[3], "a sound whose length the model chose has no estimate where fal gives none"
+
+    # What a kind does not take is sent back before anything is paid for
+    spent = len(fal.calls)
+    wrong = [
+        use("generate_audio", kind="music", prompt="A waltz"),
+        use("generate_audio", kind="music", prompt="A waltz", lyrics="[verse]\nOne two three", instrumental=True),
+        use("generate_audio", kind="sound", prompt="A bell", lyrics="[verse]\nDing"),
+        use("generate_audio", kind="music", prompt="A waltz", instrumental=True, voice="Puck"),
+        use("generate_audio", kind="speech", prompt="Hello.", seconds=4),
+        use("generate_audio", kind="sound", prompt="rain " * 100),
+        use("generate_audio", kind="sound", prompt="A bell", seconds=45),
+        use("generate_audio", kind="music", prompt="A waltz", instrumental=True, seconds=301),
+        use("generate_audio", kind="speech", prompt="Hello.", voice="Mara"),
+        use("generate_audio", kind="noise", prompt="Hiss"),
+    ]
+    model.script(reply(*wrong), reply(say("Sorry.")))
+    message(client, film["id"], "More")
+    refused = tool_results(model.requests[-1])
+    assert all(refused[call["id"]]["is_error"] for call in wrong) and len(fal.calls) == spent
+    words = [refused[call["id"]]["content"] for call in wrong]
+    assert "give lyrics" in words[0] and "not both" in words[1] and "lyrics and instrumental are for kind music" in words[2]
+    assert "voice and style are for kind speech" in words[3] and "as long as its words" in words[4]
+    assert "at most 450 characters; this one is 500" in words[5] and "from 0.5 to 30 for kind sound" in words[6] and "from 1 to 300 for kind music" in words[7]
+
+    # A take that does not come back does not cost the person the ones that did, and one take of none fails the call
+    fal.failures = [RuntimeError("fal could not generate it: busy")]
+    some = use("generate_audio", kind="sound", prompt="A bell", seconds=1, count=3)
+    fal_failed = RuntimeError("fal refused the request: no credit")
+    none = use("generate_audio", kind="sound", prompt="A bell", seconds=1, count=2)
+    model.script(reply(some), reply(none), reply(say("Two of three.")))
+    message(client, film["id"], "Bells")
+    partly = tool_results(model.requests[-2])[some["id"]]
+    assert not partly.get("is_error") and "Generated 2 sounds." in partly["content"]
+    assert "1 of 3 takes did not come back, and nothing was kept of them: fal could not generate it: busy" in partly["content"]
+    fal.failures = [fal_failed, fal_failed]
+    model.script(reply(none), reply(say("None.")))
+    message(client, film["id"], "Again")
+    assert tool_results(model.requests[-1])[none["id"]]["is_error"] and "no credit" in tool_results(model.requests[-1])[none["id"]]["content"]
+    last = [e["data"] for e in events(client, film["id"])["events"] if e["kind"] == "tool_end"]
+    assert (last[-1]["ok"], "media" in last[-1]) == (False, False) and last[-3]["summary"] == "2 sounds, under $0.01; 1 failed"
 
 
 def test_a_look_where_no_picture_can_be_made_says_why_and_the_generation_stands(studio, monkeypatch):
