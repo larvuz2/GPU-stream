@@ -13,7 +13,7 @@ The app is three panes, the layout of a coding agent's workspace:
 
 | Pane | Holds |
 | --- | --- |
-| Left sidebar | New project, search, **Pinned** and **Recent** projects, the account (credits, Connect Claude, sign out) |
+| Left sidebar | New project, **Create** (the short list of things to start, which is `catalog.json`'s `shortcuts`: each starts a project of a discipline, with a format where it means one, and one that is not available yet shows what is coming instead), **Pinned** and **Recent** projects with search opened from the Recent row, the account (credits, turn limits, Connect Claude, sign out) |
 | Center | The project's conversation with the agent: messages, tool activity, the agent's questions as choices, generated images and videos inline, the composer |
 | Right pane | Modular panels the project shows as it needs them: **Screen** (the live stream of an engine), **Environment** (the engines running, start and stop, **Connect GitHub**, and, for Unreal Engine, **Connect Epic**), **Plan** (the agent's tasks and their state), **Library** (the project's characters, environments, props, products, or whatever sections the project has) |
 
