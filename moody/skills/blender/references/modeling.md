@@ -14,9 +14,10 @@ objects.md are these moves put together.
 ## Units and axes
 
 - **One unit is one meter.** Leave `scene.unit_settings.scale_length` at 1.0. For a product, set
-  `scene.unit_settings.length_unit = "MILLIMETERS"`: the window then reads 180 mm where the
-  data says 0.18, and nothing else changes. Lights, camera clipping, glTF, FBX, and USD all
-  assume meters; STL has no unit, so it is written with `global_scale=1000.0` for a printer.
+  `scene.unit_settings.length_unit = "MILLIMETERS"`: that is how Blender then shows lengths,
+  and the data stays in meters (a 180 mm vase is 0.18). The GLB, FBX, and USD written here
+  came back at the same size with no scale given; STL has no unit, so it is written with
+  `global_scale=1000.0` for a printer.
 - **+Z is up; X is east, Y is north** for a building, the convention of the CADCraft import, so
   a plan's 0,0 is the world's origin and a second import lands on the first.
 - **Keep the origin near the work.** A building at its plan coordinates, a product standing on
