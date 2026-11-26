@@ -48,6 +48,9 @@
  * the control plane signs them afresh each time, so a page that reads the log again gets other
  * addresses for the same files.
  *
+ * A project made here without a format opens on the card that asks its kind, and the agent then
+ * opens that kind with cards of its own, up to a first version of the piece (`demoOpenings.ts`).
+ *
  * The scene parameter (`?demo=<scene>`) picks a state: the film by default, `offline` for a
  * server with no integrations configured, `empty` for an account with no projects, `legacy` for a
  * control plane from before the studio, which answers its routes with 404, `no-epic` for an
@@ -92,7 +95,7 @@ import {
   type TurnLimits,
   type UnrealProject,
 } from '../lib/api';
-import { catalog, findApp, findDiscipline } from '../lib/catalog';
+import { catalog, defaultSections, findApp, findDiscipline } from '../lib/catalog';
 import { creditCount, usd } from '../lib/format';
 import { appImage } from '../lib/media';
 import {
@@ -109,7 +112,7 @@ import {
   type Script,
   type Simulation,
 } from './demoKit';
-import { chosenKind, kindCard } from './demoOpenings';
+import { chosenKind, kindCard, openingTurn } from './demoOpenings';
 import {
   FILM_DISCIPLINES,
   MOVIE_AGENTS,
@@ -862,7 +865,7 @@ function demoProjects(now: number): Project[] {
         id: 'demo-film',
         name: 'The Beacon',
         discipline: 'media',
-        format: 'Movie',
+        format: 'Film & TV',
         pinned: true,
         github_repo: `${LOGIN}/the-beacon`,
         library_sections: ['Characters', 'Environments', 'Props'],
@@ -875,7 +878,7 @@ function demoProjects(now: number): Project[] {
         id: 'demo-commercial',
         name: 'Northwind runner launch',
         discipline: 'media',
-        format: 'Commercial',
+        format: 'Commercials',
         pinned: true,
         library_sections: ['Products', 'Shots'],
       },
@@ -896,7 +899,7 @@ function demoProjects(now: number): Project[] {
       { id: 'demo-interior', name: 'Glasshouse retreat', discipline: 'architecture', format: 'Interior' },
       5 * HOUR,
     ),
-    project({ id: 'demo-vertical', name: 'Spire City', discipline: 'media', format: 'Vertical drama' }, DAY + 3 * HOUR),
+    project({ id: 'demo-vertical', name: 'Spire City', discipline: 'media', format: 'Vertical Shows' }, DAY + 3 * HOUR),
     project({ id: 'demo-art', name: 'Ember peaks key art', discipline: 'art', format: 'Concept art' }, 3 * DAY),
     project(
       { id: 'demo-score', name: 'Lighthouse theme', discipline: 'music', format: 'Score', plan: scorePlan() },
@@ -1234,6 +1237,32 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
   }
 
   /**
+   * Makes a project one of its discipline's kinds, as the message that locks the card asking its
+   * kind does before the turn begins. A library still on the sections it started with takes the
+   * kind's.
+   *
+   * @param id The project's identifier.
+   * @param kind The kind chosen.
+   * @returns The changed project.
+   * @throws ApiError With status 400 for a kind the project's discipline does not offer.
+   */
+  function takeKind(id: string, kind: string): Project {
+    const project = find(id);
+    const discipline = findDiscipline(project.discipline);
+    if (discipline?.formats.includes(kind) !== true) {
+      throw new ApiError(400, `${discipline?.name ?? project.discipline} has no format '${kind}'.`);
+    }
+    const started = defaultSections(discipline, project.format);
+    const untouched =
+      project.library_sections.length === started.length &&
+      project.library_sections.every((section, index) => section === started[index]);
+    return change(id, {
+      format: kind,
+      ...(untouched ? { library_sections: defaultSections(discipline, kind) } : {}),
+    });
+  }
+
+  /**
    * The log of a project, with every event's place in it.
    *
    * @param id The project's identifier.
@@ -1531,7 +1560,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
           created_at: now,
           updated_at: now,
           github_repo: fields.github_repo ?? null,
-          library_sections: [],
+          library_sections: discipline === undefined ? [] : defaultSections(discipline, fields.format ?? ''),
           plan: [],
         };
         projects = [project, ...projects];
@@ -1631,11 +1660,13 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
           at: now,
           event: { turn_id: turn, kind: 'user_message', data: ui === undefined ? { text } : { text, ui } },
         };
-        // The message that locks the card asking the project's kind gives the project its format first.
         const locked = entries.find(({ event }) => event.kind === 'ui' && event.data.ui_id === ui?.ui_id)?.event;
-        const kind = locked?.kind === 'ui' ? chosenKind(locked.data, ui?.value) : null;
-        const project = kind === null ? find(projectId) : change(projectId, { format: kind });
-        const answer = reply(project, text, turn, now, epicLinked, entries, limits());
+        const answered = locked?.kind === 'ui' ? locked.data : null;
+        const kind = answered === null ? null : chosenKind(answered, ui?.value);
+        const project = kind === null ? find(projectId) : takeKind(projectId, kind);
+        const answer =
+          openingTurn(project, answered, ui?.value, turn, now) ??
+          reply(project, text, turn, now, epicLinked, entries, limits());
         play(projectId, { ...answer, events: [message, ...answer.events] });
         change(projectId, { updated_at: new Date(now).toISOString() });
         return turn;

@@ -410,6 +410,20 @@ export function asksKind(discipline: Discipline): boolean {
 }
 
 /**
+ * The library sections a project of a discipline and a kind starts with: the kind's own where it
+ * has any (a commercial's products and shots), else the discipline's.
+ *
+ * @param discipline The discipline.
+ * @param format The project's format, empty for one whose kind is not chosen yet.
+ * @returns The sections, in order.
+ */
+export function defaultSections(discipline: Discipline, format: string): string[] {
+  const kinds = discipline.kinds ?? {};
+  const kind = Object.hasOwn(kinds, format) ? kinds[format] : undefined;
+  return kind?.sections ?? discipline.sections ?? [];
+}
+
+/**
  * The discipline a shortcut starts a project in.
  *
  * @param shortcut The shortcut.

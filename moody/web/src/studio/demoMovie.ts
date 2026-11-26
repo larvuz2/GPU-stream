@@ -121,7 +121,7 @@ export function movieProject(now: number): Project {
     id: MOVIE_PROJECT,
     name: 'Untitled movie',
     discipline: 'media',
-    format: 'Movie',
+    format: 'Film & TV',
     pinned: false,
     created_at: time,
     updated_at: time,
