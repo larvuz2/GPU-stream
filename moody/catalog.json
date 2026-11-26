@@ -49,10 +49,54 @@
       "id": "media",
       "name": "Media",
       "formats": [
-        "Movie",
-        "Commercial",
-        "Episode",
-        "Vertical drama"
+        "Film & TV",
+        "Social Media",
+        "Vertical Shows",
+        "Commercials",
+        "Music Videos",
+        "Education",
+        "Other"
+      ],
+      "opening": "What kind of video are you making?",
+      "opening_skill": "video",
+      "kinds": {
+        "Film & TV": {
+          "note": "A film, a series, or a documentary, told shot by shot.",
+          "icon": "film"
+        },
+        "Social Media": {
+          "note": "Clips for a feed: a hook, captions, the platform's shape.",
+          "icon": "social"
+        },
+        "Vertical Shows": {
+          "note": "Serial drama for a phone, in short upright episodes.",
+          "icon": "vertical"
+        },
+        "Commercials": {
+          "note": "An ad for a product or a brand, in every length it runs.",
+          "icon": "commercial",
+          "sections": [
+            "Products",
+            "Shots"
+          ]
+        },
+        "Music Videos": {
+          "note": "Pictures cut to a track: a performance, a story, a look.",
+          "icon": "music-video"
+        },
+        "Education": {
+          "note": "A lesson or an explainer, narrated and shown.",
+          "icon": "education"
+        },
+        "Other": {
+          "note": "Something else. Say what it is, and we shape it together.",
+          "icon": "other"
+        }
+      },
+      "sections": [
+        "Characters",
+        "Environments",
+        "Props"
       ],
       "blurb": "Films, series, ads, and social video, from script to final cut.",
       "engines": [
@@ -864,6 +908,16 @@
       "memory_gb": 32,
       "credits_per_minute": 5,
       "blurb": "NVIDIA A10G. Production scenes and long renders."
+    }
+  ],
+  "settings": [
+    {
+      "id": "video_hyperframes",
+      "tab": "Video editing",
+      "label": "Use HyperFrames for videos edited by code",
+      "help": "The agent writes such a video as HTML and animation, and HyperFrames renders it. Off, it cuts in the Cut Room.",
+      "kind": "toggle",
+      "default": false
     }
   ],
   "regions": [

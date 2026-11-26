@@ -1,7 +1,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
-"""Image and video generation on fal.ai, through its queue API.
+"""Image, video, and sound generation on fal.ai, through its queue API.
 
 A generation takes from seconds (an image) to minutes (a video), longer than an
 HTTP request should be held open, so each one is submitted to fal's queue and
@@ -23,14 +23,26 @@ the agent makes per call:
   480p or 720p; `draft`, Seedance 2.5's own 480p preview (`draft: true`), since
   fal has no separate draft endpoint.
 
-Every model names its references in the prompt by position, `@Image1`,
-`@Image2`, `@Video1`, in the order their URLs are given (`video_arguments`,
-`image_arguments`).
+- Sound (`AUDIO_MODELS`), by what is made. `music` is MiniMax Music 3
+  (`minimax/music-3`): a song from a description and lyrics, up to five
+  minutes; it requires lyrics, so an instrumental is asked for with a lyric
+  sheet that is one `[instrumental]` tag. `sound` is ElevenLabs Sound Effects
+  v3: an effect from a description of at most 450 characters, half a second
+  to thirty, its length chosen by the model where none is given. `speech` is
+  Google's Gemini 3.8 Flash TTS: the words as written, in one of thirty
+  voices, with a line of direction for the delivery (tone, pace, accent) that
+  is not spoken. Each call makes one file, so several takes are several
+  calls (`audio_arguments`, one per take).
+
+Every image and video model names its references in the prompt by position,
+`@Image1`, `@Image2`, `@Video1`, in the order their URLs are given
+(`video_arguments`, `image_arguments`).
 
 What a generation cost is fal's to say: its pricing API gives each model's
-price per unit (`Fal.cost`), which times the units a call made (images, or
-seconds of video) is the estimate shown; where the unit is not one a call
-counts, fal's own per-call estimate stands in.
+price per unit (`Fal.cost`), which times the units a call made (images,
+seconds of video or of sound, thousands of characters spoken) is the estimate
+shown; where the unit is not one a call counts, fal's own per-call estimate
+stands in.
 
 Polling asks the caller whether to go on (`alive`), so a turn that is stopped
 cancels what it queued rather than paying for it to finish.
@@ -78,6 +90,25 @@ SEEDREAM_SIZES = {
     "2:3": "portrait_4_3",
     "9:16": "portrait_16_9",
 }
+# Sound, by what is made: a song or an instrumental, a sound effect, a spoken line
+AUDIO_MODELS = {
+    "music": "minimax/music-3",
+    "sound": "elevenlabs/sound-effects/v3",
+    "speech": "google/gemini-3.8-flash-tts",
+}
+# The shortest and the longest each model makes, in seconds; speech is as long as its words
+AUDIO_SECONDS = {"music": (1, 300), "sound": (0.5, 30)}
+# The lyric sheet of a piece with no singing, which the music model requires lyrics for all the same
+INSTRUMENTAL_LYRICS = "[instrumental]"
+# The longest description the sound effects model takes
+SOUND_PROMPT_CHARACTERS = 450
+SPEECH_VOICES = (
+    "Achernar", "Achird", "Algenib", "Algieba", "Alnilam", "Aoede", "Autonoe", "Callirrhoe", "Charon", "Despina",
+    "Enceladus", "Erinome", "Fenrir", "Gacrux", "Iapetus", "Kore", "Laomedeia", "Leda", "Orus", "Pulcherrima", "Puck",
+    "Rasalgethi", "Sadachbia", "Sadaltager", "Schedar", "Sulafat", "Umbriel", "Vindemiatrix", "Zephyr", "Zubenelgenubi",
+)
+# The voice a line is spoken in where none is chosen, which is the model's own default
+SPEECH_VOICE = "Kore"
 POLL_SECONDS = 3.0
 
 
@@ -134,6 +165,43 @@ def video_arguments(
         if given:
             arguments[f"{kind}_urls"] = given
     return VIDEO_MODELS[choice], arguments
+
+
+def audio_arguments(
+    kind: str, prompt: str, lyrics: str | None, voice: str | None, style: str | None, seconds: float | None
+) -> tuple[str, dict[str, Any]]:
+    """The model and the input of one sound of a kind.
+
+    `prompt` is what each model takes first: a song's description, a sound's
+    description, the words of a spoken line. `lyrics` are a song's, or
+    `INSTRUMENTAL_LYRICS`; `voice` and `style` are a spoken line's; `seconds`
+    is the most a song may run, or how long a sound is.
+    """
+    if kind == "music":
+        arguments: dict[str, Any] = {"prompt": prompt, "lyrics": lyrics or INSTRUMENTAL_LYRICS}
+        if seconds:
+            arguments["duration"] = seconds
+    elif kind == "sound":
+        arguments = {"text": prompt}
+        if seconds:
+            arguments["duration_seconds"] = seconds
+    else:
+        arguments = {"prompt": prompt, "voice": voice or SPEECH_VOICE}
+        if style:
+            arguments["style_instructions"] = style
+    return AUDIO_MODELS[kind], arguments
+
+
+def audio_units(kind: str, prompt: str, seconds: float | None) -> dict[str, float]:
+    """What one sound counts in the units fal prices its model by: seconds made, or thousands of characters spoken.
+
+    `seconds` is how long the sound is where that is known: fal's answer
+    for a song, what was asked for an effect. A unit that is not known is
+    left out, and fal's own estimate of a call stands in (`Fal.cost`).
+    """
+    if kind == "speech":
+        return {"1000 character": len(prompt) / 1000}
+    return {"second": float(seconds)} if seconds else {}
 
 
 def video_kilotokens(resolution: str, aspect_ratio: str, seconds: float) -> float:
