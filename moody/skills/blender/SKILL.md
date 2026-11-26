@@ -127,11 +127,9 @@ selkies-modal-blender 60 < "$P/scripts/start.py"
 ```
 
 It answers in about a second (8 s while Blender is still starting): `{"blender": "5.2.4 LTS",
-"project": "…/projects/<id>", "file": "…/projects/<id>/house.blend", "file_in_project": true,
-"blends_in_project": ["house.blend", "product.blend"], "units": ["METRIC", 1.0, "METERS"],
-"engine": "CYCLES", "frames": [1, 96, 24], "resolution": [1920, 1080, 100], "camera": "Exterior
-south-east", "collections": {name: count}, "objects": {name: [type, [x, y, z] in meters]},
-"windows": 1}`.
+"file": "…/projects/<id>/house.blend", "file_in_project": true, "blends_in_project": […],
+"units": ["METRIC", 1.0, "METERS"], "camera": "Exterior south-east", "objects": {name: [type,
+[x, y, z] in meters]}, "windows": 1, …}`.
 
 **A Blender engine opens the scene the workspace's last Blender closed with, whichever project
 that was**, and a new workspace opens Blender's start-up scene (a cube, a light, a camera) with
@@ -184,12 +182,10 @@ renders a saved file in a second Blender that has no window, so the person's sta
 cd "$SELKIES_MODAL_WORKSPACE/${SELKIES_MODAL_PROJECT:-projects/default}" && blender -b house.blend --python-exit-code 1 --python scripts/render.py -- --camera "Exterior south-east" --out previews/exterior-draft.png --percent 50 --hide "Scale figure" 2>&1 | grep "^RENDER\|rror:"
 ```
 
-```text
-RENDER {"file": "house.blend", "camera": "Exterior south-east", "engine": "CYCLES", "device": ["CPU"], "samples": 64, "size": [960, 540], "frames": 1, "seconds": 23.0, "first": "previews/exterior-draft.png", "brightness": {"mean": 0.603, "clipped": 0.0, "black": 0.0}}
-```
-
-It reads the file from disk: save in the window first. `--clay` renders the same frame in gray;
-on a GPU tier add `--device OPTIX`.
+It printed `RENDER {… "device": ["CPU"], "samples": 64, "size": [960, 540], "seconds": 23.0,
+"first": "previews/exterior-draft.png", "brightness": {"mean": 0.603, "clipped": 0.0, "black":
+0.0}}`. It reads the file from disk: save in the window first. `--clay` renders the same frame
+in gray; on a GPU tier add `--device OPTIX`.
 
 `engine_exec` waits five minutes. A render that could pass four runs as a job, which also keeps
 the engine from ending as unused while it works:
@@ -216,9 +212,9 @@ free (rendering.md has the scripts, and how to close the render window afterward
 | Light | sun and sky for a place, date, and hour, or a studio's three lights | look.md | the same view, lit |
 | Views | cameras at eye height, level, framed by lens shift | look.md | each view in clay |
 | Materials | Principled recipes in meters; pictures from the library | look.md | a draft with materials |
-| Final frames | full size, more samples, as a job | rendering.md | the finished stills |
-| Motion | a turntable or an orbit, frames, then an mp4 | rendering.md | the clip |
-| Delivery | GLB, STL, FBX, USD, or pictures to another engine | modeling.md, handoff.md | the file's size and what it kept |
+| Final frames | full size, 128 samples, as a job on `cpu` | rendering.md | the finished stills |
+| Motion | an orbit, a walk, or a turntable, as frames, then an mp4 | rendering.md, objects.md | the clip |
+| Delivery | a GLB for the page, an STL for a printer, pictures for another engine | modeling.md, handoff.md | the file's size and what it kept |
 
 The rules that hold in every stage:
 
@@ -256,41 +252,41 @@ The rules that hold in every stage:
 
 ## Cost and time
 
-An engine costs credits every minute it runs (1 on `cpu`, 3 on `t4`; a credit is $0.01). Say the
-tier, the minutes, and the credits before `engine_start` and before a long render. Measured with
-Cycles and its denoiser on the two test scenes of the references (a one-room building on a site;
-a vase on a backdrop):
+An engine costs credits every minute it runs (1 on `cpu`, 3 on `t4`; a credit is $0.01), and its
+tier is fixed when it starts. Say the tier, the minutes, and the credits before `engine_start`
+and before a long render. Which tier a step needs, and how long it took with Cycles on the
+references' two test scenes (a one-room building on a site; a vase on a backdrop):
 
-| Render | Size, samples | `cpu` | `t4`, on its GPU |
+| Step | Tier to use | On `cpu` | On `t4`, on its GPU |
 |---|---|---|---|
-| Exterior draft, clay; with materials | 960 × 540, 64 | 18 s; 23 s | 2.3 s; 2.6 s |
-| Interior draft | 960 × 540, 64 | 60 s | 4.2 s |
-| Exterior final | 1920 × 1080, 128 | 2 min 57 s | 10.6 s |
-| Interior final | 1920 × 1080, 128 | 7 min 41 s | 24 s |
-| Product final | 1600 × 1200, 128 | 3 min 1 s | 10.2 s |
-| One frame of an orbit or a turntable | 960 × 540, 32 | 12 s | 0.7 s |
-| A full turn, 96 frames, 4 seconds | 960 × 540, 32 | 19 min, 19 credits | 63 s, 3 credits |
+| Import, build, light, cameras, materials: each a script | `cpu` | about 1 s | the same |
+| A draft at 960 × 540: an exterior; an interior | `cpu` | 23 s; 60 s | 2.6 s; 4.2 s |
+| Exterior final, 1920 × 1080, 128 samples | either | 2 min 57 s | 11 s |
+| Interior final, 1920 × 1080, 128 samples | `t4` | 7 min 41 s | 24 s |
+| Product final, 1600 × 1200, 128 samples | either | 3 min 1 s | 10 s |
+| A clip of 96 frames at 960 × 540: an orbit, a walk | `t4` | 19 min, 19 credits | 63 to 81 s, 3 to 4 credits |
+| A print check, a GLB, an STL, a hand-off file | `cpu` | 3 to 7 s | the same |
 
-- **Build, light, frame, and draft on `cpu`.** A script answers in a second and an exterior
-  draft in under half a minute. Every `blender -b` adds 2 to 5 s to start and load the file.
-- **Render interiors' finals and every animation on `t4`.** It rendered 17 to 19 times faster at
-  three times the price, so the same frame costs about a sixth. Save, `engine_stop` the `cpu`
-  engine, and start a `t4` one on the same project: the folder and the `.blend` are there. It
-  was up in 11 s here; a GPU can take minutes to find.
+- **Build and draft on `cpu`; render final interiors and every clip on `t4`.** It rendered 17 to
+  19 times faster at three times the price, so the same frame costs about a sixth. To change
+  tier: save, `engine_stop`, then `engine_start("blender", "t4")` on the same project, where the
+  folder and the `.blend` wait (up in 11 to 15 s here; a GPU can take minutes to find). Pass
+  `--device OPTIX`: without it a GPU engine renders on its processor.
+- **A job that goes from plan to final frames in one sitting** can start on `t4`: the building
+  scripts take the same second there, and each minute costs 2 credits more.
+- **`cpu` engines differ.** The same draft took 24 s on one start and 15 s on another: quote a
+  final from a draft on the engine you have (rendering.md).
 - `l4` and `a10` were not measured. Stop the engine when the frames are confirmed in `previews/`.
 
 ## What is not possible yet
 
-- **No command channel.** Blender is driven by scripts through `engine_exec`; there is no list
-  of commands to ask it for.
-- **The bridge dies after a timeout on a running script** (recipe 2), and with it the keeping of
-  the open scene at stop. Save often.
+- **No command channel**, and a bridge that dies after a timeout on a running script, taking
+  the keeping of the open scene at stop with it (recipe 2). Save often.
 - **Nothing but Blender itself is installed.** No asset library (no people, trees, cars,
   furniture, or material packs), no texture library, and only eight small panoramas (look.md).
   Offer block entourage, procedural materials, and pictures from the library (`generate_image`,
   or the person's uploads), and say that is what they are.
-- **Only the add-ons Blender ships**: glTF, FBX, SVG, BVH, UV layout, Cycles, the pose library
-  on; Node Wrangler and Rigify off. No DXF, DWG, STEP, IGES, or 3MF importer, no 3D-print
+- **Only the add-ons Blender ships.** No DXF, DWG, STEP, IGES, or 3MF importer, no 3D-print
   toolbox, no sun-position add-on, no BIM tools (look.md computes the sun; objects.md checks a
   print). Blender's online access is off, and installing an extension was not tried.
 - **The window is drawn in software on every tier**, a T4's too, and so is EEVEE, with or
@@ -298,10 +294,11 @@ a vase on a backdrop):
   no bounced light, and it does not take the sky's sun (rendering.md). Use Cycles for what the
   person judges. The viewport's rendered modes were not measured: show renders.
 - **A GPU renders only on a GPU tier**; on `cpu`, asking for one falls back to the CPU and the
-  RENDER line says so.
-- **Textures made of nodes stay in Blender.** A GLB or an FBX carries plain values and pictures
-  mapped by UVs; the procedural materials and box-projected pictures of look.md arrive white or
-  unmapped (modeling.md). There is no recipe here for UV unwrapping or baking.
+  RENDER line says so. Blender's kept preferences still list the GPU of an earlier engine:
+  trust `gpu_peak` in that line, not a device list.
+- **Textures made of nodes stay in Blender.** A GLB or an FBX carries plain values; the
+  procedural materials of look.md arrive white and its box-projected pictures unplaced
+  (modeling.md). There is no recipe here for UV unwrapping or baking.
 - **A plan holds no heights**, and a model does not go back into a drawing: only a cut outline
   returns to CADCraft (handoff.md).
 - **Send to Unreal is not in this engine.** It is in the Blender of an Unreal engine (the
@@ -340,8 +337,9 @@ preview(engine_id, path="previews/house-orbit.mp4", caption="One turn around the
 - A still: `render.py --out previews/<name>.png`; in clay with `--clay`; smaller with `--percent`.
 - A clip: `render.py --frames 1 96 --out previews/<name>/frame`, then the `ffmpeg` line of
   rendering.md writes `previews/<name>.mp4`.
-- A model to turn in the conversation: `print_check.py` (objects.md) writes a `.glb`, and a
-  card's `model` component shows it (the `cards` skill).
+- A model to turn in the conversation or on a page: `print_check.py` (objects.md) writes a
+  `.glb` of one object and `export_glb.py` (modeling.md) of a whole scene, and a card's `model`
+  component shows it (the `cards` skill).
 - What the window looks like now: `engine_screenshot(engine_id)`, after closing a render window
   that covers the viewport.
 - One preview per stage, with the numbers in your message: the sizes, the sun's hour, the lens,

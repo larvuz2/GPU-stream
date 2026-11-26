@@ -6,28 +6,31 @@
 
 # Architecture visualization
 
-From a plan or a handful of dimensions to pictures a client can judge a building by. The test
-building of this file is one room of 4.6 by 4.0 m drawn in CADCraft, with a door, two windows, a
-flat roof, a site, and block trees; every script was run on it on a cloud engine, and the
-sizes and times quoted are what came back.
+From a plan or a handful of dimensions to pictures a client can judge a building or a room by.
+The test building of this file is one room of 4.6 by 4.0 m drawn in CADCraft, with a door, two
+windows, a flat roof, a site, and block trees; every script was run on it on a cloud engine,
+and the sizes and times quoted are what came back.
 
 ## The order of work, and what the person sees
 
 Each stage ends with something shown and a decision. Do not run ahead: a material on a massing
 that is about to change is work thrown away.
 
-| Stage | You do | You show | They decide |
-|---|---|---|---|
-| 1. Brief | collect what is fixed, ask for what a plan cannot say | the list of sizes, with the ones you assumed marked | the assumed sizes |
-| 2. Walls | import the plan, or build from dimensions; check the sizes | the Screen, and the sizes read back | nothing yet |
-| 3. Massing | openings, slabs, roof, site, block entourage | one or two clay views from eye height | the form: heights, roof, openings |
-| 4. Light | sun and sky for the place, date, and hour | the same clay view at two hours, side by side | the hour |
-| 5. Views | level cameras, exterior and interior | each view in clay | which views become final frames |
-| 6. Materials | the palette, on the approved form | half-size drafts from the final cameras | the palette |
-| 7. Final frames | full size as a job; an interior with portals | the stills | changes, or done |
-| 8. Motion | an orbit, frames, a clip | the clip | done |
+| Stage | You do | You show | They decide | Tier |
+|---|---|---|---|---|
+| 1. Sizes | collect what is fixed, ask for what a plan cannot say | the list of sizes, the assumed ones marked | the assumed sizes | no engine |
+| 2. Walls | import the plan, or build from dimensions; check the sizes | the Screen, and the sizes read back | nothing yet | `cpu` |
+| 3. Massing | openings, slabs, roof, site, block entourage | one or two clay views from eye height | the form: heights, roof, openings | `cpu` |
+| 4. Light | sun and sky for the place, date, and hour | the same clay view at two hours, side by side | the hour | `cpu` |
+| 5. Views | level cameras, outside and inside | each view in clay | which views become final frames | `cpu` |
+| 6. Materials | the palette, on the approved form | half-size drafts from the final cameras | the palette | `cpu` |
+| 7. Final frames | full size, 128 samples; an interior with portals | the stills | changes, or done | `t4` for interiors; either for an exterior |
+| 8. Motion | an orbit or a walk, frames, a clip | the clip | done | `t4` |
 
-Keep the `.blend` saved after every stage, and say at each one what it cost and what is next.
+Stages 2 to 6 took scripts of about a second each and drafts of 18 to 60 s on `cpu`. A final
+exterior took 3 minutes there and 11 s on `t4`; a final interior 7 min 41 s and 24 s; a 4-second
+orbit 19 minutes and 63 s. Keep the `.blend` saved after every stage, and say at each one what
+it cost and what is next.
 
 ## 1. What a plan cannot say
 
@@ -44,7 +47,8 @@ A plan has no heights and no site. Before you build, have these, given or assume
 | North | +Y on the plan | the plan has a north arrow that is not up |
 | Where on earth, which date and hour | 45° north, an equinox morning | the light matters to them, which it does |
 
-Also ask which side the building is entered and seen from: it places the first camera.
+Also ask which side the building is entered and seen from: it places the first camera. For a
+room that exists, ask which wall has the windows and which hour the room matters most at.
 
 ## 2. Walls
 
@@ -52,8 +56,8 @@ Also ask which side the building is entered and seen from: it places the first c
 `handoff/cadcraft-to-blender/` and import it with the script in the `cadcraft` skill's
 `references/handoff.md` (section "CADCraft to Blender: the recipe"): it reads the file with
 `ezdxf`, converts millimeters to meters, and extrudes the closed outlines of each layer you give
-a height. As run on this building (the first run installs `ezdxf`, 14 s; later ones take a
-second):
+a height. Start from an empty scene where Blender opened another project's (SKILL.md, recipe 1).
+As run on this building:
 
 ```text
 A-WALL: 32 vertices, 20 faces, size (4.6, 4.0, 2.7) m
@@ -62,12 +66,15 @@ A-GLAZ: 6 vertices, 0 faces, size (1.2, 0.2, 0.0) m
 A-FURN: 152 vertices, 82 faces, size (1.5, 2.0, 0.45) m
 ```
 
+- **How long it takes**: the very first import in a workspace installs `ezdxf` (14 s). The
+  first import on each new engine then loads it from the workspace, which took 42 s; after
+  that an import takes a second. Give `selkies-modal-blender` its 300 as that script has it.
 - The wall object's size has to equal the plan's overall dimensions in meters. Compare it with
   the drawing's dimension chain before anything else.
 - The plan's walls stop at doors and windows, so the extrusion leaves each opening open from
   floor to ceiling: the shell script fills in above and below.
-- The import saves `<name>.blend` and leaves Blender's start-up cube, light, and camera in the
-  scene; the shell script removes them and saves under its own name.
+- The import saves `<name>.blend` and leaves Blender's start-up cube, light, and camera where
+  they were; the shell script removes them and saves under its own name.
 - Where each opening is, read from the drawing (the `cadcraft` skill's `entities` on the door
   and glazing layers), not from the picture.
 
@@ -112,8 +119,11 @@ bpy.ops.wm.save_as_mainfile(filepath=os.path.join(P, "cabin.blend"))
 print(json.dumps({"file": bpy.data.filepath, "size_m": [round(d, 3) for d in walls.dimensions], "volume_m3": round(volume, 3), "non_manifold_edges": loose}))
 ```
 
-@@WALLS_NOTE@@ Every opening is then a cut (`CUT_OPENINGS` below, the door included, with
-`PLAN_OPENINGS` empty).
+It answers `{"file": ".../cabin.blend", "size_m": [6.0, 4.5, 2.8], "volume_m3": 17.942,
+"non_manifold_edges": 0}`: the ring of 5.94 m² and the partition of 0.468 m², times 2.8. Every
+opening is then a cut (`CUT_OPENINGS` below, the doors included, with `PLAN_OPENINGS` empty).
+With a door, two windows, and an inner door cut, the shell script reported 15.505 m³: the
+17.942 less the openings' 2.438.
 
 ## 3. The shell
 
@@ -314,7 +324,7 @@ print(json.dumps(report))
 It answers, for the test building:
 
 ```text
-@@SHELL_ANSWER@@
+{"wall_size_m": [4.6, 4.0, 2.7], "wall_volume_m3": 6.962, "wall_non_manifold_edges": 0, "collections": {"Cutters": ["Cutter Window east"], "Entourage": ["Scale figure", "Tree 1", "Tree 2", "Tree 3"], "Floors": ["Floor finish", "Slab", "Threshold Door"], "Openings": ["Frame Window east 1", … "Glass Window east", "Glass Window north", "Leaf Door"], "Roof": ["Roof slab"], "room": ["A-DOOR", "A-FURN", "A-GLAZ", "A-WALL"], "Site": ["Ground", "Path", "Step"], "Walls": ["Wall over Door", "Wall over Window north", "Wall under Window north"]}, "scales_not_1": []}
 ```
 
 Check, before you show anything:
@@ -332,18 +342,23 @@ What the script decides, and why:
   wire and not rendered. Moving or resizing the cutter moves the window, so a design change is
   a number, not a rebuild. Exporters apply modifiers themselves (modeling.md).
 - **Glass does not cast shadows** (`visible_shadow = False`): the pane still reflects and
-  refracts, and daylight reaches the room. With ordinary glass the room is dark.
+  refracts, and daylight reaches the room. With glass that casts shadows the test room lost its
+  patch of sun and a quarter of its brightness.
+- **Parts butt, they do not overlap.** Frame bars that ran through each other at the corners
+  rendered as black squares; the sides now fit between sill and head.
 - **Nested outlines get different heights.** Pillows drawn on the bed's layer were extruded to
-  the bed's height, and their coinciding tops flickered in the render; the script raises every
-  part but the largest by 0.12 m.
+  the bed's height, so their tops coincided with it; the script raises every part but the
+  largest by 0.12 m.
 - **The ground reaches the horizon** (300 m each way), or a dark band shows under the sky.
 - **Entourage is blocks**, in one collection, so a final frame can leave the figure out
   (`--hide "Scale figure"`) and a white-model presentation can keep it.
+- **A room that exists** is the same script: the roof slab is its ceiling, and what is outside
+  the windows is the ground and the sky.
 
 ## 4 and 5. Light and views
 
-look.md has the script that sets sun, sky, exposure, and cameras, and the rules behind it. For
-a building:
+look.md has the script that sets sun, sky, exposure, and cameras, and the rules behind it;
+`interior_light.py` there adds the portals a room needs. For a building:
 
 - **The first view is from where a visitor arrives**, at eye height, 1.5 to 2.5 building heights
   away, showing two faces (a corner view): one lit, one in shade.
@@ -351,40 +366,51 @@ a building:
   moves the sun's height only; for another bearing run the script again with another
   `SOLAR_HOUR`) and show them side by side: people choose light by seeing it.
 - **The interior view stands in a corner or a doorway**, 1.5 m up, 18 mm, looking along the
-  room's diagonal toward a window, with both side walls in frame.
+  room's diagonal toward a window, with both side walls in frame. An interior is judged by its
+  light: render the hour the person named first.
 - **Show the massing in clay from the final cameras**:
 
 ```bash
 cd "$SELKIES_MODAL_WORKSPACE/${SELKIES_MODAL_PROJECT:-projects/default}" && for view in "Exterior south-east:exterior:-4.96" "Interior from door:interior:-1.7"; do IFS=: read camera name stops <<< "$view"; blender -b house.blend --python-exit-code 1 --python scripts/render.py -- --camera "$camera" --out "previews/$name-clay.png" --clay --percent 50 --exposure "$stops" 2>&1 | grep "^RENDER\|rror:"; done
 ```
 
-@@CLAY_NOTE@@
+The two drafts took 18.9 s and 44.2 s on `cpu`, with mean brightness 0.68 and 0.72.
 
 ## 6 to 8. Materials, final frames, motion
 
-- **Materials** by the script of look.md, which assigns by the names the shell gave. Show half-size
-  drafts from the final cameras; change a color or a roughness and render the draft again.
-- **Final frames** at full size as jobs (rendering.md), the interior with the portals of look.md.
-  Quote the time from the draft: four times it for the size, twice for 128 samples.
-- **An orbit** (rendering.md) for a building that is seen from all sides; for one that has a
-  front, a short move along it reads better than a full circle.
+- **Materials** by the script of look.md, which assigns by the names the shell gave. The
+  palette is the person's: in an Architecture project it is the Materials section of the
+  library. Show half-size drafts from the final cameras (23 s and 60 s on `cpu`); change a
+  color or a roughness and render the draft again.
+- **Final frames** at full size and 128 samples (rendering.md). On `cpu` start each as a job. For
+  an interior, or more than two or three frames, the `t4` tier is both faster and cheaper
+  (SKILL.md, "Cost and time").
+- **An orbit** (rendering.md) for a building that is seen from all sides; **a walk** for an
+  approach or a pass along a front. Both are rendered as frames and encoded to an mp4.
+- **A model for the page**: a GLB of the building (modeling.md's exporter; 327 kB for this one)
+  turns in a card's `model` component. It arrives at its real size with its plain colors; the
+  procedural wood and concrete arrive white, so say it is the massing, not the materials.
 
 ## When the design changes
 
 The drawing changes first. Export the DXF under a new name, bring it to the engine
-(`engine_send` if both run), run the import, then the shell script, then save. Cameras, lights,
-and materials are not touched by either script, so the same render commands show the changed
-building from the same views: put the two pictures side by side (`preview` with `compare`).
+(`engine_send` if both run), then run the import, the shell script, and the materials script, in
+that order, and save. The import replaces the plan's objects with new, bare ones and saves the
+scene as `<name>.blend`; the shell script cuts the openings again and saves under its own name;
+the materials script dresses the new walls. Cameras, lights, portals, and the orbit are not
+touched, so the same render commands show the changed building from the same views: put the
+two pictures side by side (`preview` with `compare`). Run on the test building: after a second
+import the three scripts brought it back to 6.962 m³ and 27 objects with materials.
 
 ## What this engine cannot give a building
 
 - **No people, trees, cars, or furniture** beyond blocks. A generated or photographed picture
-  can stand behind a window or on a wall (modeling.md's picture on a plane); it does not turn
+  can stand on a wall or behind a window (modeling.md's picture on a plane); it does not turn
   with the camera.
-- **No walls that know they are walls.** There are no building objects: a wall is a solid, a
-  window is a hole with a pane, and a schedule is the drawing's job.
-- **No sloped roof recipe was run.** A pitched roof is a profile extruded along the ridge
-  (`bmesh.ops.extrude_face_region`, as `walls.py` does upward); build it, check its size, and say
-  it is new ground.
-- **Interiors are slow on `cpu`**: the test room's final frame took @@INTERIOR_CPU@@ there and
-  @@INTERIOR_T4@@ on `t4` (rendering.md). Quote before you render.
+- **No walls that know they are walls.** A wall is a solid, a window is a hole with a pane, and
+  a schedule is the drawing's job.
+- **No sloped roof and no stair were built.** Both are profiles pushed along a line
+  (`bmesh.ops.extrude_face_region`, as `walls.py` pushes the plan up): build one, check its size,
+  and say it is new ground.
+- **Interiors are slow on `cpu`**: the test room's final frame took 7 min 41 s there and 24 s
+  on `t4`. Quote before you render.

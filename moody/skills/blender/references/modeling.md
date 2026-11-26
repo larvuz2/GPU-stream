@@ -186,18 +186,57 @@ coat; surface 88.5 by 88.5 by 179.7 mm, 14,850 vertices) and read back:
 |---|---|---|---|---|---|
 | GLB | `bpy.ops.export_scene.gltf(filepath=…, export_format="GLB", use_selection=True, export_apply=True, export_animations=False)` | 536 kB | the same surface, smooth | size, base color, clear coat | modifiers (applied), procedural textures |
 | glTF and `.bin` | the same with `export_format="GLTF_SEPARATE"` | 2 kB + 535 kB | as GLB | as GLB | as GLB |
-| OBJ and `.mtl` | `bpy.ops.wm.obj_export(filepath=…, export_selected_objects=True, apply_modifiers=True, export_materials=True)` | 1.5 MB | the surface, lying Y-up under a 90° object rotation | size, base color | clear coat, everything else of the material |
+| OBJ and `.mtl` | `bpy.ops.wm.obj_export(filepath=…, export_selected_objects=True, apply_modifiers=True, export_materials=True)` | 1.5 MB | the surface, upright under a 90° rotation on the object | size, base color | clear coat, everything else of the material |
 | FBX | `bpy.ops.export_scene.fbx(filepath=…, use_selection=True, use_mesh_modifiers=True, bake_anim=False)` | 450 kB | the surface, smooth | size, base color | clear coat |
 | STL | `bpy.ops.wm.stl_export(filepath=…, export_selected_objects=True, apply_modifiers=True, global_scale=1000.0)` | 1.5 MB | triangles, flat shaded | size (in millimeters) | materials, smoothing, units, names |
 | PLY | `bpy.ops.wm.ply_export(filepath=…, export_selected_objects=True, apply_modifiers=True)` | 431 kB | triangles | size | materials, smoothing |
-| USD | `bpy.ops.wm.usd_export(filepath=…, selected_objects_only=True, export_animation=False)` | 14 kB | the cage of 898 vertices with its parent | base color, clear coat, the hierarchy | the Subdivision's surface as a mesh: it travels as a subdivision setting, so the mesh read back is the cage, 92 by 181.1 mm |
+| USD | `bpy.ops.wm.usd_export(filepath=…, selected_objects_only=True, export_animation=False)` | 14 kB | the cage of 898 vertices with its parent | base color, clear coat, the hierarchy | the Subdivision modifier's surface: the mesh read back is the cage, 92 by 181.1 mm, with no modifier on it |
 | Alembic | `bpy.ops.wm.alembic_export(filepath=…, selected=True, start=1, end=1)` | 32 kB | the cage of 898 vertices with its parent | the hierarchy | materials, the Subdivision's surface |
 
-- **For the web and for a game engine: GLB.** It is meters and +Y up by definition and the
-  exporter converts. It is what a card's `model` component shows.
 - **For a printer: STL in millimeters**, after the check of objects.md. Say "millimeters" with
   the file: STL does not.
-- **A texture made of nodes does not travel.** glTF, FBX, OBJ, and USD carry a material's plain
-  values and its pictures, never a noise or a brick node: a procedural floor arrives in its flat
-  base color. Deliver such a model with plain colors or pictures from the library, and say so.
+- **For the web, a card in the conversation, and a game engine: GLB.** It is meters and +Y up by
+  definition and the exporter converts. For a whole scene:
+
+```python
+# Write the scene's model as one GLB, for a web viewer, a card in the conversation, or a game engine:
+# every mesh a render would show, less the names given.
+#   blender -b house.blend --python-exit-code 1 --python scripts/export_glb.py -- exports/house.glb Ground Tree "Scale figure"
+import json, os, sys, time
+import bpy
+
+arguments = sys.argv[sys.argv.index("--") + 1:]
+out, leave_out = os.path.join(os.path.dirname(bpy.data.filepath), arguments[0]), tuple(arguments[1:])
+os.makedirs(os.path.dirname(out), exist_ok=True)
+bpy.ops.object.select_all(action="DESELECT")
+chosen = [o for o in bpy.context.scene.objects
+          if o.type == "MESH" and not o.hide_render and o.data.polygons and not (leave_out and o.name.startswith(leave_out))]
+for obj in chosen:
+    obj.select_set(True)
+bpy.context.view_layer.objects.active = chosen[0]
+began = time.time()
+# Modifiers are applied in the file written, not in the scene; glTF is meters with +Y up, and the exporter converts
+bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", use_selection=True, export_apply=True, export_animations=False)
+procedural = sorted({m.name for o in chosen for m in o.data.materials if m and any(
+    link.to_node.bl_idname == "ShaderNodeBsdfPrincipled" and link.from_node.bl_idname != "ShaderNodeTexImage" and link.to_socket.name == "Base Color"
+    for link in m.node_tree.links)})
+print("GLB " + json.dumps({"file": arguments[0], "bytes": os.path.getsize(out), "objects": len(chosen), "seconds": round(time.time() - began, 2),
+                           "arrive_white": procedural}))
+```
+
+```bash
+cd "$SELKIES_MODAL_WORKSPACE/${SELKIES_MODAL_PROJECT:-projects/default}" && blender -b house.blend --python-exit-code 1 --python scripts/export_glb.py -- exports/house.glb Ground Tree "Scale figure" 2>&1 | grep "^GLB\|rror:"
+```
+
+It printed `GLB {"file": "exports/house.glb", "bytes": 327356, "objects": 22, "seconds": 4.87,
+"arrive_white": ["Concrete", "Oak boards"]}` for the test building: 22 objects in 327 kB.
+
+- **A texture made of nodes does not travel.** Read back, the building's walls were 4.6 by 4.0
+  by 2.7 m with the window cut in (the boolean applied), and plaster, paint, metal, glass, and
+  fabric kept their color, roughness, metal, and transmission. The materials whose color comes
+  from texture nodes (the wood boards, the concrete) arrived white, bumps were gone everywhere,
+  and the box-projected picture was still attached but has no UV map to place it. The script
+  names those materials (`arrive_white`): give them a plain color in a copy of the file before
+  a delivery that has to look right, and say what the model shows. There is no recipe here for
+  UV unwrapping or for baking textures into pictures.
 - **Before an export**: scale applied, objects named, what should be one object joined.

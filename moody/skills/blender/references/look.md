@@ -4,11 +4,11 @@
   file, You can obtain one at https://mozilla.org/MPL/2.0/.
 -->
 
-# Materials, light, and cameras
+# Light, cameras, and materials
 
-What makes a model read as a place or a thing: surfaces that answer light the way their
-material does, one clear light, and a camera where a person would stand. Every script and number
-here was run on Blender 5.2.4 on a cloud engine. The order on a job is light, then cameras, then
+What makes a model read as a place or a thing: one clear light, a camera where a person would
+stand, and surfaces that answer light the way their material does. Every script and number here
+was run on Blender 5.2.4 on a cloud engine. The order on a job is light, then cameras, then
 materials: a material is judged in the light it will be seen in.
 
 ## Daylight: sun and sky for a place, a date, and an hour
@@ -114,28 +114,57 @@ at 45° north: 21 June at 10:00, elevation 57.5° and bearing 121.4°; 21 June a
 within the hour either way.
 
 - **Choose the hour for the view.** The sun 30 to 60 degrees to the side of the camera's
-  direction lights one face and shades the next. A high sun (over 55°) puts a wall under a deep
-  overhang in shadow from top to bottom: at 57.5° a 0.9 m canopy shaded a 2.7 m wall entirely.
-- **A sun below about 3° is twilight.** `--sun-elevation -4` in `render.py` gives the blue hour
-  for an evening interior.
+  direction lights one face and shades the next. A high sun puts a wall under a deep overhang
+  in shadow from top to bottom: at 57.5° a 0.9 m canopy shaded a 2.7 m wall entirely, and at
+  40.8° it drew a band across the top third.
+- **A sun below the horizon is twilight.** `--sun-elevation -4` in `render.py` gave the blue
+  hour behind an evening interior.
 - **EEVEE does not take the sky's sun disc**: under it this world lights the scene with the sky
-  alone, dim and blue. Render daylight in Cycles. Where EEVEE must do, add a Sun light on the
-  same bearing and switch the disc off (`sky.sun_disc = False`); a Sun light of this strength
-  gave the same sunlit ground in Cycles as the disc:
+  alone, dim and blue (a mean brightness of 0.44 where Cycles gave 0.62). Render daylight in
+  Cycles. Where EEVEE must do, a Sun light on the sky's bearing stands in for the disc. Its
+  strength, measured as what lit the ground in Cycles as the disc did:
 
 | Sun's elevation | 10° | 20° | 30° | 45° | 60° |
 |---|---|---|---|---|---|
 | Sun light strength, W/m² | 71 | 104 | 120 | 131 | 137 |
 
-@@EEVEE_SUN_NOTE@@
+```python
+# Give the scene a Sun light that stands in for the Sky Texture's sun disc, on the same bearing and height,
+# for EEVEE, which does not take the disc. It changes the open scene and does not save: run it ahead of
+# render.py in one command, or through the bridge and save.
+#   blender -b house.blend --python scripts/sun_light.py --python scripts/render.py -- --engine BLENDER_EEVEE --out previews/exterior-eevee.png
+import bpy, json, math
+from mathutils import Vector
+
+scene = bpy.context.scene
+sky = next(n for n in scene.world.node_tree.nodes if n.bl_idname == "ShaderNodeTexSky")
+elevation, bearing = sky.sun_elevation, sky.sun_rotation
+# The strength in W/m2 that lit the ground as the disc did, measured at these elevations in degrees
+measured = [(10, 71.0), (20, 104.0), (30, 120.0), (45, 131.0), (60, 137.0)]
+degrees = min(max(math.degrees(elevation), 10.0), 60.0)
+strength = next(a[1] + (b[1] - a[1]) * (degrees - a[0]) / (b[0] - a[0]) for a, b in zip(measured, measured[1:]) if a[0] <= degrees <= b[0])
+
+sun = bpy.data.objects.get("Sun") or bpy.data.objects.new("Sun", bpy.data.lights.new("Sun", "SUN"))
+if sun.name not in scene.collection.all_objects:
+    scene.collection.objects.link(sun)
+toward_sun = Vector((math.sin(bearing) * math.cos(elevation), math.cos(bearing) * math.cos(elevation), math.sin(elevation)))
+sun.rotation_euler = (-toward_sun).to_track_quat("-Z", "Y").to_euler()      # a light shines down its own -Z
+sun.data.energy, sun.data.angle = strength, math.radians(0.545)             # the sun's width in the sky
+sky.sun_disc = False                                                         # or Cycles would count the sun twice
+print("SUNLIGHT " + json.dumps({"elevation_deg": round(math.degrees(elevation), 1), "bearing_deg": round(math.degrees(bearing), 1), "strength_w_m2": round(strength, 1)}))
+```
+
+On the test building it printed `SUNLIGHT {"elevation_deg": 40.8, "bearing_deg": 149.6,
+"strength_w_m2": 127.9}`. Cycles then rendered the same picture with the light as with the
+disc (mean brightness 0.615 against 0.617), and EEVEE came to 0.59.
 
 ## A panorama for light and reflections
 
-The image ships no HDRI library, but Blender carries eight small panoramas (1024 by 512, from
-Poly Haven, in `datafiles/studiolights/world/` of the installation): `city`, `courtyard`,
-`forest`, `interior`, `night`, `studio`, `sunrise`, `sunset`. They are enough to light a product
-softly and to put something into its reflections, and too coarse to appear in a picture, so the
-camera is given a plain color instead:
+The image ships no HDRI library, but Blender carries eight small panoramas (1024 by 512, made
+from Poly Haven's, in `datafiles/studiolights/world/` of the installation): `city`,
+`courtyard`, `forest`, `interior`, `night`, `studio`, `sunrise`, `sunset`. They are enough to
+light softly and to put something into reflections, and too coarse to appear in a picture, so
+the camera is given a plain color in their place:
 
 ```python
 # Light a scene with one of the eight panoramas Blender ships (city, courtyard, forest, interior, night,
@@ -172,24 +201,29 @@ bpy.ops.wm.save_mainfile()
 print(json.dumps({"world": world.name, "panorama": [os.path.basename(path), list(picture.image.size)], "strength": STRENGTH}))
 ```
 
-@@HDRI_NOTE@@
+It answers `{"world": "Panorama", "panorama": ["studio.exr", [1024, 512]], "strength": 1.0}`.
+Run on the product scene of objects.md with its three lights kept, it lifted the picture's mean
+brightness from 0.73 to 0.81 and flattened the shadow: with a panorama, lower `STRENGTH` or take
+the fill light out. It replaces the scene's world, so on a building it replaces the sun and sky.
 
 A sharper panorama has to come from the library: an equirectangular picture the person uploads
-or you generate, brought with `engine_import` and loaded in place of `path`. A generated picture
-is not a measured sky: it lights softly and its brightness is whatever looks right.
+or you generate, brought with `engine_import` and loaded in place of `path`. That was not run
+here, and a generated picture is not a measured sky: its brightness is whatever looks right.
 
 ## Room light
 
 A room lit by daylight through windows is the slow case: little light gets in, and it bounces.
 In order:
 
-1. **Exposure first.** About 3 stops over the exterior's: the test room rendered at -1.7 where
-   its exterior took -4.96. Read `brightness.mean` in the RENDER line and aim for 0.45 to 0.7.
+1. **Exposure first.** About 3 stops over the exterior's: the test room rendered at -1.7 (mean
+   brightness 0.64) where its exterior took -4.96. Read `brightness.mean` in the RENDER line
+   and aim for 0.45 to 0.7.
 2. **Glass that lets light in.** A pane with `visible_shadow = False` on its object, as the
-   building script sets: clear glass otherwise shadows the room.
+   building script sets. With glass that casts shadows the same room lost its patch of sun
+   and fell to a mean of 0.48.
 3. **Portals.** An area light the size of each opening, facing in, with `cycles.is_portal`: it
    gives no light and tells Cycles where the sky is. In the test room at 64 samples the grain
-   fell from 0.067 to 0.055 (mean difference of a pixel from its neighbors) for 5% more time.
+   fell from 0.067 to 0.055 (the mean difference of a pixel from its neighbors) for 5% more time.
 4. **Lamps that would be there**, for an evening view: warm, with a real size, kept in a
    collection that is hidden until a render shows it.
 
@@ -253,32 +287,40 @@ bpy.ops.wm.save_mainfile()
 print(json.dumps({"portals": [o.name for o in portals.objects], "evening": {o.name: [o.data.type, o.data.energy, o.data.temperature] for o in evening.objects}}))
 ```
 
-An evening view is then `render.py … --show "Lights evening" --sun-elevation -4 --exposure
-1.5`. @@EVENING_NOTE@@ Light power is in watts of light, not of
-electricity: a 180 W panel here is a strong ceiling fixture. `use_temperature` with
-`temperature` in kelvin colors a lamp: 2700 for a bedside lamp, 3000 for a warm ceiling, 4000
-for neutral, 6500 for daylight.
+It answers `{"portals": ["Portal Window east", "Portal Window north"], "evening": {"Ceiling
+panel": ["AREA", 180.0, 3000.0], "Bedside lamp": ["POINT", 40.0, 2700.0]}}`. An evening view is
+then `render.py … --show "Lights evening" --sun-elevation -4 --exposure -2.5`: in the test room
+a mean brightness of 0.60, lamp light on the walls, a blue-hour sky in the windows, and the
+lamps mirrored in the glass. At `--exposure 1.5` the same frame was burnt (half its pixels
+clipped), which the RENDER line said before anyone looked.
+
+- Light power is in watts of light, not of electricity: 180 W on a panel is a strong ceiling
+  fixture, 40 W a bright bedside lamp.
+- `use_temperature` with `temperature` in kelvin colors a lamp. 3000 and 2700 gave a deep
+  orange room against the blue hour; that is what those numbers look like next to a twilight
+  sky, so say it before the person is surprised.
 
 ## Cameras
 
 - **Architecture is level.** Rotation `(90°, 0, heading)`: the camera turns about the vertical
   only, so vertical edges stay vertical. Raise or lower what it sees with `shift_y`, not with a
-  tilt.
+  tilt. `shift_y` is in widths of the frame: 0.1 moved a point down by 0.178 of the height at
+  16:9.
 - **Eye height.** 1.6 m standing, 1.2 m seated, 1.5 m in a small room.
 - **Focal length** (`lens`, mm, on a 36 mm sensor): interiors 16 to 24 (18 in the test room;
   under 16 the corners stretch), exteriors 24 to 35 (28 for the test building), details 50 to 85.
 - **Check the framing by numbers.** `world_to_camera_view(scene, camera, point)` gives where a
   point lands in the frame, 0 to 1 across and up. The script reports the subject's bounds: both
   ranges inside 0.05 to 0.95 and it is all in view; aim for a building's foot near 0.15 to 0.2
-  up, with ground under it. @@SHIFT_NOTE@@
+  up, with ground under it.
 - **Put the viewport on the camera** (`region_3d.view_perspective = "CAMERA"`, as the script
   does) so the Screen shows the person the frame you mean.
 - **A camera that looks at a thing** (a product, a detail): aim it with
   `obj.rotation_euler = (target - obj.location).to_track_quat("-Z", "Y").to_euler()`; cameras and
   lights both look down their own -Z.
 - **Depth of field** belongs to close views: `cam.data.dof.use_dof = True`, `focus_object` (or
-  `focus_distance` in meters), `aperture_fstop` (8 keeps a small product sharp front to back;
-  2.8 isolates a detail). Leave it off for architecture, where everything is in focus.
+  `focus_distance` in meters), `aperture_fstop`: 8 kept a 180 mm product sharp front to back at
+  0.7 m. Leave it off for architecture, where everything is in focus.
 
 ## Materials
 
@@ -445,7 +487,8 @@ print(json.dumps({"materials": sorted(set(assigned.values())), "objects": len(as
 ```
 
 It answers `{"materials": [the ten names], "objects": 27, "without_material": ["A-DOOR",
-"A-GLAZ", "Cutter Window east"], "pictures": {…}}`: the flat guides and the cutter need none.
+"A-GLAZ", "Cutter Window east"], "pictures": {"01-paving.png":
+["//library/paving/01-paving.png", [512, 512]]}}`: the flat guides and the cutter need none.
 
 - **Textures are in meters because the coordinates are.** Object coordinates on an object with
   scale 1 and its origin at the world's are world meters, so "boards 0.14 m wide" is a number in
@@ -453,10 +496,15 @@ It answers `{"materials": [the ten names], "objects": 27, "without_material": ["
   pattern: apply the scale (modeling.md).
 - **A picture from the library**: `engine_import(engine_id, ["@paving"])` copies an entry's media
   to `library/paving/01-<name>` in the project's folder and answers with the paths; `pictured`
-  box-projects it so that no UV map is needed, at a size in meters you state. Make paths relative
-  (`bpy.ops.file.make_paths_relative()`), so the file opens on the next machine.
+  box-projects it so that no UV map is needed, at a size in meters you state. It was run on a
+  picture written to that path by hand, since no library was at hand. The script makes paths
+  relative (`bpy.ops.file.make_paths_relative()`), so the file opens on the next machine.
+- **The palette is the person's.** In an Architecture project the Materials section of the
+  library holds one entry per material with a close picture: use `pictured` for those that are
+  a pattern (a stone, a tile, a weave) and a plain recipe from the table, with the entry's
+  color, for those that are a finish.
 - **A material nothing uses is not saved** (`use_fake_user = True` keeps one).
 - **Nodes do not leave Blender.** These textures render here and are lost in a GLB or an FBX
-  (modeling.md): a model that leaves gets plain colors or pictures.
+  (modeling.md): a model that leaves gets plain colors.
 - **Judge a material in a draft**, half size and 64 samples, from the final camera, before the
   final frame is rendered.
