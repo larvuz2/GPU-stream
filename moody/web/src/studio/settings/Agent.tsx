@@ -5,8 +5,8 @@
  */
 
 /**
- * The studio's "Limits for a turn" dialog: what one turn may spend on the model, in dollars, and
- * how many steps it may take, as settings of the person's account (`Limits` in `moody/STUDIO.md`).
+ * The Agent tab of Settings: what one turn may spend on the model, in dollars, and how many steps
+ * it may take, as settings of the person's account (`Limits` in `moody/STUDIO.md`).
  *
  * Each field shows the number that applies. A limit the person has not set is the deployment's
  * default and says so; one they set says what the default is and offers the way back to it, which
@@ -15,48 +15,28 @@
  *
  * A value is checked here before anything is sent: a spend must be above zero and no higher than
  * its ceiling, and steps a whole number from one to theirs. The control plane checks the same and
- * may still refuse (its ceiling moved, say), which the dialog shows in the server's own words. Only
- * what changed is sent, and saving nothing just closes the dialog.
+ * may still refuse (its ceiling moved, say), which the tab shows in the server's own words. Only
+ * what changed is sent, and the button is there to press only while something has.
  *
- * The dialog opens from the account menu, and from the line a turn leaves in the conversation
- * when it stopped at one of these limits, in which case the field of that limit has the focus. It
- * is offered only where the control plane reports the limits (`Me.limits`).
+ * The tab is also where the line a turn leaves in the conversation leads when it stopped at one
+ * of these limits, in which case the field of that limit has the focus.
  * @module
  */
 import { useEffect, useId, useRef, useState, type SubmitEvent } from 'react';
-import { Dialog } from '../components/Dialog';
-import type { LimitChanges, Limits, TurnLimit } from '../lib/api';
-import { creditCount, usd } from '../lib/format';
-import { ErrorNotice } from './Notice';
-import { limitText } from './present';
+import { Check } from 'lucide-react';
+import type { LimitChanges, Limits, TurnLimit } from '../../lib/api';
+import { creditCount, usd } from '../../lib/format';
+import { ErrorNotice } from '../Notice';
+import { limitText } from '../present';
 
-/** Props of {@link LimitsDialog}. */
-interface LimitsDialogProps {
-  /** Whether the dialog is shown. */
-  open: boolean;
-  /** Closes the dialog. */
-  onClose: () => void;
+/** Props of {@link LimitsForm}. */
+interface LimitsFormProps {
   /** The account's limits. */
   limits: Limits;
   /** The limit a turn just stopped at, whose field takes the focus; `null` for neither. */
   reached: TurnLimit | null;
   /** Saves the limits that changed. Rejects with an `ApiError`, 400 for a value the server refuses. */
   onSave: (changes: LimitChanges) => Promise<void>;
-}
-
-/**
- * Renders the dialog.
- *
- * @param props The component's props.
- * @returns The dialog.
- */
-export function LimitsDialog({ open, onClose, limits, reached, onSave }: LimitsDialogProps) {
-  const titleId = useId();
-  return (
-    <Dialog open={open} onClose={onClose} labelledBy={titleId}>
-      <LimitsForm titleId={titleId} limits={limits} reached={reached} onClose={onClose} onSave={onSave} />
-    </Dialog>
-  );
 }
 
 /** One of the two limits, as its field needs it. */
@@ -120,26 +100,36 @@ function valueOf(entry: Entry, spec: FieldSpec, max: number): number | null | un
   return fits ? value : undefined;
 }
 
-/** Props of {@link LimitsForm}. */
-interface LimitsFormProps extends Omit<LimitsDialogProps, 'open'> {
-  /** The `id` the dialog is titled by. */
-  titleId: string;
-}
-
 /**
- * Renders the dialog's content: the two fields, and what the last attempt to save came to.
+ * Renders the two limits of a turn, and what the last attempt to save them came to.
  *
  * @param props The component's props.
  * @returns The form.
  */
-function LimitsForm({ titleId, limits, reached, onClose, onSave }: LimitsFormProps) {
+export function LimitsForm({ limits, reached, onSave }: LimitsFormProps) {
   const [entries, setEntries] = useState<Record<TurnLimit, Entry>>(() => ({
     budget: limits.own.turn_budget_usd === null ? { own: false } : { own: true, text: String(limits.own.turn_budget_usd) },
     steps: limits.own.turn_limit === null ? { own: false } : { own: true, text: String(limits.own.turn_limit) },
   }));
   const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<unknown>(null);
+
+  // What saving would send, or `null` while a field holds what it refuses.
+  let changes: LimitChanges | null = {};
+  for (const spec of FIELDS) {
+    const key = KEYS[spec.limit];
+    const value = valueOf(entries[spec.limit], spec, limits.max[key]);
+    if (value === undefined) {
+      changes = null;
+      break;
+    }
+    if (value !== limits.own[key]) {
+      changes[key] = value;
+    }
+  }
+  const unchanged = changes !== null && Object.keys(changes).length === 0;
 
   /**
    * Saves what changed, or shows which field refuses its value.
@@ -150,27 +140,17 @@ function LimitsForm({ titleId, limits, reached, onClose, onSave }: LimitsFormPro
     event.preventDefault();
     setChecked(true);
     setError(null);
-    const changes: LimitChanges = {};
-    for (const spec of FIELDS) {
-      const key = KEYS[spec.limit];
-      const value = valueOf(entries[spec.limit], spec, limits.max[key]);
-      if (value === undefined) {
-        return;
-      }
-      if (value !== limits.own[key]) {
-        changes[key] = value;
-      }
-    }
-    if (Object.keys(changes).length === 0) {
-      onClose();
+    if (changes === null || unchanged) {
       return;
     }
     setBusy(true);
     try {
       await onSave(changes);
-      onClose();
+      setSaved(true);
+      setChecked(false);
     } catch (failure) {
       setError(failure);
+    } finally {
       setBusy(false);
     }
   }
@@ -182,14 +162,7 @@ function LimitsForm({ titleId, limits, reached, onClose, onSave }: LimitsFormPro
         void submit(event);
       }}
     >
-      <h2 id={titleId} className="pr-10 text-xl font-semibold tracking-tight">
-        Limits for a turn
-      </h2>
-      <p className="lede mt-2 text-sm">
-        A turn is one message of yours and everything the agent does until it hands back to you. Each limit starts
-        fresh with your next message.
-      </p>
-      <div className="mt-5 grid grid-cols-1 gap-5">
+      <div className="grid grid-cols-1 gap-5 sm:max-w-md">
         {FIELDS.map((spec) => {
           const key = KEYS[spec.limit];
           return (
@@ -204,24 +177,30 @@ function LimitsForm({ titleId, limits, reached, onClose, onSave }: LimitsFormPro
               onEntry={(entry) => {
                 setEntries({ ...entries, [spec.limit]: entry });
                 setError(null);
+                setSaved(false);
               }}
             />
           );
         })}
       </div>
       {error === null ? null : (
-        <div className="mt-4">
+        <div className="mt-4 sm:max-w-md">
           <ErrorNotice error={error} />
         </div>
       )}
-      <div className="mt-6 flex justify-end gap-2">
-        <button type="button" className="btn btn-quiet btn-sm" onClick={onClose}>
-          Cancel
-        </button>
-        <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
+      <div className="mt-6 flex items-center gap-3">
+        <button type="submit" className="btn btn-primary btn-sm" disabled={busy || unchanged}>
           {busy ? <span className="spinner size-3.5" aria-hidden="true" /> : null}
           Save limits
         </button>
+        <p className="flex items-center gap-1.5 text-sm text-muted" role="status">
+          {saved && unchanged ? (
+            <>
+              <Check className="size-4 text-ok" aria-hidden="true" />
+              Saved. Your next turn runs under these.
+            </>
+          ) : null}
+        </p>
       </div>
     </form>
   );
@@ -239,7 +218,7 @@ interface LimitFieldProps {
   max: number;
   /** Whether saving was tried, after which a refused value says so. */
   checked: boolean;
-  /** Whether the field takes the focus when the dialog opens. */
+  /** Whether the field takes the focus when the tab opens. */
   focused: boolean;
   /** Replaces what the field holds. */
   onEntry: (entry: Entry) => void;

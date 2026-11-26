@@ -173,7 +173,7 @@ function Sidebar() {
           </span>
         </span>
         <span className="flex justify-between text-faint">
-          <span>Connect Claude</span>
+          <span>Settings</span>
           <span>Sign out</span>
         </span>
       </div>

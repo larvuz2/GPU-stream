@@ -31,6 +31,7 @@ import { cx } from '../lib/cx';
 import { shortDateTime } from '../lib/format';
 import { MediaView } from './MediaView';
 import { ErrorNotice, Notice } from './Notice';
+import { normalizeTag } from './present';
 import { Prose } from './Prose';
 import type { ProcessEntry } from './transcript';
 import type { ProjectData } from './useProject';
@@ -61,21 +62,6 @@ interface LibraryBodyProps {
 /** The tab that shows every section, and the tab that shows what the session showed. */
 const ALL_TAB = '\u0000all';
 const PROCESS_TAB = '\u0000process';
-
-/**
- * Normalizes a tag as prompts name it: lowercase, without the `@`, words joined by hyphens.
- *
- * @param text The tag as typed.
- * @returns The tag.
- */
-function normalizeTag(text: string): string {
-  return text
-    .trim()
-    .replace(/^@+/, '')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}_-]+/gu, '-')
-    .replace(/^-+|-+$/g, '');
-}
 
 /**
  * The image that stands for an asset in a grid.

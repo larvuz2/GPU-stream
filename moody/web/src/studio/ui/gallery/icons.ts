@@ -8,122 +8,45 @@
  * The pixel icons of the gallery's cards, each as an agent would write one into a tile: twelve
  * rows of twelve cells, `1` for a cell that is drawn.
  *
- * They were drawn for the gallery, cell by cell, in the grid language of the site's own icons
+ * The seven that stand for a project's kind are the catalog's own (`icons` in `catalog.json`),
+ * which the control plane puts on the card that asks the kind: they are read from there, so there
+ * is one drawing of each and the gallery shows the one a project opens with. The others were
+ * drawn for the gallery, cell by cell, in the grid language of the site's own icons
  * (`components/DisciplineIcon.tsx`); the sound wave is the site's Music icon.
  * @module
  */
+import { catalog } from '../../../lib/catalog';
+
+/**
+ * Reads one of the catalog's icons.
+ *
+ * @param name The icon's name in the catalog.
+ * @returns Its rows, or none for a name the catalog no longer has, which leaves a tile its words.
+ */
+function registered(name: string): string[] {
+  return catalog.icons[name] ?? [];
+}
 
 /** A clapperboard: Film & TV. */
-export const CLAPPER = [
-  '000000000000',
-  '001100110011',
-  '011001100110',
-  '110011001100',
-  '111111111111',
-  '100000000001',
-  '100000000001',
-  '100000000001',
-  '100000000001',
-  '100000000001',
-  '111111111111',
-  '000000000000',
-];
+export const CLAPPER = registered('film');
 
-/** A heart: Social Media. */
-export const HEART = [
-  '000000000000',
-  '001100001100',
-  '011110011110',
-  '111111111111',
-  '111111111111',
-  '111111111111',
-  '011111111110',
-  '001111111100',
-  '000111111000',
-  '000011110000',
-  '000001100000',
-  '000000000000',
-];
+/** A heart in a message: Social Media. */
+export const HEART = registered('social');
 
 /** A phone held upright, playing: Vertical Shows. */
-export const PHONE = [
-  '001111111100',
-  '001000000100',
-  '001000000100',
-  '001001000100',
-  '001001100100',
-  '001001110100',
-  '001001100100',
-  '001001000100',
-  '001000000100',
-  '001000000100',
-  '001111111100',
-  '000000000000',
-];
+export const PHONE = registered('vertical');
 
 /** A megaphone: Commercials. */
-export const MEGAPHONE = [
-  '000000000000',
-  '000000000110',
-  '000000011110',
-  '000001111110',
-  '111111111110',
-  '111111111110',
-  '111111111110',
-  '000001111110',
-  '001100011110',
-  '001100000110',
-  '001100000000',
-  '000000000000',
-];
+export const MEGAPHONE = registered('commercial');
 
 /** Two joined notes: Music Videos. */
-export const NOTES = [
-  '000000000000',
-  '000011111110',
-  '000011111110',
-  '000010000010',
-  '000010000010',
-  '000010000010',
-  '000010000010',
-  '011110011110',
-  '111110111110',
-  '111110111110',
-  '011100011100',
-  '000000000000',
-];
+export const NOTES = registered('music-video');
 
 /** An open book: Education. */
-export const BOOK = [
-  '000000000000',
-  '000000000000',
-  '111110011111',
-  '100001100001',
-  '100001100001',
-  '100001100001',
-  '100001100001',
-  '100001100001',
-  '111111111111',
-  '000001100000',
-  '000000000000',
-  '000000000000',
-];
+export const BOOK = registered('education');
 
 /** Three dots: Other. */
-export const DOTS = [
-  '000000000000',
-  '000000000000',
-  '000000000000',
-  '000000000000',
-  '000000000000',
-  '110011001100',
-  '110011001100',
-  '000000000000',
-  '000000000000',
-  '000000000000',
-  '000000000000',
-  '000000000000',
-];
+export const DOTS = registered('other');
 
 /** A written page: a script. */
 export const PAGE = [

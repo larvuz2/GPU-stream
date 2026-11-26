@@ -1161,6 +1161,24 @@
     --dialog-width: 44rem;
   }
 
+  /* A dialog that is a page of its own: as tall as the window allows, its content scrolling inside it. */
+  dialog.dialog-page {
+    --dialog-width: 60rem;
+    height: min(100dvh - 1.5rem, 44rem);
+    overflow: hidden;
+  }
+
+  @media (max-width: 639.98px) {
+    dialog.dialog-page {
+      width: 100vw;
+      height: 100dvh;
+      max-height: none;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
+  }
+
   dialog.dialog[open] {
     animation: dialog-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
   }

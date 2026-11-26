@@ -6,8 +6,8 @@
 
 /**
  * How the studio presents what the catalog and the control plane name: a discipline's name, an
- * app's status, the plan's progress, a limit of a turn, how long ago something happened, and
- * opening a stream in a new tab.
+ * app's status, the plan's progress, a limit of a turn, a library tag, how long ago something
+ * happened, and opening a stream in a new tab.
  * @module
  */
 import type { PlanItem, TurnLimit } from '../lib/api';
@@ -76,6 +76,21 @@ export function planProgress(items: PlanItem[]): string | undefined {
  */
 export function limitText(limit: TurnLimit, value: number): string {
   return limit === 'budget' ? usd(value) : `${creditCount(value)} ${value === 1 ? 'step' : 'steps'}`;
+}
+
+/**
+ * Normalizes a tag as prompts name it: lowercase, without the `@`, words joined by hyphens.
+ *
+ * @param text The tag as typed.
+ * @returns The tag.
+ */
+export function normalizeTag(text: string): string {
+  return text
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}_-]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 const MINUTE = 60_000;

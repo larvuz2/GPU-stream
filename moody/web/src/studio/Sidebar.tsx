@@ -6,13 +6,14 @@
 
 /**
  * The studio's left sidebar: the brand, "New project", the **Create** shortcuts, the **Pinned** and
- * **Recent** projects, and the account with its credits and the limits of its turns at the foot.
+ * **Recent** projects, and the account at the foot, whose short menu opens Settings.
  *
  * Create lists the catalog's shortcuts (`catalog.shortcuts`): a kind of work by its everyday name.
- * Each opens the new-project dialog on its discipline, and on its format where it names one, so a
- * project of that kind is two clicks away and the first of them makes nothing. A shortcut the
- * catalog does not offer yet is drawn dimmed with "Soon": it starts nothing, and where the catalog
- * says what to expect of it, choosing it shows that (`ComingDialog.tsx`).
+ * Choosing one starts a project of it, which the studio does in the fewest steps the kind allows
+ * (`Studio.tsx`, `startShortcut`): at once where the conversation asks the rest, else through the
+ * new-project dialog on its discipline and format. A shortcut the catalog does not offer yet is
+ * drawn dimmed with "Soon": it starts nothing, and where the catalog says what to expect of it,
+ * choosing it shows that (`ComingDialog.tsx`).
  *
  * Each project row has a menu to pin, rename, or delete it; a rename is edited in the row itself,
  * and a delete asks first. The search is a quiet icon at the end of the Recent heading's row (the
@@ -31,8 +32,6 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 
 import {
   Coins,
   Ellipsis,
-  Gauge,
-  KeyRound,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
@@ -41,6 +40,7 @@ import {
   PinOff,
   Plus,
   Search,
+  Settings,
   Trash2,
   X,
 } from 'lucide-react';
@@ -56,8 +56,8 @@ import { Menu } from './Menu';
 import { ErrorNotice } from './Notice';
 import { DisciplineIcon, ShortcutIcon } from '../components/DisciplineIcon';
 import { ComingDialog } from './ComingDialog';
-import type { ProjectDraft } from './NewProjectDialog';
-import { ago, disciplineName, limitText } from './present';
+import { ago, disciplineName } from './present';
+import { BILLING } from './settings/tabs';
 import type { Projects } from './useAccount';
 
 /** Props of {@link Sidebar}. */
@@ -68,8 +68,10 @@ interface SidebarProps {
   selectedId: string | null;
   /** Opens a project. */
   onSelect: (id: string) => void;
-  /** Opens the new-project dialog, on what a shortcut starts where one was chosen. */
-  onNewProject: (preset?: ProjectDraft) => void;
+  /** Opens the new-project dialog. */
+  onNewProject: () => void;
+  /** Starts a project from a shortcut of the Create list. Rejects with an `ApiError`. */
+  onShortcut: (shortcut: Shortcut) => Promise<void>;
   /** Whether the sidebar is folded to a rail. */
   collapsed: boolean;
   /** Folds or unfolds it. */
@@ -80,12 +82,8 @@ interface SidebarProps {
   email: string;
   /** Whether the studio is showing the demo's sample data, which the header says. */
   demo: boolean;
-  /** Opens the credits dialog. */
-  onAddCredits: () => void;
-  /** Opens the Connect Claude dialog. */
-  onConnectClaude: () => void;
-  /** Opens the dialog of a turn's limits. */
-  onLimits: () => void;
+  /** Opens Settings, on the tab named (`settings/tabs.ts`) or on its first. */
+  onSettings: (tab?: string) => void;
   /** Signs the person out. */
   onSignOut: () => void;
   /** Whether the region is hidden behind another tab on a narrow screen. */
@@ -99,11 +97,13 @@ interface SidebarProps {
  * @returns The sidebar.
  */
 export function Sidebar(props: SidebarProps) {
-  const { projects, collapsed, onCollapse, onNewProject, mobileHidden, demo } = props;
+  const { projects, collapsed, onCollapse, onNewProject, onShortcut, mobileHidden, demo } = props;
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [coming, setComing] = useState<Shortcut | null>(null);
+  const [startError, setStartError] = useState<unknown>(null);
+  const starting = useRef(false);
   const ready = projects.status === 'ready';
   const search: ProjectSearch = {
     open: searching,
@@ -119,17 +119,27 @@ export function Sidebar(props: SidebarProps) {
   };
 
   /**
-   * Opens the new-project dialog on what a shortcut starts, or, for one that starts nothing yet,
-   * what to expect of it.
+   * Starts a project from a shortcut, or, for one that starts nothing yet, shows what to expect of
+   * it. A second press while the first is still starting is left out, so one project is made.
    *
    * @param shortcut The shortcut chosen.
    */
-  const choose = (shortcut: Shortcut): void => {
-    const discipline = shortcutDiscipline(shortcut);
-    if (discipline === undefined) {
+  const choose = async (shortcut: Shortcut): Promise<void> => {
+    if (shortcutDiscipline(shortcut) === undefined) {
       setComing(shortcut);
-    } else {
-      onNewProject({ discipline: discipline.id, format: shortcut.format });
+      return;
+    }
+    if (starting.current) {
+      return;
+    }
+    starting.current = true;
+    setStartError(null);
+    try {
+      await onShortcut(shortcut);
+    } catch (failure) {
+      setStartError(failure);
+    } finally {
+      starting.current = false;
     }
   };
   const comingDialog = (
@@ -256,6 +266,7 @@ export function Sidebar(props: SidebarProps) {
 
       <div className="thin-scroll mt-3 grid min-h-0 flex-1 grid-cols-1 content-start gap-4 overflow-y-auto px-3 pb-3">
         <CreateList ready={ready} compact={false} onChoose={choose} />
+        {startError === null ? null : <ErrorNotice error={startError} />}
         <ProjectLists {...props} pinned={pinned} recent={recent} search={search} onDelete={setDeleting} />
       </div>
 
@@ -282,7 +293,7 @@ interface CreateListProps {
   /** Whether the sidebar is a rail, where a shortcut is its icon alone. */
   compact: boolean;
   /** Takes the shortcut the person chose. */
-  onChoose: (shortcut: Shortcut) => void;
+  onChoose: (shortcut: Shortcut) => Promise<void>;
 }
 
 /**
@@ -300,7 +311,7 @@ function CreateList({ ready, compact, onChoose }: CreateListProps) {
     const soon = shortcutDiscipline(shortcut) === undefined;
     const icon = <ShortcutIcon shortcut={shortcut} className="size-3" />;
     const choose = (): void => {
-      onChoose(shortcut);
+      void onChoose(shortcut);
     };
     if (soon && (shortcut.preview ?? []).length === 0) {
       return (
@@ -683,7 +694,9 @@ function ProjectRow({ project, active, hidden, now, onSelect, onDelete, onRename
             type="button"
             className="min-w-0 flex-1 truncate text-left after:absolute after:inset-0 after:content-['']"
             aria-current={active ? 'page' : undefined}
-            title={`${project.name} · ${disciplineName(project.discipline)} · ${project.format}`}
+            title={[project.name, disciplineName(project.discipline), project.format]
+              .filter((part) => part !== '')
+              .join(' · ')}
             onClick={() => {
               onSelect(project.id);
             }}
@@ -815,16 +828,20 @@ interface AccountMenuProps extends SidebarProps {
 }
 
 /**
- * Renders the account button at the sidebar's foot and the menu it opens: the balance, adding
- * credits, a turn's limits where the control plane has them (with the two that apply beside the
- * item), Connect Claude, and signing out.
+ * Renders the account button at the sidebar's foot and the short menu it opens: Settings, the
+ * credit balance (which opens Settings on Billing), and signing out. Everything else that is the
+ * person's to set is in Settings.
+ *
+ * The button names the person by the name they gave themselves, or by their email address where
+ * they gave none.
  *
  * @param props The component's props.
  * @returns The account button and its menu.
  */
-function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onLimits, onSignOut }: AccountMenuProps) {
-  const limits = me?.limits;
-  const initial = email.charAt(0) || '?';
+function AccountMenu({ me, email, compact, onSettings, onSignOut }: AccountMenuProps) {
+  const name = me?.name ?? '';
+  const shown = name === '' ? email : name;
+  const initial = shown.charAt(0) || '?';
   const balance = me === null ? '—' : creditCount(me.credits);
   const avatar = (
     <span className="grid size-8 flex-none place-items-center rounded-md border border-line-strong bg-ink-700 text-[0.8125rem] font-semibold uppercase">
@@ -835,7 +852,7 @@ function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onLimi
     <Menu
       label="Account"
       placement="above-start"
-      menuClassName="w-64"
+      menuClassName="w-56"
       triggerClassName={cx(
         'flex items-center gap-2.5 rounded-xl text-left transition-colors hover:bg-white/[0.05]',
         compact ? 'p-1' : 'w-full p-2',
@@ -848,7 +865,7 @@ function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onLimi
             {avatar}
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium" title={email}>
-                {email || 'Your account'}
+                {shown || 'Your account'}
               </span>
               <span className="flex items-center gap-1 text-xs text-muted">
                 <Coins className="size-3 text-fg" aria-hidden="true" />
@@ -860,40 +877,30 @@ function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onLimi
       }
       items={
         <>
-          <div className="px-3 pt-2 pb-2.5">
-            <p className="text-xs text-faint">Signed in as</p>
-            <p className="truncate text-sm font-medium" title={email}>
-              {email}
-            </p>
-          </div>
-          <div className="mx-1 mb-1 flex items-center justify-between gap-2 rounded-xl border border-line bg-white/[0.03] py-2 pr-2 pl-3">
-            <span className="flex items-center gap-2 text-sm">
-              <Coins className="size-4 text-fg" aria-hidden="true" />
-              <span className="font-semibold tabular-nums">{balance}</span>
-              <span className="text-muted">credits</span>
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            onClick={() => {
+              onSettings();
+            }}
+          >
+            <Settings aria-hidden="true" />
+            Settings
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            aria-label={`${balance} credits. Open Billing`}
+            onClick={() => {
+              onSettings(BILLING.id);
+            }}
+          >
+            <Coins aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              <span className="font-semibold tabular-nums">{balance}</span> credits
             </span>
-            <button
-              type="button"
-              role="menuitem"
-              className="btn btn-primary btn-sm h-7 px-2.5 text-xs"
-              onClick={onAddCredits}
-            >
-              <Plus className="size-3.5" aria-hidden="true" />
-              Add
-            </button>
-          </div>
-          {limits === undefined ? null : (
-            <button type="button" role="menuitem" className="menu-item" onClick={onLimits}>
-              <Gauge aria-hidden="true" />
-              <span className="flex-none">Turn limits</span>
-              <span className="min-w-0 flex-1 truncate text-right text-xs text-faint tabular-nums">
-                {limitText('budget', limits.turn_budget_usd)} · {limitText('steps', limits.turn_limit)}
-              </span>
-            </button>
-          )}
-          <button type="button" role="menuitem" className="menu-item" onClick={onConnectClaude}>
-            <KeyRound aria-hidden="true" />
-            Connect Claude
           </button>
           <button type="button" role="menuitem" className="menu-item" onClick={onSignOut}>
             <LogOut aria-hidden="true" />

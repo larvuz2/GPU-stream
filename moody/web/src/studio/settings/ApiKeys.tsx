@@ -5,28 +5,26 @@
  */
 
 /**
- * The studio's "Connect Claude" dialog, opened from the account menu: create, list, and revoke API
- * keys, and the command that hands one to Claude.
+ * The API keys tab of Settings: create, list, and revoke the keys other programs reach the
+ * account with, Claude first among them.
  *
- * The control plane returns a key's secret once, when it is created, so the dialog shows it then,
- * with the setup command already filled in, and holds it only in this component's state: closing
- * the dialog or leaving the page is the last anyone sees of it. The keys are read each time the
- * dialog opens, since the content mounts afresh then.
+ * The control plane returns a key's secret once, when it is created, so the tab shows it then,
+ * with the command that hands it to Claude already filled in, and holds it only in this
+ * component's state: leaving the tab, closing Settings, or leaving the page is the last anyone
+ * sees of it. The keys are read each time the tab opens, since its content mounts afresh then.
  * @module
  */
 import { useEffect, useId, useState, type SubmitEvent } from 'react';
-import { KeyRound, Plus, Sparkles, Trash2, X } from 'lucide-react';
-import { CommandBlock, CopyButton } from '../components/Copy';
-import { Dialog } from '../components/Dialog';
-import type { ApiKey, CreatedKey } from '../lib/api';
-import { shortDate } from '../lib/format';
-import { mcpEndpoint, mcpSetupCommand, SECRET_PLACEHOLDER } from '../lib/mcp';
-import { ErrorNotice, Notice } from './Notice';
+import { KeyRound, Plus, Trash2, X } from 'lucide-react';
+import { CommandBlock, CopyButton } from '../../components/Copy';
+import type { ApiKey, CreatedKey } from '../../lib/api';
+import { shortDate } from '../../lib/format';
+import { mcpSetupCommand } from '../../lib/mcp';
+import { ErrorNotice, Notice } from '../Notice';
+import { Block, TabHeading } from './parts';
 
-/** What the dialog does with the account's keys. */
-interface KeyActions {
-  /** Whether a control plane is connected; without one no key can be made. */
-  connected: boolean;
+/** Props of {@link ApiKeysTab}. */
+interface ApiKeysTabProps {
   /** Lists the account's keys. */
   onList: () => Promise<ApiKey[]>;
   /** Creates a key and returns its secret. */
@@ -35,42 +33,13 @@ interface KeyActions {
   onRevoke: (id: string) => Promise<void>;
 }
 
-/** Props of {@link ConnectClaudeDialog}. */
-interface ConnectClaudeDialogProps extends KeyActions {
-  /** Whether the dialog is shown. */
-  open: boolean;
-  /** Closes the dialog. */
-  onClose: () => void;
-}
-
 /**
- * Renders the dialog.
+ * Renders the API keys tab.
  *
  * @param props The component's props.
- * @returns The dialog.
+ * @returns The tab's content.
  */
-export function ConnectClaudeDialog({ open, onClose, ...actions }: ConnectClaudeDialogProps) {
-  const titleId = useId();
-  return (
-    <Dialog open={open} onClose={onClose} labelledBy={titleId} wide>
-      <ConnectClaude titleId={titleId} {...actions} />
-    </Dialog>
-  );
-}
-
-/** Props of {@link ConnectClaude}. */
-interface ConnectClaudeProps extends KeyActions {
-  /** The `id` the dialog is titled by. */
-  titleId: string;
-}
-
-/**
- * Renders the dialog's content.
- *
- * @param props The component's props.
- * @returns The content.
- */
-function ConnectClaude({ titleId, connected, onList, onCreate, onRevoke }: ConnectClaudeProps) {
+export function ApiKeysTab({ onList, onCreate, onRevoke }: ApiKeysTabProps) {
   const nameId = useId();
   const [keys, setKeys] = useState<ApiKey[] | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
@@ -80,9 +49,6 @@ function ConnectClaude({ titleId, connected, onList, onCreate, onRevoke }: Conne
   const [created, setCreated] = useState<CreatedKey | null>(null);
 
   useEffect(() => {
-    if (!connected) {
-      return;
-    }
     let current = true;
     onList()
       .then((listed) => {
@@ -98,7 +64,7 @@ function ConnectClaude({ titleId, connected, onList, onCreate, onRevoke }: Conne
     return () => {
       current = false;
     };
-  }, [connected, onList]);
+  }, [onList]);
 
   /**
    * Revokes a key and drops it from the list.
@@ -132,19 +98,13 @@ function ConnectClaude({ titleId, connected, onList, onCreate, onRevoke }: Conne
   }
 
   return (
-    <div>
-      <div>
-        <h2 id={titleId} className="flex items-center gap-2.5 pr-10 text-xl font-semibold tracking-tight">
-          <Sparkles className="size-[1.1rem] text-fg" aria-hidden="true" />
-          Connect Claude
-        </h2>
-        <p className="lede mt-2 text-sm">
-          Give Claude an API key and it can start sessions, work inside the app you are watching, and stop them when
-          it is done.
-        </p>
-
+    <>
+      <TabHeading title="API keys">
+        A key lets a program act as you in the studio: start engines, work in them, and stop them.
+      </TabHeading>
+      <Block label="New key">
         {created === null ? null : (
-          <div className="mt-5 rounded-2xl border border-line-strong bg-ink-800 p-4">
+          <div className="mb-4 rounded-2xl border border-line-strong bg-ink-900 p-4">
             <div className="flex items-start justify-between gap-3">
               <p className="text-sm font-semibold">
                 Your new key, <span className="text-fg">{created.key.name}</span>
@@ -169,14 +129,13 @@ function ConnectClaude({ titleId, connected, onList, onCreate, onRevoke }: Conne
             </div>
             <CommandBlock
               className="mt-3"
-              title="Paste into your terminal"
+              title="Paste into your terminal to connect Claude"
               command={mcpSetupCommand(created.secret)}
             />
           </div>
         )}
-
         <form
-          className="mt-5 flex flex-col gap-2.5 sm:flex-row"
+          className="flex flex-col gap-2.5 sm:flex-row"
           onSubmit={(event) => {
             void create(event);
           }}
@@ -197,7 +156,7 @@ function ConnectClaude({ titleId, connected, onList, onCreate, onRevoke }: Conne
               }}
             />
           </div>
-          <button type="submit" className="btn btn-primary h-[2.9rem]" disabled={!connected || busy}>
+          <button type="submit" className="btn btn-primary h-[2.9rem]" disabled={busy}>
             {busy ? <span className="spinner" aria-hidden="true" /> : <Plus className="size-4" aria-hidden="true" />}
             Create key
           </button>
@@ -207,38 +166,24 @@ function ConnectClaude({ titleId, connected, onList, onCreate, onRevoke }: Conne
             <ErrorNotice error={error} />
           </div>
         )}
-
-        <h3 className="mt-7 text-xs font-semibold tracking-[0.14em] text-faint uppercase">Your keys</h3>
-        {loadError === null ? null : (
-          <div className="mt-3">
-            <ErrorNotice error={loadError} />
-          </div>
-        )}
+      </Block>
+      <Block label="Your keys">
+        {loadError === null ? null : <ErrorNotice error={loadError} />}
         {keys === null ? (
-          <p className="mt-3 text-sm text-muted">{connected ? 'Loading your keys…' : 'Keys appear here once the control plane is connected.'}</p>
+          loadError === null ? (
+            <p className="text-sm text-muted">Loading your keys…</p>
+          ) : null
         ) : keys.length === 0 ? (
-          <p className="mt-3 text-sm text-muted">No keys yet. Create one to connect Claude.</p>
+          <p className="text-sm text-muted">No keys yet.</p>
         ) : (
-          <ul className="mt-2 divide-y divide-line">
+          <ul className="-my-3.5 divide-y divide-line">
             {keys.map((key) => (
               <KeyRow key={key.id} apiKey={key} onRevoke={revoke} />
             ))}
           </ul>
         )}
-
-        {created === null ? (
-          <>
-            <h3 className="mt-7 text-xs font-semibold tracking-[0.14em] text-faint uppercase">Setup command</h3>
-            <CommandBlock className="mt-3" title="Claude Code" command={mcpSetupCommand()} />
-            <p className="mt-3 text-sm text-faint">
-              Replace <span className="mono text-muted">{SECRET_PLACEHOLDER}</span> with your key. Other MCP clients
-              can connect to <span className="mono break-all text-muted">{mcpEndpoint()}</span> with the key as a
-              bearer token.
-            </p>
-          </>
-        ) : null}
-      </div>
-    </div>
+      </Block>
+    </>
   );
 }
 

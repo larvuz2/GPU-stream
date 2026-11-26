@@ -86,6 +86,7 @@ import {
 } from '../lib/catalog';
 import { cx } from '../lib/cx';
 import { clock, minutesText, sizeText, timestamp } from '../lib/format';
+import { FoldSection } from './FoldSection';
 import { useNow } from './hooks';
 import { GitHubMark, Menu } from './Menu';
 import { describeEndReason, describeError } from './messages';
@@ -120,7 +121,7 @@ interface EngineSectionProps {
   onShow: (id: string) => void;
   /** Puts one picture of an engine on screen, such as an Unreal engine's Desktop. */
   onShowPicture: (id: string, stream: string) => void;
-  /** Opens the credits dialog. */
+  /** Opens Settings on Billing, where credits are bought. */
   onAddCredits: () => void;
   /** Lists the Unreal projects in a running Unreal engine's workspace. */
   unrealProjects: (engineId: string) => Promise<UnrealProject[]>;
@@ -163,8 +164,7 @@ export function EngineSection({
     .sort((a, b) => Date.parse(b.ended_at ?? b.created_at) - Date.parse(a.ended_at ?? a.created_at))
     .slice(0, 3);
   return (
-    <div>
-      <h3 className="section-label">Engines</h3>
+    <FoldSection id="environment.engines" label="Engines">
       <EpicReturnNotice returned={epicReturned} epic={epic} />
       {enginesStatus === 'missing' ? (
         <p className="mt-2 text-sm text-faint">Engines per project arrive with the studio&rsquo;s backend.</p>
@@ -227,7 +227,7 @@ export function EngineSection({
           </ul>
         </details>
       )}
-    </div>
+    </FoldSection>
   );
 }
 
@@ -625,7 +625,7 @@ interface StartFormProps {
   epic: Epic;
   /** Starts an engine. */
   onStart: (app: string, tier: string) => Promise<Session>;
-  /** Opens the credits dialog. */
+  /** Opens Settings on Billing, where credits are bought. */
   onAddCredits: () => void;
 }
 
@@ -1030,14 +1030,18 @@ export function GitHubSection({ project, github, health, returned, onLink, onUnl
   }
 
   return (
-    <div>
-      <h3 className="section-label flex items-center gap-1.5">
-        <GitHubMark className="size-3" />
-        Repositories
-        {repositories.length === 0 ? null : (
-          <span className="font-normal tracking-normal tabular-nums">{repositories.length}</span>
-        )}
-      </h3>
+    <FoldSection
+      id="environment.repositories"
+      label={
+        <>
+          <GitHubMark className="size-3" />
+          Repositories
+          {repositories.length === 0 ? null : (
+            <span className="font-normal tracking-normal tabular-nums">{repositories.length}</span>
+          )}
+        </>
+      }
+    >
       {repositories.length === 0 ? null : (
         <ul className="mt-2 grid grid-cols-1 gap-1.5" aria-label="Linked repositories">
           {repositories.map((repository) => (
@@ -1112,7 +1116,7 @@ export function GitHubSection({ project, github, health, returned, onLink, onUnl
           </div>
         )}
       </div>
-    </div>
+    </FoldSection>
   );
 }
 

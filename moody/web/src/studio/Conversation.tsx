@@ -45,6 +45,9 @@
  * their pointer rather than being pushed out of view by a jump to the end. Two things bring the
  * end back into view wherever the person is reading: an approval, since the agent's turn waits on
  * it, and a message the person sends, since it and the answer to it are what they look for next.
+ * Following ends on the last line, with one exception: a card the conversation ends on that is
+ * taller than the view (the card that asks a project's kind, on a phone) is brought into view by
+ * its start, once, and left where the person then scrolls it, since a card is read from its top.
  *
  * Another part of the page can lead to an entry (`reveal`, from a file under the library's
  * Process tab): the entry is unfolded where it was folded away, scrolled to, and lit for a moment.
@@ -72,6 +75,7 @@ import { PreviewCard } from './PreviewCard';
 import { Prose } from './Prose';
 import { ThinkingEyes, ThinkingNote } from './ThinkingNote';
 import { ToolCard } from './ToolCard';
+import type { UploadFile } from './ui/context';
 import { UiCard } from './ui/UiCard';
 import {
   agentActivity,
@@ -90,6 +94,49 @@ const FOLLOW_SLACK_PX = 96;
 
 /** How long after a click or a key press a change of height counts as the person's own doing. */
 const OWN_CHANGE_MS = 600;
+
+/** The room left above a card that is brought into view by its start, in pixels. */
+const CARD_MARGIN_PX = 12;
+
+/**
+ * Finds the conversation's last entry, where it is a card.
+ *
+ * @param element The conversation's scrolling element.
+ * @returns The card's entry, or `null` where the conversation ends on something else: a message,
+ *   the agent's words, or the line that says what it is doing.
+ */
+function lastCard(element: Element): Element | null {
+  const last = element.querySelector('ol[aria-label="Conversation"]')?.lastElementChild;
+  return last?.hasAttribute('data-card') === true ? last : null;
+}
+
+/**
+ * Brings the conversation's end into view: its last line, or, for a card it ends on that is taller
+ * than the view, the card's start.
+ *
+ * @param element The conversation's scrolling element.
+ * @param held The card the view was last brought to the start of, which is then left where the
+ *   person scrolls it; this records the one it brings into view.
+ * @param toLastLine Whether the last line is wanted whatever the conversation ends on, as when the
+ *   person has just sent a message.
+ */
+function toEnd(element: HTMLElement, held: { current: string | null }, toLastLine: boolean): void {
+  const card = toLastLine ? null : lastCard(element);
+  if (card !== null) {
+    const key = card.getAttribute('data-entry');
+    if (held.current === key) {
+      return;
+    }
+    const view = element.getBoundingClientRect();
+    const box = card.getBoundingClientRect();
+    if (box.height > view.height - CARD_MARGIN_PX) {
+      held.current = key;
+      element.scrollTop += box.top - view.top - CARD_MARGIN_PX;
+      return;
+    }
+  }
+  element.scrollTop = element.scrollHeight;
+}
 
 /** How many previews of one turn stay in view; the ones before them fold away. */
 const PREVIEWS_IN_VIEW = 3;
@@ -122,10 +169,16 @@ interface ConversationProps {
   onChoose: (text: string) => Promise<void>;
   /** Answers an approval the running turn waits on. */
   onApprove: (approvalId: string, decision: ApprovalDecision) => Promise<void>;
-  /** Opens the dialog of a turn's limits on the one a turn reached, or `null` where there are none to set. */
+  /** Opens Settings on the Agent tab, at the limit a turn reached, or `null` where there are none to set. */
   onLimits: ((reached: TurnLimit) => void) | null;
   /** Locks an interactive card in with its state, as the person's next message. */
   onLock: (ui: UiData, value: unknown) => Promise<void>;
+  /**
+   * Takes a file a card's upload input was given into the project's library, in the section the
+   * card names, and answers with the entry it made. Rejects with the reason in words the person
+   * can read, which the card shows as they are.
+   */
+  onUpload: UploadFile;
   /** Puts a suggestion in the composer. */
   onSuggest: (text: string) => void;
 }
@@ -145,13 +198,14 @@ export function Conversation(props: ConversationProps) {
   const [following, setFollowing] = useState(true);
   const [seen, setSeen] = useState(0);
   const touched = useRef(0);
+  const held = useRef<string | null>(null);
   const activity = useMemo(() => (data.running ? agentActivity(items) : null), [data.running, items]);
   const behind = !following && items.length > seen;
 
   useLayoutEffect(() => {
     const element = scroller.current;
     if (element !== null && following) {
-      element.scrollTop = element.scrollHeight;
+      toEnd(element, held, data.pending !== null);
     }
   }, [items, data.pending, activity, following]);
 
@@ -188,7 +242,7 @@ export function Conversation(props: ConversationProps) {
         setFollowing(element.scrollHeight - element.scrollTop - element.clientHeight < FOLLOW_SLACK_PX);
         return;
       }
-      element.scrollTop = element.scrollHeight;
+      toEnd(element, held, false);
     });
     observer.observe(element);
     if (element.firstElementChild !== null) {
@@ -256,7 +310,10 @@ export function Conversation(props: ConversationProps) {
     }
     const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < FOLLOW_SLACK_PX;
     setFollowing(atBottom);
-    if (atBottom) {
+    // A card the conversation ends on is seen once its start is in view, though its end is not.
+    const card = lastCard(element);
+    const cardInView = card !== null && card.getBoundingClientRect().top >= element.getBoundingClientRect().top;
+    if (atBottom || cardInView) {
       setSeen(items.length);
     }
   }
@@ -410,6 +467,8 @@ interface UiEntryProps {
   live: boolean;
   /** Locks the card in. */
   onLock: (ui: UiData, value: unknown) => Promise<void>;
+  /** Takes a file the card's upload input was given into the library. */
+  onUpload: ConversationProps['onUpload'];
 }
 
 /**
@@ -418,7 +477,7 @@ interface UiEntryProps {
  * @param props The component's props.
  * @returns The card.
  */
-function UiEntry({ ui, locked, live, onLock }: UiEntryProps) {
+function UiEntry({ ui, locked, live, onLock, onUpload }: UiEntryProps) {
   const [error, setError] = useState<unknown>(null);
   return (
     <>
@@ -432,6 +491,7 @@ function UiEntry({ ui, locked, live, onLock }: UiEntryProps) {
             setError(failure);
           });
         }}
+        onUpload={onUpload}
       />
       {error === null ? null : (
         <div className="mt-2">
@@ -502,8 +562,10 @@ function Welcome({ project, canSend, onSuggest }: WelcomeProps) {
       </span>
       <h2 className="display mt-5 text-2xl sm:text-3xl">{project.name}</h2>
       <p className="lede mt-2 max-w-md text-sm">
-        {/^[aeiou]/i.test(project.format) ? 'An' : 'A'} {midSentence(project.format)} in{' '}
-        {disciplineName(project.discipline)}. Bring what you have, or start from an
+        {project.format === ''
+          ? `A new project in ${disciplineName(project.discipline)}.`
+          : `${/^[aeiou]/i.test(project.format) ? 'An' : 'A'} ${midSentence(project.format)} in ${disciplineName(project.discipline)}.`}{' '}
+        Bring what you have, or start from an
         idea, and the agent builds it with you, asking at every decision that is yours.
       </p>
       <ul className="mt-7 grid grid-cols-1 w-full max-w-md gap-2">
@@ -555,6 +617,7 @@ function Entry({
   onApprove,
   onLimits,
   onLock,
+  onUpload,
   reveal,
 }: EntryProps) {
   switch (item.type) {
@@ -595,12 +658,13 @@ function Entry({
       const sent = data.pending?.ui?.ui_id === item.ui.ui_id ? { value: data.pending.ui.value } : null;
       const locked = item.locked ?? sent;
       return (
-        <AgentRow first={item.first} entry={item.key}>
+        <AgentRow first={item.first} entry={item.key} card>
           <UiEntry
             ui={item.ui}
             locked={locked}
             live={item.current && locked === null && canSend && !data.running}
             onLock={onLock}
+            onUpload={onUpload}
           />
         </AgentRow>
       );
@@ -694,6 +758,8 @@ interface AgentRowProps {
   mark?: ReactNode;
   /** The entry's key, for an entry another part of the page can lead to. */
   entry?: string;
+  /** Whether the entry is a card the person answers, which the view brings in by its start. */
+  card?: boolean;
   /** The entry. */
   children: ReactNode;
 }
@@ -704,9 +770,9 @@ interface AgentRowProps {
  * @param props The component's props.
  * @returns The list item.
  */
-function AgentRow({ first, mark, entry, children }: AgentRowProps) {
+function AgentRow({ first, mark, entry, card = false, children }: AgentRowProps) {
   return (
-    <li className={cx('flex gap-3', first && 'mt-5 first:mt-0')} data-entry={entry}>
+    <li className={cx('flex gap-3', first && 'mt-5 first:mt-0')} data-entry={entry} data-card={card ? '' : undefined}>
       {mark === undefined ? (
         <span className="w-7 flex-none pt-0.5">
           {first ? (

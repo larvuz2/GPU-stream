@@ -27,10 +27,10 @@ import { CATALOG, isComponentType, limit, type ComponentType } from './catalog';
 export type { UiData, UiMedia } from '../../lib/api';
 
 /**
- * A card's data as this folder reads it: the wire shape, and `instant`, which the `ui` event
- * carries for a card that locks on its one choice (`moody/STUDIO.md`).
+ * A card's data as this folder reads it: the `ui` event's own shape, which carries `instant` for
+ * a card that locks on its one choice (`moody/STUDIO.md`).
  */
-export type CardData = UiData & { instant?: boolean };
+export type CardData = UiData;
 
 /**
  * Whether a card locks as soon as the person chooses, with no lock-in button.

@@ -17,6 +17,8 @@
  *
  * The last is the project's own `permissions`: each tool the person answered "always allow" for
  * in an approval, with a button that takes the answer back, after which the agent asks again.
+ *
+ * Each of the four is a section that folds (`FoldSection.tsx`).
  * @module
  */
 import { useState } from 'react';
@@ -24,6 +26,7 @@ import { FolderGit2, Globe, KeyRound, Plug, ShieldCheck, Sparkles, type LucideIc
 import { MoodyEyes } from '../components/MoodyEyes';
 import { ALWAYS, type ConnectorKind, type ConnectorState, type Environment } from '../lib/api';
 import { cx } from '../lib/cx';
+import { FoldSection } from './FoldSection';
 import { ErrorNotice } from './Notice';
 import type { Availability } from './useAccount';
 
@@ -72,25 +75,27 @@ export function AgentEnvironment({ environment, status, permissions, onRevoke }:
   return (
     <>
       {status === 'loading' ? (
-        <div>
-          <h3 className="section-label">Connectors</h3>
+        <FoldSection id="environment.connectors" label="Connectors">
           <div className="mt-2 grid grid-cols-1 gap-1.5" aria-label="Loading the environment">
             {[0, 1, 2].map((row) => (
               <div key={row} className="h-11 animate-pulse rounded-xl bg-white/[0.04]" />
             ))}
           </div>
-        </div>
+        </FoldSection>
       ) : status === 'failed' ? (
-        <div>
-          <h3 className="section-label">Connectors</h3>
+        <FoldSection id="environment.connectors" label="Connectors">
           <p className="mt-2 text-sm text-bad">Could not read what the agent is connected to.</p>
-        </div>
+        </FoldSection>
       ) : environment === null ? null : (
         <>
-          <div>
-            <h3 className="section-label">
-              Connectors <Count value={environment.connectors.length} />
-            </h3>
+          <FoldSection
+            id="environment.connectors"
+            label={
+              <>
+                Connectors <Count value={environment.connectors.length} />
+              </>
+            }
+          >
             {environment.connectors.length === 0 ? (
               <p className="mt-2 text-sm text-faint">Nothing is connected to this project&rsquo;s agent yet.</p>
             ) : (
@@ -116,11 +121,15 @@ export function AgentEnvironment({ environment, status, permissions, onRevoke }:
                 })}
               </ul>
             )}
-          </div>
-          <div>
-            <h3 className="section-label">
-              Subagents <Count value={environment.agents.length} />
-            </h3>
+          </FoldSection>
+          <FoldSection
+            id="environment.subagents"
+            label={
+              <>
+                Subagents <Count value={environment.agents.length} />
+              </>
+            }
+          >
             {environment.agents.length === 0 ? (
               <p className="mt-2 text-sm text-faint">This project&rsquo;s agent works alone.</p>
             ) : (
@@ -138,11 +147,15 @@ export function AgentEnvironment({ environment, status, permissions, onRevoke }:
                 ))}
               </ul>
             )}
-          </div>
-          <div>
-            <h3 className="section-label">
-              Skills <Count value={environment.skills.length} />
-            </h3>
+          </FoldSection>
+          <FoldSection
+            id="environment.skills"
+            label={
+              <>
+                Skills <Count value={environment.skills.length} />
+              </>
+            }
+          >
             {environment.skills.length === 0 ? (
               <p className="mt-2 text-sm text-faint">No skill is offered to this project yet.</p>
             ) : (
@@ -155,13 +168,17 @@ export function AgentEnvironment({ environment, status, permissions, onRevoke }:
                 ))}
               </dl>
             )}
-          </div>
+          </FoldSection>
         </>
       )}
-      <div>
-        <h3 className="section-label">
-          Always allowed <Count value={allowed.length} />
-        </h3>
+      <FoldSection
+        id="environment.allowed"
+        label={
+          <>
+            Always allowed <Count value={allowed.length} />
+          </>
+        }
+      >
         {allowed.length === 0 ? (
           <p className="mt-2 text-sm text-faint">
             Nothing. The agent asks before a tool that costs or changes something; &ldquo;Always allow&rdquo; puts
@@ -174,7 +191,7 @@ export function AgentEnvironment({ environment, status, permissions, onRevoke }:
             ))}
           </ul>
         )}
-      </div>
+      </FoldSection>
     </>
   );
 }
@@ -192,7 +209,7 @@ interface CountProps {
  * @returns The count, or nothing for an empty section.
  */
 function Count({ value }: CountProps) {
-  return value === 0 ? null : <span className="ml-1 font-normal tracking-normal tabular-nums">{value}</span>;
+  return value === 0 ? null : <span className="font-normal tracking-normal tabular-nums">{value}</span>;
 }
 
 /**

@@ -22,12 +22,14 @@
  * Every question the demo's agents ask names the answer they would give (`recommended`), as the
  * agent on Anthropic's loop does.
  *
- * The film's agent shows its work before it asks: four previews of every kind a card takes (a
- * file, a frame, a before and after pair of a grade, and a six-second animatic), one more than a
- * turn keeps in view, so the earliest is folded. A third project, Lighthouse theme, is a score in
- * SoundCraft whose agent plays the person the first eight bars as a preview. The clip, the graded
- * frame, and the eight bars are made for the demo: the clip and the frame from the site's own
- * artwork with ffmpeg, the bars synthesized with it (`public/media/preview-*`).
+ * The film's agent shows its work before it asks: five previews of every kind a card takes (the
+ * boards cut together, a file, a frame, a before and after pair of a grade, and a six-second
+ * animatic), two more than a turn keeps in view, so the earliest are folded. The boards cut and
+ * the animatic are versions of the piece (`version`), so the Latest module plays the animatic and
+ * lists the boards cut before it. A third project, Lighthouse theme, is a score in SoundCraft
+ * whose agent plays the person the first eight bars as a preview, a version too. The clips, the
+ * graded frame, and the eight bars are made for the demo: the clips and the frame from the site's
+ * own artwork with ffmpeg, the bars synthesized with it (`public/media/preview-*`).
  *
  * Beside the film is a game, Ember Ridge, part way through a studio's onboarding (`moody/UNREAL.md`):
  * the agent started an Unreal engine and put its Desktop on the screen, the developer cloned the
@@ -46,6 +48,9 @@
  * the control plane signs them afresh each time, so a page that reads the log again gets other
  * addresses for the same files.
  *
+ * A project made here without a format opens on the card that asks its kind, and the agent then
+ * opens that kind with cards of its own, up to a first version of the piece (`demoOpenings.ts`).
+ *
  * The scene parameter (`?demo=<scene>`) picks a state: the film by default, `offline` for a
  * server with no integrations configured, `empty` for an account with no projects, `legacy` for a
  * control plane from before the studio, which answers its routes with 404, `no-epic` for an
@@ -57,7 +62,9 @@
  *
  * The account has the limits of a turn as settings ({@link DEFAULT_LIMITS}, {@link MAX_LIMITS}),
  * which `updateMe` changes and refuses as the control plane does, and which the film's long job
- * keeps to.
+ * keeps to. It also has a name and the catalog's settings, each on its default until changed:
+ * `updateMe` trims the name to its length, refuses a setting or a value the catalog does not
+ * offer in the control plane's words, and changes nothing where it refuses anything.
  * @module
  */
 import {
@@ -81,13 +88,14 @@ import {
   type PreviewItem,
   type Project,
   type Session,
+  type SettingValue,
   type SkillInfo,
   type StudioEvent,
   type TurnId,
   type TurnLimits,
   type UnrealProject,
 } from '../lib/api';
-import { catalog, findApp, findDiscipline } from '../lib/catalog';
+import { catalog, defaultSections, findApp, findDiscipline } from '../lib/catalog';
 import { creditCount, usd } from '../lib/format';
 import { appImage } from '../lib/media';
 import {
@@ -104,6 +112,7 @@ import {
   type Script,
   type Simulation,
 } from './demoKit';
+import { chosenKind, kindCard, openingTurn } from './demoOpenings';
 import {
   FILM_DISCIPLINES,
   MOVIE_AGENTS,
@@ -122,6 +131,9 @@ const DEFAULT_LIMITS: TurnLimits = { turn_budget_usd: 15, turn_limit: 200 };
 
 /** The demo deployment's ceilings, which no account sets a limit above. */
 const MAX_LIMITS: TurnLimits = { turn_budget_usd: 100, turn_limit: 1000 };
+
+/** The longest name the control plane keeps. */
+const NAME_LIMIT = 80;
 
 /** The spend for a turn the account of the `limit` scene set itself, low enough for a long job to reach. */
 const LOW_BUDGET_USD = 1;
@@ -462,11 +474,31 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
     },
   });
   /** Shows work in progress the way the agent's `preview` tool does: its call, the card, its outcome. */
-  const show = (call: string, summary: string, caption: string, items: PreviewItem[], compare = false): void => {
+  const show = (
+    call: string,
+    summary: string,
+    caption: string,
+    items: PreviewItem[],
+    { compare = false, version }: { compare?: boolean; version?: string } = {},
+  ): void => {
     add({ turn_id: t2, kind: 'tool_start', data: { call_id: call, tool: 'preview', title: 'Preparing a preview' } });
-    add({ turn_id: t2, kind: 'preview', data: { engine_id: engine.id, caption, items, compare } }, 3 * SECOND);
+    add(
+      {
+        turn_id: t2,
+        kind: 'preview',
+        data: { engine_id: engine.id, caption, items, compare, ...(version === undefined ? {} : { version }) },
+      },
+      3 * SECOND,
+    );
     add({ turn_id: t2, kind: 'tool_end', data: { call_id: call, ok: true, summary } }, SECOND);
   };
+  show(
+    'c7b',
+    'Showed 1 video: the boards cut together',
+    'The boards cut together in black and white, three seconds each: no motion yet, only the order.',
+    [{ kind: 'video', url: '/media/preview-boards.mp4', name: 'opening-boards.mp4', seconds: 6, width: 640, height: 360 }],
+    { version: 'Boards cut' },
+  );
   show('c8', 'Showed 1 file: the opening’s shot list', 'The opening as a shot list: six shots, 24 seconds.', [
     { kind: 'file', url: '/media/preview-shot-list.txt', name: 'opening-shot-list.txt' },
   ]);
@@ -490,7 +522,7 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
       { kind: 'image', url: SPIRE.url, name: 'shot01-reference.png', width: 1200, height: 800 },
       { kind: 'image', url: '/media/preview-shot-graded.webp', name: 'shot01-graded.png', width: 1200, height: 800 },
     ],
-    true,
+    { compare: true },
   );
   add({
     turn_id: t2,
@@ -519,6 +551,7 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
         height: 360,
       },
     ],
+    { version: 'Animatic v1' },
   );
   add({
     turn_id: t2,
@@ -778,6 +811,7 @@ function scoreEvents(start: number, engine: Session): Scheduled[] {
         caption: 'The theme’s first eight bars, piano alone: A minor, 72 BPM, nothing mixed yet.',
         items: [{ kind: 'audio', url: '/media/preview-theme.m4a', name: 'theme-bars-1-8.wav', seconds: 10.2 }],
         compare: false,
+        version: 'First eight bars',
       },
     }),
     step(80, {
@@ -831,7 +865,7 @@ function demoProjects(now: number): Project[] {
         id: 'demo-film',
         name: 'The Beacon',
         discipline: 'media',
-        format: 'Movie',
+        format: 'Film & TV',
         pinned: true,
         github_repo: `${LOGIN}/the-beacon`,
         library_sections: ['Characters', 'Environments', 'Props'],
@@ -844,7 +878,7 @@ function demoProjects(now: number): Project[] {
         id: 'demo-commercial',
         name: 'Northwind runner launch',
         discipline: 'media',
-        format: 'Commercial',
+        format: 'Commercials',
         pinned: true,
         library_sections: ['Products', 'Shots'],
       },
@@ -865,7 +899,7 @@ function demoProjects(now: number): Project[] {
       { id: 'demo-interior', name: 'Glasshouse retreat', discipline: 'architecture', format: 'Interior' },
       5 * HOUR,
     ),
-    project({ id: 'demo-vertical', name: 'Spire City', discipline: 'media', format: 'Vertical drama' }, DAY + 3 * HOUR),
+    project({ id: 'demo-vertical', name: 'Spire City', discipline: 'media', format: 'Vertical Shows' }, DAY + 3 * HOUR),
     project({ id: 'demo-art', name: 'Ember peaks key art', discipline: 'art', format: 'Concept art' }, 3 * DAY),
     project(
       { id: 'demo-score', name: 'Lighthouse theme', discipline: 'music', format: 'Score', plan: scorePlan() },
@@ -1136,8 +1170,13 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     default: DEFAULT_LIMITS,
     max: MAX_LIMITS,
   });
+  /** The name the account gave itself, empty until it gives one. */
+  let name = '';
+  /** The catalog's settings the account changed, by id. */
+  let chosen: Record<string, SettingValue> = {};
   /**
-   * The account, with its limits unless the control plane is one from before the studio.
+   * The account, with its name, limits, and settings unless the control plane is one from before
+   * the studio.
    *
    * @returns The account.
    */
@@ -1146,7 +1185,15 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     email: DEMO_EMAIL,
     credits: 412,
     max_sessions: 3,
-    ...(legacy ? {} : { limits: limits() }),
+    ...(legacy
+      ? {}
+      : {
+          name,
+          limits: limits(),
+          settings: Object.fromEntries(
+            catalog.settings.map((setting) => [setting.id, chosen[setting.id] ?? setting.default]),
+          ),
+        }),
   });
   const health: Health = {
     ok: true,
@@ -1187,6 +1234,32 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     const next = { ...find(id), ...changes };
     projects = projects.map((project) => (project.id === id ? next : project));
     return next;
+  }
+
+  /**
+   * Makes a project one of its discipline's kinds, as the message that locks the card asking its
+   * kind does before the turn begins. A library still on the sections it started with takes the
+   * kind's.
+   *
+   * @param id The project's identifier.
+   * @param kind The kind chosen.
+   * @returns The changed project.
+   * @throws ApiError With status 400 for a kind the project's discipline does not offer.
+   */
+  function takeKind(id: string, kind: string): Project {
+    const project = find(id);
+    const discipline = findDiscipline(project.discipline);
+    if (discipline?.formats.includes(kind) !== true) {
+      throw new ApiError(400, `${discipline?.name ?? project.discipline} has no format '${kind}'.`);
+    }
+    const started = defaultSections(discipline, project.format);
+    const untouched =
+      project.library_sections.length === started.length &&
+      project.library_sections.every((section, index) => section === started[index]);
+    return change(id, {
+      format: kind,
+      ...(untouched ? { library_sections: defaultSections(discipline, kind) } : {}),
+    });
   }
 
   /**
@@ -1412,10 +1485,30 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
             if (typeof steps === 'number' && steps > MAX_LIMITS.turn_limit) {
               throw new ApiError(400, `A turn may take at most ${creditCount(MAX_LIMITS.turn_limit)} steps here.`);
             }
+            for (const [id, value] of Object.entries(changes.settings ?? {})) {
+              const setting = catalog.settings.find((candidate) => candidate.id === id);
+              if (setting === undefined) {
+                throw new ApiError(400, `There is no setting ${id}.`);
+              }
+              const options = (setting.options ?? []).map((option) => option.value);
+              const offered = setting.kind === 'toggle' ? typeof value === 'boolean' : options.some((option) => option === value);
+              if (value !== null && !offered) {
+                const wanted = setting.kind === 'toggle' ? 'true or false' : options.join(', ');
+                throw new ApiError(400, `${id} is ${wanted}, or null for its default.`);
+              }
+            }
             own = {
               turn_budget_usd: budget === undefined ? own.turn_budget_usd : budget,
               turn_limit: steps === undefined ? own.turn_limit : steps,
             };
+            if (changes.name !== undefined) {
+              name = (changes.name ?? '').trim().replace(/\s+/g, ' ').slice(0, NAME_LIMIT);
+            }
+            chosen = Object.fromEntries(
+              Object.entries({ ...chosen, ...changes.settings }).flatMap(([id, value]) =>
+                value === null ? [] : [[id, value]],
+              ),
+            );
             return me();
           }),
     sessionLink: () => Promise.reject(new ApiError(NOT_CONFIGURED, 'The demo has no stream to open.')),
@@ -1457,17 +1550,26 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
       soon(() => {
         counter += 1;
         const now = new Date().toISOString();
+        const discipline = findDiscipline(fields.discipline);
         const project: Project = {
           id: `demo-project-${counter}`,
-          ...fields,
+          name: fields.name ?? 'Untitled project',
+          discipline: fields.discipline,
+          format: fields.format ?? '',
           pinned: false,
           created_at: now,
           updated_at: now,
           github_repo: fields.github_repo ?? null,
-          library_sections: [],
+          library_sections: discipline === undefined ? [] : defaultSections(discipline, fields.format ?? ''),
           plan: [],
         };
         projects = [project, ...projects];
+        // A project without a format opens on the card that asks its kind, written with no turn.
+        const card =
+          fields.format === undefined && discipline !== undefined ? kindCard(discipline, `${project.id}-kind`) : null;
+        if (card !== null) {
+          log(project.id).push({ at: Date.now(), event: { turn_id: null, kind: 'ui', data: card } });
+        }
         return project;
       }, 500),
     getProject: (id) => (legacy ? missing() : soon(() => find(id))),
@@ -1546,7 +1648,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     },
     sendMessage: (projectId, text, ui) =>
       soon(() => {
-        const project = find(projectId);
+        find(projectId);
         const entries = log(projectId);
         const now = Date.now();
         if (pauses.has(projectId) || entries.some((scheduled) => scheduled.at > now)) {
@@ -1558,7 +1660,13 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
           at: now,
           event: { turn_id: turn, kind: 'user_message', data: ui === undefined ? { text } : { text, ui } },
         };
-        const answer = reply(project, text, turn, now, epicLinked, entries, limits());
+        const locked = entries.find(({ event }) => event.kind === 'ui' && event.data.ui_id === ui?.ui_id)?.event;
+        const answered = locked?.kind === 'ui' ? locked.data : null;
+        const kind = answered === null ? null : chosenKind(answered, ui?.value);
+        const project = kind === null ? find(projectId) : takeKind(projectId, kind);
+        const answer =
+          openingTurn(project, answered, ui?.value, turn, now) ??
+          reply(project, text, turn, now, epicLinked, entries, limits());
         play(projectId, { ...answer, events: [message, ...answer.events] });
         change(projectId, { updated_at: new Date(now).toISOString() });
         return turn;

@@ -6,14 +6,15 @@
 
 /**
  * The open project: its header, conversation, and composer in the center, and in the right column
- * the Screen over the Environment (engines, repositories, and what the agent works with), Plan,
- * and Library panels.
+ * the Screen over the Latest (the newest version of the piece, once the session has shown one),
+ * Environment (engines, repositories, and what the agent works with), Plan, and Library panels.
  *
  * It renders three regions of the studio's grid (`studio.css`) and is keyed by the project, so
  * opening another project starts its data afresh. Each region knows how to lead to the others: a
  * tag in the agent's prose opens its asset in the library, a started engine goes on the screen,
  * and the screen's empty state leads to the Environment panel, unfolding the panel and, on a
- * narrow screen, switching to its tab.
+ * narrow screen, switching to its tab. Every module of the right column folds, and so does each
+ * section inside Environment; what is folded is remembered per project (`folds.ts`).
  *
  * What the screen shows, the engine and which of its pictures (an Unreal engine's Desktop or
  * Unreal), is chosen here, by whoever chose last: the person, with the screen's toggle, its keys,
@@ -29,52 +30,34 @@
  * @module
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { Layers, ListChecks, PanelRightClose, PanelRightOpen, Plus, Server } from 'lucide-react';
+import { Layers, ListChecks, PanelRightClose, PanelRightOpen, Play, Plus, Server } from 'lucide-react';
 import { ALWAYS, isActive, type ControlPlane, type Project, type Session, type TurnLimit } from '../lib/api';
 import { AUTO_REGION } from '../lib/catalog';
-import { isBoolean, isRecord, type Guard } from '../lib/narrow';
 import { Composer } from './Composer';
 import { Conversation } from './Conversation';
 import { AgentEnvironment } from './EnvironmentAgent';
 import { EngineSection, GitHubSection, type EpicReturn, type GitHubReturn } from './EnvironmentPanel';
 import { GitHubMark } from './Menu';
-import { usePreference } from './hooks';
+import { FoldsContext, useFolds } from './folds';
+import { LatestBody } from './LatestPanel';
 import { LibraryBody } from './LibraryPanel';
+import { describeError } from './messages';
 import { Panel } from './Panel';
 import { PlanBody } from './PlanPanel';
 import { DisciplineIcon } from '../components/DisciplineIcon';
-import { disciplineName, planProgress } from './present';
+import { disciplineName, normalizeTag, planProgress } from './present';
 import { describeAnswer } from './ui/answer';
+import type { Uploaded } from './ui/context';
 import { Stage, type StreamStandIn } from './Stage';
-import { buildTranscript, openQuestion, processMedia, type ProcessEntry, type Reveal } from './transcript';
+import { buildTranscript, openQuestion, processMedia, versions, type Reveal } from './transcript';
 import { connected, type Account, type Epic, type GitHub, type Projects } from './useAccount';
 import { useProject } from './useProject';
 
 /** The tabs a narrow screen shows the studio's regions under. */
 export type MobileTab = 'projects' | 'chat' | 'screen' | 'workspace';
 
-/** The panels of the right column, each folded or not. */
-interface PanelState {
-  /** Whether the Screen is unfolded. */
-  screen: boolean;
-  /** Whether Environment is unfolded. */
-  environment: boolean;
-  /** Whether the Plan is unfolded. */
-  plan: boolean;
-  /** Whether the Library is unfolded. */
-  library: boolean;
-}
-
-/** Checks a stored value into a {@link PanelState}. */
-const isPanelState: Guard<PanelState> = (value): value is PanelState =>
-  isRecord(value) &&
-  isBoolean(value.screen) &&
-  isBoolean(value.environment) &&
-  isBoolean(value.plan) &&
-  isBoolean(value.library);
-
-/** Every panel unfolded, as a new viewer sees them. */
-const ALL_OPEN: PanelState = { screen: true, environment: true, plan: true, library: true };
+/** A module of the right column, by the id it folds under. */
+type Module = 'screen' | 'latest' | 'environment' | 'plan' | 'library';
 
 /** A picture of an engine, as the person or the agent put it on screen. */
 interface Picked {
@@ -120,9 +103,9 @@ interface WorkspaceProps {
   firstMessage: string | null;
   /** Called once the first message has been handed to the composer's send. */
   onFirstMessageTaken: () => void;
-  /** Opens the credits dialog. */
+  /** Opens Settings on Billing, where credits are bought. */
   onAddCredits: () => void;
-  /** Opens the dialog of a turn's limits on the one a turn reached, or `null` where there are none to set. */
+  /** Opens Settings on the Agent tab, at the limit a turn reached, or `null` where there are none to set. */
   onLimits: ((reached: TurnLimit) => void) | null;
   /** Drawn instead of the stream, where there is none to show. */
   standIn?: StreamStandIn;
@@ -147,8 +130,13 @@ export function Workspace(props: WorkspaceProps) {
       showEngine(request.engineId, false);
     },
   });
-  const [panels, setPanels] = usePreference<PanelState>('panels', ALL_OPEN, isPanelState);
-  const [draft, setDraft] = useState('');
+  const folds = useFolds(project.id);
+  const unfolded = (module: Module): boolean => !folds.folded.has(module);
+  // A first message for a project that opened on the card asking its kind waits here, since the
+  // kind is answered first.
+  const [draft, setDraft] = useState(() =>
+    props.firstMessage !== null && project.format === '' ? props.firstMessage : '',
+  );
   const [screenId, setScreenId] = useState<string | null>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
   const [openAssetId, setOpenAssetId] = useState<string | null>(null);
@@ -156,6 +144,7 @@ export function Workspace(props: WorkspaceProps) {
   const [ledTo, setLedTo] = useState<Reveal | null>(null);
   const items = useMemo(() => buildTranscript(data.events), [data.events]);
   const process = useMemo(() => processMedia(items), [items]);
+  const shown = useMemo(() => versions(items), [items]);
   const environmentRef = useRef<HTMLDivElement>(null);
   const planRef = useRef<HTMLDivElement>(null);
   const libraryRef = useRef<HTMLDivElement>(null);
@@ -202,11 +191,14 @@ export function Workspace(props: WorkspaceProps) {
     }
     firstTaken.current = true;
     onFirstMessageTaken();
+    if (project.format === '') {
+      return;
+    }
     send(firstMessage).catch(() => {
       // Refused (a turn already running, say): the message waits in the composer instead.
       setDraft(firstMessage);
     });
-  }, [firstMessage, onFirstMessageTaken, send, blocked, data.eventsStatus]);
+  }, [firstMessage, onFirstMessageTaken, send, blocked, data.eventsStatus, project.format]);
 
   /**
    * Unfolds a panel and brings it into view, switching to its tab on a narrow screen.
@@ -214,10 +206,8 @@ export function Workspace(props: WorkspaceProps) {
    * @param name The panel.
    * @param ref Its element.
    */
-  function reveal(name: keyof PanelState, ref: RefObject<HTMLDivElement | null>): void {
-    if (!panels[name]) {
-      setPanels({ ...panels, [name]: true });
-    }
+  function reveal(name: Module, ref: RefObject<HTMLDivElement | null>): void {
+    folds.unfold(name);
     if (props.paneCollapsed) {
       props.onPaneCollapsed(false);
     }
@@ -243,10 +233,11 @@ export function Workspace(props: WorkspaceProps) {
   /**
    * Leads to where a file the session showed appeared in the conversation.
    *
-   * @param entry The file.
+   * @param entry The file: the conversation's entry it appeared in, and the subagent whose card
+   *   holds it, where one does.
    */
-  function showInConversation(entry: ProcessEntry): void {
-    setLedTo({ key: entry.itemKey, agentId: entry.agentId, seq: (ledTo?.seq ?? 0) + 1 });
+  function showInConversation(entry: { itemKey: string; agentId?: string | null }): void {
+    setLedTo({ key: entry.itemKey, agentId: entry.agentId ?? null, seq: (ledTo?.seq ?? 0) + 1 });
     if (narrow) {
       onTab('chat');
     }
@@ -261,9 +252,7 @@ export function Workspace(props: WorkspaceProps) {
    */
   function showEngine(id: string, switchTab = true): void {
     setScreenId(id);
-    if (!panels.screen) {
-      setPanels({ ...panels, screen: true });
-    }
+    folds.unfold('screen');
     if (props.paneCollapsed && !focus) {
       props.onPaneCollapsed(false);
     }
@@ -283,13 +272,45 @@ export function Workspace(props: WorkspaceProps) {
     showEngine(id);
   }
 
-  const toggle = (name: keyof PanelState) => () => {
-    setPanels({ ...panels, [name]: !panels[name] });
+  /**
+   * Takes a file a card's upload input was given into the library: a new entry named after the
+   * file, with it as the entry's first file, in the section the card names or, where it names
+   * none, the library's first one. Its tag is made from the file's name, numbered where an entry
+   * already has that tag, as when the same file is given twice.
+   *
+   * @param file The file.
+   * @param into Where the card wants it.
+   * @returns The entry as the card is answered with it.
+   * @throws Error When the entry could not be made or the file could not be stored, with the
+   *   reason as the card shows it.
+   */
+  async function upload(file: File, into: { section: string | null }): Promise<Uploaded> {
+    const name = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Upload';
+    const taken = new Set((data.library?.assets ?? []).map((asset) => asset.tag?.replace(/^@/, '') ?? ''));
+    const stem = normalizeTag(name);
+    let tag = stem;
+    for (let copy = 2; tag !== '' && taken.has(tag); copy += 1) {
+      tag = `${stem}-${copy}`;
+    }
+    try {
+      const made = await data.createAsset(
+        { section: into.section ?? data.sections[0] ?? 'Uploads', name, ...(tag === '' ? {} : { tag }) },
+        file,
+      );
+      const stored = made.media.at(-1);
+      return { tag: made.tag ?? '', name: made.name, kind: stored?.kind ?? 'file', url: stored?.url ?? '' };
+    } catch (failure) {
+      throw new Error(describeError(failure), { cause: failure });
+    }
+  }
+
+  const toggle = (name: Module) => () => {
+    folds.toggle(name);
   };
   const plan = data.plan;
 
   return (
-    <>
+    <FoldsContext value={folds}>
       <main className="studio-center" aria-label={project.name} data-mobile-hidden={narrow && tab !== 'chat'}>
         <header className="flex min-h-14 items-center gap-3 border-b border-[var(--studio-line)] px-4 py-2 sm:px-5">
           <span className="icon-tile size-8 rounded-lg">
@@ -298,7 +319,13 @@ export function Workspace(props: WorkspaceProps) {
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-[0.9375rem] leading-tight font-semibold tracking-tight">{project.name}</h1>
             <p className="truncate text-xs text-muted">
-              {disciplineName(project.discipline)} <span className="text-faint">·</span> {project.format}
+              {disciplineName(project.discipline)}
+              {project.format === '' ? null : (
+                <>
+                  {' '}
+                  <span className="text-faint">·</span> {project.format}
+                </>
+              )}
             </p>
           </div>
           {data.running ? (
@@ -361,7 +388,19 @@ export function Workspace(props: WorkspaceProps) {
           onChoose={data.send}
           onApprove={data.approve}
           onLimits={props.onLimits}
-          onLock={(ui, value) => data.send(describeAnswer(ui, value), { ui_id: ui.ui_id, value })}
+          onLock={async (ui, value) => {
+            await data.send(describeAnswer(ui, value), { ui_id: ui.ui_id, value });
+            if (ui.sets !== undefined) {
+              // The answer changed the project itself (its kind), which the header and the sidebar show.
+              client
+                ?.getProject(project.id)
+                .then(projects.accept)
+                .catch(() => {
+                  // The project is read again with the next change to it.
+                });
+            }
+          }}
+          onUpload={upload}
           onSuggest={setDraft}
         />
         <Composer
@@ -383,7 +422,7 @@ export function Workspace(props: WorkspaceProps) {
         onStream={chooseStream}
         focus={focus}
         onFocus={onFocus}
-        open={panels.screen}
+        open={unfolded('screen')}
         onToggle={toggle('screen')}
         link={data.link}
         onStartEngine={() => {
@@ -399,11 +438,22 @@ export function Workspace(props: WorkspaceProps) {
         aria-label="Project panels"
         data-mobile-hidden={narrow && tab !== 'workspace'}
       >
-        <div ref={environmentRef}>
+        {shown.length === 0 ? null : (
+          <Panel
+            title="Latest"
+            icon={Play}
+            open={unfolded('latest')}
+            onToggle={toggle('latest')}
+            badge={shown[0]?.label ?? undefined}
+          >
+            <LatestBody versions={shown} onShow={showInConversation} />
+          </Panel>
+        )}
+        <div ref={environmentRef} className={shown.length === 0 ? undefined : 'border-t border-[var(--studio-line)]'}>
           <Panel
             title="Environment"
             icon={Server}
-            open={panels.environment}
+            open={unfolded('environment')}
             onToggle={toggle('environment')}
             badge={countRunning(data.engines)}
           >
@@ -457,7 +507,13 @@ export function Workspace(props: WorkspaceProps) {
           </Panel>
         </div>
         <div ref={planRef} className="border-t border-[var(--studio-line)]">
-          <Panel title="Plan" icon={ListChecks} open={panels.plan} onToggle={toggle('plan')} badge={planProgress(plan)}>
+          <Panel
+            title="Plan"
+            icon={ListChecks}
+            open={unfolded('plan')}
+            onToggle={toggle('plan')}
+            badge={planProgress(plan)}
+          >
             <PlanBody items={plan} />
           </Panel>
         </div>
@@ -465,7 +521,7 @@ export function Workspace(props: WorkspaceProps) {
           <Panel
             title="Library"
             icon={Layers}
-            open={panels.library}
+            open={unfolded('library')}
             onToggle={toggle('library')}
             badge={data.library === null ? undefined : String(data.library.assets.length)}
             actions={
@@ -497,7 +553,7 @@ export function Workspace(props: WorkspaceProps) {
           </Panel>
         </div>
       </aside>
-    </>
+    </FoldsContext>
   );
 }
 

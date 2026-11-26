@@ -17,6 +17,11 @@
  * The open project is named in the address (`?project=`), so a reload or a shared link opens it;
  * without one, or with one the account does not have, the most recently updated project opens.
  *
+ * What is the person's to set is in Settings (`settings/SettingsDialog.tsx`), opened from the
+ * account menu and by what leads to one of its tabs: a turn that stopped at a limit to Agent, a
+ * request refused for lack of credits to Billing. Its open tab is in the address too
+ * (`?settings=`).
+ *
  * It is written against the {@link ControlPlane} interface and renders the same whatever answers
  * it: the HTTP client, the demo's fixtures, or none at all (no API address in the build), which it
  * says in one notice and requests nothing.
@@ -24,17 +29,17 @@
  */
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { FolderOpen, LayoutGrid, MessageSquare, MonitorPlay, Plus } from 'lucide-react';
-import type { ControlPlane, NewProject, TurnLimit } from '../lib/api';
-import { brand, catalog } from '../lib/catalog';
+import type { ControlPlane, NewProject } from '../lib/api';
+import { asksKind, brand, catalog, shortcutDiscipline, type Shortcut } from '../lib/catalog';
+import { midSentence } from '../lib/format';
 import { isBoolean, isNumber } from '../lib/narrow';
-import { ConnectClaudeDialog } from './ConnectClaude';
-import { CreditsDialog } from './CreditsDialog';
 import type { EpicReturn, GitHubReturn } from './EnvironmentPanel';
 import { useMediaQuery, usePreference } from './hooks';
-import { LimitsDialog } from './LimitsDialog';
 import { NewProjectDialog, type ProjectDraft } from './NewProjectDialog';
 import { ErrorNotice, Notice } from './Notice';
 import { DisciplineIcon } from '../components/DisciplineIcon';
+import { SettingsDialog } from './settings/SettingsDialog';
+import { AGENT, BILLING, PROFILE, targetInAddress, writeTabToAddress, type SettingsTarget } from './settings/tabs';
 import { Sidebar } from './Sidebar';
 import type { StreamStandIn } from './Stage';
 import { connected, useAccount, useEpic, useGitHub, useProjects } from './useAccount';
@@ -113,10 +118,8 @@ export function Studio({
   const [selectedId, setSelectedId] = useState<string | null>(projectInAddress);
   const [newProject, setNewProject] = useState<ProjectDraft | null>(draft);
   const [creating, setCreating] = useState(draft !== null);
-  const [credits, setCredits] = useState(false);
-  const [claude, setClaude] = useState(false);
-  // The dialog of a turn's limits: closed, open from the menu, or open on the limit a turn reached.
-  const [limits, setLimits] = useState<TurnLimit | 'open' | null>(null);
+  // What Settings is open on, or `null` while it is closed; a link that names a tab opens it there.
+  const [settings, setSettings] = useState<SettingsTarget | null>(targetInAddress);
   const [focusWanted, setFocusWanted] = useState(false);
   const [tab, setTab] = useState<MobileTab>('chat');
   const [firstMessage, setFirstMessage] = useState<{ project: string; text: string } | null>(null);
@@ -173,10 +176,39 @@ export function Studio({
     setCreating(true);
   };
 
-  const listKeys = useCallback(() => connected(client).listApiKeys(), [client]);
-  const createKey = useCallback((name: string) => connected(client).createApiKey(name), [client]);
-  const revokeKey = useCallback((id: string) => connected(client).revokeApiKey(id), [client]);
-  const checkout = useCallback((pack: string) => connected(client).checkout(pack), [client]);
+  /**
+   * Starts from a shortcut of the Create list.
+   *
+   * A shortcut that names a format, or whose discipline asks nothing first, opens the new-project
+   * dialog on it. One whose discipline asks its kind makes the project at once, since the
+   * conversation asks the rest. So that a stray click leaves nothing behind, a project of that
+   * discipline with no kind yet, in which the person has said nothing, is opened again instead of
+   * a second one being made.
+   *
+   * @param shortcut The shortcut chosen.
+   * @throws ApiError When the project could not be made, or the one waiting could not be read.
+   */
+  const startShortcut = async (shortcut: Shortcut): Promise<void> => {
+    const discipline = shortcutDiscipline(shortcut);
+    if (discipline === undefined) {
+      return;
+    }
+    if (shortcut.format !== undefined || !asksKind(discipline)) {
+      openNewProject({ discipline: discipline.id, format: shortcut.format });
+      return;
+    }
+    const plane = connected(client);
+    for (const waiting of projects.list.filter((project) => project.discipline === discipline.id && project.format === '')) {
+      const { events } = await plane.listEvents(waiting.id, 0);
+      if (!events.some((event) => event.kind === 'user_message')) {
+        select(waiting.id);
+        return;
+      }
+    }
+    const made = await projects.create({ discipline: discipline.id, name: `Untitled ${midSentence(shortcut.label)}` });
+    select(made.id);
+  };
+
   const takeFirstMessage = useCallback(() => {
     setFirstMessage(null);
   }, []);
@@ -194,7 +226,10 @@ export function Studio({
         projects={projects}
         selectedId={selected?.id ?? null}
         onSelect={select}
-        onNewProject={openNewProject}
+        onNewProject={() => {
+          openNewProject();
+        }}
+        onShortcut={startShortcut}
         collapsed={(sideCollapsed || focus) && !narrow}
         onCollapse={(collapsed) => {
           setSideCollapsed(collapsed);
@@ -205,14 +240,8 @@ export function Studio({
         me={account.me}
         email={email}
         demo={demo}
-        onAddCredits={() => {
-          setCredits(true);
-        }}
-        onConnectClaude={() => {
-          setClaude(true);
-        }}
-        onLimits={() => {
-          setLimits('open');
+        onSettings={(tab = PROFILE.id) => {
+          setSettings({ tab });
         }}
         onSignOut={onSignOut}
         mobileHidden={narrow && tab !== 'projects'}
@@ -247,9 +276,15 @@ export function Studio({
           firstMessage={firstMessage?.project === selected.id ? firstMessage.text : null}
           onFirstMessageTaken={takeFirstMessage}
           onAddCredits={() => {
-            setCredits(true);
+            setSettings({ tab: BILLING.id });
           }}
-          onLimits={account.me?.limits === undefined ? null : setLimits}
+          onLimits={
+            account.me?.limits === undefined
+              ? null
+              : (limit) => {
+                  setSettings({ tab: AGENT.id, limit });
+                }
+          }
           standIn={standIn}
         />
       )}
@@ -271,33 +306,21 @@ export function Studio({
         }}
         onCreate={create}
       />
-      <CreditsDialog
-        open={credits}
+      <SettingsDialog
+        target={settings}
+        onTarget={setSettings}
         onClose={() => {
-          setCredits(false);
+          setSettings(null);
+          writeTabToAddress(null);
         }}
-        onCheckout={checkout}
-      />
-      {account.me?.limits === undefined ? null : (
-        <LimitsDialog
-          open={limits !== null}
-          onClose={() => {
-            setLimits(null);
-          }}
-          limits={account.me.limits}
-          reached={limits === 'open' ? null : limits}
-          onSave={account.setLimits}
-        />
-      )}
-      <ConnectClaudeDialog
-        open={claude}
-        onClose={() => {
-          setClaude(false);
-        }}
-        connected={client !== null}
-        onList={listKeys}
-        onCreate={createKey}
-        onRevoke={revokeKey}
+        client={client}
+        account={account}
+        email={email}
+        github={github}
+        epic={epic}
+        githubReturned={githubReturned}
+        epicReturned={epicReturned}
+        onSignOut={onSignOut}
       />
     </div>
   );
@@ -345,7 +368,7 @@ function EmptyCenter({ status, error, connectedPlane, mobileHidden, onNewProject
         <h1 className="display text-3xl">Projects are on their way</h1>
         <p className="lede mx-auto mt-3 max-w-md text-sm">
           This server runs a control plane from before the studio, so projects cannot be made here yet. Your credits and
-          Claude keys work as before, from the account menu.
+          API keys work as before, in Settings from the account menu.
         </p>
         <a className="btn btn-ghost btn-sm mt-6" href="/app/?demo">
           See the studio with sample data
