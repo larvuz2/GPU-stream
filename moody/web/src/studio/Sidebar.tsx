@@ -18,7 +18,9 @@
  * and a delete asks first. The search is a quiet icon at the end of the Recent heading's row (the
  * Pinned one's, for an account whose projects are all pinned). Pressing it opens the field in that
  * row, where it narrows both lists by name, discipline, or format; Escape, its close button, or
- * leaving it empty puts the heading back.
+ * leaving it empty puts the heading back. The field stays where it opened while the person types:
+ * under it the matches close up, and above it a pinned project that does not match keeps its
+ * place and is only hidden.
  *
  * Folded, the sidebar is a rail: unfolding, a new project, the search (which unfolds it), the
  * shortcuts as icons, and the account. On a narrow screen it is the Projects tab, where the
@@ -542,11 +544,12 @@ function ProjectLists({ projects, pinned, recent, search, selectedId, onSelect, 
       </p>
     );
   }
-  const row = (project: Project) => (
+  const row = (project: Project, hidden = false) => (
     <ProjectRow
       key={project.id}
       project={project}
       active={project.id === selectedId}
+      hidden={hidden}
       now={now}
       onSelect={onSelect}
       onDelete={onDelete}
@@ -560,24 +563,28 @@ function ProjectLists({ projects, pinned, recent, search, selectedId, onSelect, 
   );
   // The search's row is the Recent heading's, which is there whenever a project is not pinned.
   const recents = projects.list.some((project) => !project.pinned);
+  // Nothing above that row may move while the person types in it, so there every pinned project
+  // keeps its place and one the search does not match is hidden, not removed.
+  const matching = new Set(pinned.map((project) => project.id));
+  const pins = recents ? projects.list.filter((project) => project.pinned) : pinned;
   const none =
     search.query.trim() !== '' && pinned.length === 0 && recent.length === 0 ? (
       <p className="px-2 pt-1.5 text-sm text-faint">No project matches.</p>
     ) : null;
   return (
     <div className="grid grid-cols-1 gap-4">
-      {pinned.length === 0 && recents ? null : (
+      {pins.length === 0 && recents ? null : (
         <section aria-label="Pinned">
           <ListHead label="Pinned" search={recents ? undefined : search} />
           {recents ? null : none}
-          <ul className="grid grid-cols-1 gap-0.5">{pinned.map(row)}</ul>
+          <ul className="grid grid-cols-1 gap-0.5">{pins.map((project) => row(project, !matching.has(project.id)))}</ul>
         </section>
       )}
       {recents ? (
         <section aria-label="Recent">
           <ListHead label="Recent" search={search} />
           {none}
-          <ul className="grid grid-cols-1 gap-0.5">{recent.map(row)}</ul>
+          <ul className="grid grid-cols-1 gap-0.5">{recent.map((project) => row(project))}</ul>
         </section>
       ) : null}
     </div>
@@ -590,6 +597,8 @@ interface ProjectRowProps {
   project: Project;
   /** Whether it is the open one. */
   active: boolean;
+  /** Whether the row keeps its place without being shown: a pinned project the search does not match. */
+  hidden: boolean;
   /** The current time, for how long ago it changed. */
   now: number;
   /** Opens it. */
@@ -608,7 +617,7 @@ interface ProjectRowProps {
  * @param props The component's props.
  * @returns The list item.
  */
-function ProjectRow({ project, active, now, onSelect, onDelete, onRename, onPin }: ProjectRowProps) {
+function ProjectRow({ project, active, hidden, now, onSelect, onDelete, onRename, onPin }: ProjectRowProps) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(project.name);
   const [error, setError] = useState<unknown>(null);
@@ -648,7 +657,7 @@ function ProjectRow({ project, active, now, onSelect, onDelete, onRename, onPin 
   }
 
   return (
-    <li>
+    <li className={hidden ? 'invisible' : undefined} aria-hidden={hidden ? true : undefined}>
       <div className="project-row" data-active={active}>
         <DisciplineIcon
           id={project.discipline}
