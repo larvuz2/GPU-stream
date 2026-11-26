@@ -42,38 +42,32 @@ and subtitled. This is a starting point, and the person's own rules replace any 
 ## The opening card
 
 What they have to show decides how the video is built. One line ("An explainer. What do we have
-to show?"), then:
+to show?"), then one card that asks and, where they have a recording, takes it:
 
 ```json
 {
   "title": "What do we have to show?",
-  "components": {"type": "pick", "id": "material", "columns": 3, "options": [
-    {"value": "recording", "label": "I have a recording", "note": "A screen, a game, or the real thing", "icon": ["111111111111", "100000000001", "100010000001", "100011000001", "100011100001", "100011000001", "100010000001", "100000000001", "111111111111", "000001100000", "000111111000", "000000000000"]},
-    {"value": "notes", "label": "I have notes", "note": "A script, or what each part shows", "icon": ["000000000000", "011111111110", "010000000010", "010111111010", "010000000010", "010111111010", "010000000010", "010111100010", "010000000010", "011111111110", "000000000000", "000000000000"]},
-    {"value": "topic", "label": "Just the topic", "note": "We find the pictures together", "icon": ["000011110000", "000100001000", "001000000100", "001000000100", "001000000100", "000100001000", "000010010000", "000010010000", "000011110000", "000000000000", "000011110000", "000001100000"]}]},
-  "instant": true,
+  "components": {"type": "stack", "children": [
+    {"type": "pick", "id": "material", "columns": 3, "options": [
+      {"value": "recording", "label": "I have a recording", "note": "A screen, a game, or the real thing", "icon": ["111111111111", "100000000001", "100010000001", "100011000001", "100011100001", "100011000001", "100010000001", "100000000001", "111111111111", "000001100000", "000111111000", "000000000000"]},
+      {"value": "notes", "label": "I have notes", "note": "A script, or what each part shows", "icon": ["000000000000", "011111111110", "010000000010", "010111111010", "010000000010", "010111111010", "010000000010", "010111100010", "010000000010", "011111111110", "000000000000", "000000000000"]},
+      {"value": "topic", "label": "Just the topic", "note": "We find the pictures together", "icon": ["000011110000", "000100001000", "001000000100", "001000000100", "001000000100", "000100001000", "000010010000", "000010010000", "000011110000", "000000000000", "000011110000", "000001100000"]}]},
+    {"type": "upload", "id": "footage", "label": "Drop the recording here", "accept": "video", "section": "Footage",
+     "when": {"material": "recording"}},
+    {"type": "field", "id": "link", "label": "Or paste a link to it", "when": {"material": "recording"}}]},
+  "submit": "Start",
   "waits": true
 }
 ```
+
+It answers with `material`, and for a recording with `footage` (the library entry the file
+became, `{"tag", "name", "kind"}`, or null) and `link` (their words, or empty).
 
 | The answer | Your next turn |
 |---|---|
-| `recording` | Ask for it with the card below. Ask in the same line for a note of what each part shows, if they have one: a sentence a clip is enough, and the script is written from it. |
+| `recording` | Go on with the file or the link. A link is fetched by the engine where its skill says it can; where it cannot, ask for the file. Ask in the same turn for a note of what each part shows, if they have one: a sentence a clip is enough, and the script is written from it. |
 | `notes` | Ask them to paste the notes, then ask whether there is footage to go with them. |
 | `topic` | Ask for it in one line, and offer three videos it could be, each one idea with a title. The pictures are then recorded by them, or generated (the `movie` skill), or composed as type and diagrams. |
-
-```json
-{
-  "title": "Your recording",
-  "components": {"type": "upload", "id": "footage", "label": "Drop the recording here", "accept": "video",
-                 "section": "Footage", "required": true},
-  "submit": "Use this recording",
-  "waits": true
-}
-```
-
-It answers `{"footage": {"tag": "@...", "name": "...", "kind": "video"}}`. A file the upload
-refuses as too large comes as a link, where the engine's skill says it can fetch one.
 
 ## What to learn, in order
 

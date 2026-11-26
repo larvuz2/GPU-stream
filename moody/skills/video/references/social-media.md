@@ -47,7 +47,8 @@ hook. Read it before you pick a moment or write a hook.
 ## The opening card
 
 One line ("Let's make something for the feed."), then one card with the three things that decide
-how the work starts. Fit the platforms to what they said; these are a start.
+how the work starts, which also takes the footage where they have it. Fit the platforms to what
+they said; these are a start.
 
 ```json
 {
@@ -59,31 +60,24 @@ how the work starts. Fit the platforms to what they said; these are a start.
       {"value": "own", "label": "Show my work"}, {"value": "page", "label": "Grow a page"},
       {"value": "clips", "label": "Clip someone's content"}]},
     {"type": "segmented", "id": "source", "label": "What do we start from?", "options": [
-      {"value": "footage", "label": "My footage"}, {"value": "link", "label": "A link"},
-      {"value": "nothing", "label": "Nothing yet"}]}]},
+      {"value": "footage", "label": "Footage"}, {"value": "nothing", "label": "Nothing yet"}]},
+    {"type": "upload", "id": "footage", "label": "Drop the video here", "accept": "video", "section": "Footage",
+     "when": {"source": "footage"}},
+    {"type": "field", "id": "link", "label": "Or paste a link to it", "when": {"source": "footage"}}]},
   "submit": "Start",
   "waits": true
 }
 ```
 
+It answers with `platform`, `goal`, and `source`, and for footage with `footage` (the library
+entry the file became, `{"tag", "name", "kind"}`, or null) and `link` (their words, or empty).
+
 | `source` | Your next turn |
 |---|---|
-| `footage` | Ask for it with the card below. |
-| `link` | Ask them to paste it, in one line. Whether the engine can fetch a link, and from where, is in its skill; where it cannot, ask for the file. |
+| `footage`, with a file | Go on: the footage is in the library under the tag the card gave. |
+| `footage`, with a link | Whether the engine can fetch a link, and from where, is in its skill; where it cannot, ask for the file. A file the upload refuses as too large comes as a link. |
+| `footage`, with neither | Ask for the file or the link, in one line. |
 | `nothing` | Ask what the post should show, with three ideas of your own to react to. Then the material is made first: generated shots (the `movie` skill, at 9:16 and a few seconds each), or a recording they make and bring. |
-
-```json
-{
-  "title": "Your footage",
-  "components": {"type": "upload", "id": "footage", "label": "Drop the video here", "accept": "video",
-                 "section": "Footage", "required": true},
-  "submit": "Use this footage",
-  "waits": true
-}
-```
-
-It answers `{"footage": {"tag": "@...", "name": "...", "kind": "video"}}`: the library entry the
-file became. A file the upload refuses as too large comes as a link instead.
 
 | `goal` | What it changes |
 |---|---|

@@ -16,35 +16,28 @@ then ask them to listen wherever a film's skill would have you look.
 
 ## The opening card
 
-One line ("A music video starts with the track. Do you have it?"), then:
+One line ("A music video starts with the track. Do you have it?"), then one card that asks and,
+where they have it, takes it:
 
 ```json
 {
   "title": "The track",
-  "components": {"type": "pick", "id": "track", "columns": 2, "options": [
-    {"value": "have", "label": "I have the track", "note": "A finished song or a demo", "icon": ["000001111111", "000001111111", "000001000001", "000001000001", "000001000001", "000001000001", "000001000001", "001111000111", "011111001111", "011111001111", "001110000110", "000000000000"]},
-    {"value": "make", "label": "Make one with me", "note": "Tell me the kind of song, hear three", "icon": ["000001000000", "000001000000", "000011100000", "011111111100", "000011100000", "000001000000", "000001000100", "000000000100", "000000011111", "000000000100", "000000000100", "000000000000"]}]},
-  "instant": true,
+  "components": {"type": "stack", "children": [
+    {"type": "pick", "id": "track", "columns": 2, "options": [
+      {"value": "have", "label": "I have the track", "note": "A finished song or a demo", "icon": ["000001111111", "000001111111", "000001000001", "000001000001", "000001000001", "000001000001", "000001000001", "001111000111", "011111001111", "011111001111", "001110000110", "000000000000"]},
+      {"value": "make", "label": "Make one with me", "note": "Tell me the kind of song, hear three", "icon": ["000001000000", "000001000000", "000011100000", "011111111100", "000011100000", "000001000000", "000001000100", "000000000100", "000000011111", "000000000100", "000000000100", "000000000000"]}]},
+    {"type": "upload", "id": "song", "label": "Drop the song here", "accept": "audio", "section": "Music",
+     "when": {"track": "have"}}]},
+  "submit": "Start",
   "waits": true
 }
 ```
+
+It answers `{"track": "make", "song": null}`, or `{"track": "have", "song": {"tag": "@...", "name":
+"...", "kind": "audio"}}`: the library entry the file became. Where they chose "have" and gave no
+file, ask for it in one line.
 
 ## They have the track
-
-Ask for it with one input:
-
-```json
-{
-  "title": "Your track",
-  "components": {"type": "upload", "id": "song", "label": "Drop the song here", "accept": "audio",
-                 "section": "Music", "required": true},
-  "submit": "Use this track",
-  "waits": true
-}
-```
-
-It answers `{"song": {"tag": "@...", "name": "...", "kind": "audio"}}`: the library entry the
-file became. Then:
 
 1. `library_look(tags=[<its tag>])` hands you its waveform. Read its shape: where it is quiet,
    where it is loud, where it stops. Tell the person what you see in a line, as shape, not as
@@ -96,7 +89,7 @@ Then:
    give it the brief from the card word for word, the approved lyrics, the three tags, and the
    one way the versions should differ.
 3. **The pick, by ear**, on a card whose tiles play. Write under each what makes it different,
-   as you asked for it:
+   as you asked for it. The card keeps its button, so listening to each costs nothing:
 
    ```json
    {
@@ -106,7 +99,7 @@ Then:
        {"value": "@song-b", "label": "B", "note": "Faster, guitar-led", "audio": "song-b"},
        {"value": "@song-c", "label": "C", "note": "Sparse, the voice up front", "audio": "song-c"},
        {"value": "none", "label": "None of these", "note": "I'll say what to change"}]},
-     "instant": true,
+     "submit": "Use this version",
      "waits": true,
      "media": [{"tag": "@song-a", "kind": "audio"}, {"tag": "@song-b", "kind": "audio"}, {"tag": "@song-c", "kind": "audio"}]
    }

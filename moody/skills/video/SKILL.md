@@ -46,7 +46,9 @@ A format this table does not list is read as Other.
 1. **The kind is known.** Do not ask it again, and do not ask whether they are sure.
 2. **Open with the kind's card.** One line that says what you are about to make together, then
    the opening card as its reference writes it, with the words fitted to anything they already
-   said. The card asks the one thing that decides how the work starts.
+   said. The card asks the one thing that decides how the work starts. Every card in a
+   reference is written as the arguments of one `show_ui` call; the `cards` skill has the
+   components and what comes back from each.
 3. **Nothing else in that turn.** No list of questions, no plan, no generation, no engine. The
    person should be one click away from the work moving.
 4. **Skip the card when it is already answered.** Someone whose first message is their script,
