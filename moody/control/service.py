@@ -1161,8 +1161,7 @@ class Sessions:
         title, and formats to choose from. The card is one `pick` of the
         formats, in the catalog's order, each with the line and the icon its
         `kinds` entry names: the icon is looked up in the catalog's `icons`
-        and left out where there is none, or where the catalog of cards has
-        no icon on an option. Choosing locks the card (`instant`), and `sets`
+        and left out where there is none. Choosing locks the card (`instant`), and `sets`
         names what of the project the choice sets, which is also the pick's
         id, so the message that locks it carries `{format: <the kind>}`
         (`chosen_kind`). The card is built and checked as any other is
@@ -1174,8 +1173,7 @@ class Sessions:
         formats = discipline.get("formats") or []
         if not discipline.get("opening") or not formats:
             return None
-        cards = genui.catalog()
-        icons = self.catalog.data.get("icons", {}) if "icon" in cards.shapes["option"]["props"] else {}
+        icons = self.catalog.data.get("icons", {})
         options = []
         for name in formats:
             kind = discipline.get("kinds", {}).get(name, {})
@@ -1186,8 +1184,10 @@ class Sessions:
                 option["icon"] = icons[kind["icon"]]
             options.append(option)
         spec = {"type": "pick", "id": KIND_FIELD, "options": options}
-        data, _ = genui.card(cards, uuid.uuid4().hex[:12], discipline["opening"], spec, None, None, False, None, {})
-        return {**data, "waits": True, "instant": True, "sets": KIND_FIELD, "media": []}
+        data, _ = genui.card(
+            genui.catalog(), uuid.uuid4().hex[:12], discipline["opening"], spec, None, None, True, None, {}, instant=True
+        )
+        return {**data, "sets": KIND_FIELD, "media": []}
 
     def chosen_kind(self, project: dict[str, Any], card: dict[str, Any], value: Any) -> str | None:
         """The kind a message that locks a card chooses for the project, or nothing where the card sets none.

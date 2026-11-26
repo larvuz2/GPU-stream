@@ -13,9 +13,12 @@
  * tuned by sliders over a before and after pair, a lead picked from portraits, a style chosen
  * from boards, a storyboard put in order, a poster taken apart into its layers, a shot list with
  * its budget, two cues to choose between, and three documents of the agent's own
- * (`documents.ts`): an equalizer, a simulation, and the frame's self-test. The last cards are the
- * states a card can be in besides open: changed, with the way back to how it opened in view,
- * locked in, and unable to be answered for now.
+ * (`documents.ts`): an equalizer, a simulation, and the frame's self-test. The first cards are
+ * how a project opens: the kind of video, chosen from squares with pixel icons (`icons.ts`) in
+ * one press, where a film's story comes from, and the track of a music video, given as a file.
+ * The last cards are the states a card can be in besides open: changed, with the way back to how
+ * it opened in view, locked in, unable to be answered for now (a card with a button, and one
+ * that locks on its choice), and asking for a file on a page that cannot take one.
  *
  * The photographs are the site's own artwork (`public/media`), named here for the part they play.
  * The rest was made for the gallery, computed from nothing but code (`public/media/card-*`):
@@ -27,13 +30,17 @@
  * - The two cues (`card-cue-*.m4a`, eight seconds, mono) are synthesized with numpy, a pad of sine
  *   partials and a pulse of plucked notes over a thump, written as WAV and encoded with
  *   `ffmpeg -c:a aac -b:a 96k -movflags +faststart`.
+ * - The three takes of the lantern's chime (`card-sfx-*.m4a`, three seconds, mono) are synthesized
+ *   the same way: a struck bar's partials for the bell, close partials that beat for the gong, and
+ *   a burst of noise through a short resonance for the knock.
  * - The robot (`card-robot.glb`, 4,119 vertices) is built with numpy from boxes, cylinders, and
  *   spheres, placed and grouped into four materials, and written as a binary glTF by hand: a JSON
  *   chunk and one buffer of positions, normals, and indices.
  * @module
  */
-import type { UiData, UiMedia } from '../tree';
+import type { CardData, UiMedia } from '../tree';
 import { CONTACT_DOCUMENT, EQ_DOCUMENT, ISOLATION_DOCUMENT, LANTERNS_DOCUMENT, RUNAWAY_DOCUMENT } from './documents';
+import { BOOK, BULB, CLAPPER, DOTS, HEART, MEGAPHONE, NOTES, PAGE, PHONE, SPARK, TRAY, WAVE } from './icons';
 
 /** One card of the gallery, with the exchange it answers. */
 export interface Example {
@@ -44,13 +51,15 @@ export interface Example {
   /** What the agent says before the card. */
   says: string;
   /** The card. */
-  ui: UiData;
+  ui: CardData;
   /** What it was locked in with, for a card shown locked. */
   locked?: unknown;
   /** What the person has changed on it so far, by input id, for a card shown in the middle of a decision. */
   changed?: Record<string, unknown>;
   /** Whether it is shown as one that cannot be answered now. */
   idle?: boolean;
+  /** Whether it is shown on a page that has no way to take a file from the person. */
+  takesNoFiles?: boolean;
 }
 
 /**
@@ -109,8 +118,112 @@ const LOOK_SPEC = {
   ],
 };
 
+/** The card that asks where a film's story comes from, which the card that cannot be answered now shares. */
+const SOURCE_SPEC = {
+  type: 'pick',
+  id: 'source',
+  columns: 3,
+  options: [
+    { value: 'script', label: 'I have a script', icon: PAGE, note: 'Paste it or give me the file' },
+    { value: 'idea', label: 'I have an idea', icon: BULB, note: 'Tell me in a line or two' },
+    { value: 'blank', label: 'Start me off', icon: SPARK, note: 'I pitch three loglines' },
+  ],
+};
+
+/** The card that asks for a music video's track, which the card on a page that takes no files shares. */
+const TRACK_SPEC = {
+  type: 'stack',
+  children: [
+    {
+      type: 'pick',
+      id: 'have',
+      label: 'Do you have the track?',
+      columns: 2,
+      options: [
+        { value: 'yes', label: 'I have it', icon: TRAY, note: 'Give me the file' },
+        { value: 'no', label: 'Make one with me', icon: WAVE, note: 'Describe it and I write it' },
+      ],
+    },
+    {
+      type: 'upload',
+      id: 'track',
+      label: 'The track',
+      accept: 'audio',
+      section: 'Music',
+      required: true,
+      when: { have: 'yes' },
+    },
+    {
+      type: 'field',
+      id: 'brief',
+      label: 'What should it sound like?',
+      placeholder: 'Slow, a lone piano, rain behind it…',
+      lines: 2,
+      required: true,
+      when: { have: 'no' },
+    },
+  ],
+};
+
 /** The gallery's cards, in the order of a production. */
 export const EXAMPLES: Example[] = [
+  {
+    id: 'kind',
+    asked: 'I want to make a video.',
+    says: 'Then first: what kind of video is it? Each kind starts differently, so pick the closest and we are off.',
+    ui: {
+      ui_id: 'ui-kind',
+      title: 'What are we making?',
+      kind: 'components',
+      spec: {
+        type: 'pick',
+        id: 'format',
+        columns: 3,
+        options: [
+          { value: 'Film & TV', icon: CLAPPER, note: 'A story told in scenes' },
+          { value: 'Social Media', icon: HEART, note: 'Short pieces for a feed' },
+          { value: 'Vertical Shows', icon: PHONE, note: 'Episodes made for a phone' },
+          { value: 'Commercials', icon: MEGAPHONE, note: 'A product, a brand, a spot' },
+          { value: 'Music Videos', icon: NOTES, note: 'Pictures cut to a track' },
+          { value: 'Education', icon: BOOK, note: 'Explainers and lessons' },
+          { value: 'Other', icon: DOTS, note: 'Something else' },
+        ],
+      },
+      submit: null,
+      waits: true,
+      instant: true,
+      media: [],
+    },
+  },
+  {
+    id: 'source',
+    asked: 'Film & TV.',
+    says: 'A film, then. Where does the story come from?',
+    ui: {
+      ui_id: 'ui-source',
+      title: 'Where the story starts',
+      kind: 'components',
+      spec: SOURCE_SPEC,
+      submit: null,
+      waits: true,
+      instant: true,
+      media: [],
+    },
+  },
+  {
+    id: 'track',
+    asked: 'Music Videos.',
+    says: 'A music video is cut to its track, so the track comes first. Give it to me if you have it, or we make one.',
+    ui: {
+      ui_id: 'ui-track',
+      title: 'The track',
+      kind: 'components',
+      spec: TRACK_SPEC,
+      submit: 'Go on with this track',
+      waits: true,
+      media: [],
+    },
+  },
   {
     id: 'look',
     asked: 'The night market shot feels too clean. Can we find a look for it?',
@@ -530,6 +643,34 @@ export const EXAMPLES: Example[] = [
     },
   },
   {
+    id: 'sounds',
+    asked: 'The lantern needs a sound when it lights. What do you have?',
+    says: 'Three takes of the chime. Play them against each other and pick the one that belongs in the shot.',
+    ui: {
+      ui_id: 'ui-sounds',
+      title: 'The lantern’s chime',
+      kind: 'components',
+      spec: {
+        type: 'pick',
+        id: 'take',
+        label: 'Which take?',
+        columns: 3,
+        options: [
+          { value: 'bell', label: 'A · Bell', audio: 'bell', note: 'Bright, rings out' },
+          { value: 'gong', label: 'B · Gong', audio: 'gong', note: 'Low, slow to bloom' },
+          { value: 'knock', label: 'C · Knock', audio: 'knock', note: 'Dry, a short ring' },
+        ],
+      },
+      submit: 'Use this take',
+      waits: true,
+      media: [
+        file('bell', 'card-sfx-bell.m4a', 'audio'),
+        file('gong', 'card-sfx-gong.m4a', 'audio'),
+        file('knock', 'card-sfx-knock.m4a', 'audio'),
+      ],
+    },
+  },
+  {
     id: 'eq',
     asked: 'The market cue is muddy under the dialogue. Can you clear it up?',
     says: 'I put the cue through three bands of equalization so you can hear the difference yourself. Press play, shape it, and lock in the curve: I will apply it to the stem in SoundCraft.',
@@ -640,6 +781,38 @@ export const EXAMPLES: Example[] = [
       media: [file('shot', 'discipline-media.webp')],
     },
     locked: { warmth: 34, contrast: 22, saturation: -18, fade: 16, grain: 38, vignette: 42 },
+  },
+  {
+    id: 'nofile',
+    asked: 'Can I give you the track from here?',
+    says: 'Not from this page: it has no way to take a file. The card says so where the file would go, and the other way in still works.',
+    ui: {
+      ui_id: 'ui-track-nofile',
+      title: 'The track',
+      kind: 'components',
+      spec: TRACK_SPEC,
+      submit: 'Go on with this track',
+      waits: true,
+      media: [],
+    },
+    changed: { have: 'yes' },
+    takesNoFiles: true,
+  },
+  {
+    id: 'held',
+    asked: 'Before I choose: how long would each take?',
+    says: 'A fair question. The card above waits while I work that out: its choices cannot be pressed until I ask again.',
+    ui: {
+      ui_id: 'ui-source-held',
+      title: 'Where the story starts',
+      kind: 'components',
+      spec: SOURCE_SPEC,
+      submit: null,
+      waits: true,
+      instant: true,
+      media: [],
+    },
+    idle: true,
   },
   {
     id: 'idle',

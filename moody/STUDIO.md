@@ -24,9 +24,11 @@ props; a commercial has products and shots; the agent adds sections as the work
 needs them.
 
 A new project starts from one of twelve disciplines (`catalog.json`,
-`disciplines`), the first being **Media** (movie, commercial, episode, vertical
-drama), and the agent opens the conversation: a script to bring, or one to
-write together.
+`disciplines`), the first being **Media**, which is video of every kind: film
+and television, social media, vertical shows, commercials, music videos, and
+education. A video opens on the card that asks which kind it is, and the agent
+opens the conversation as that kind does: for a film, a script to bring or one
+to write together ("Contract: starting a project by its kind").
 
 ## The film workflow (the first one built)
 
@@ -43,7 +45,11 @@ write together.
 5. **Spin-offs.** A poster opens a PhotoCraft engine on the same project files;
    blocking a scene opens Blender. Engines of one project share its folder.
 
-The agent's craft knowledge is in skills. `moody/skills/movie` is the production
+The agent's craft knowledge is in skills. `moody/skills/video` is how a video
+starts by its kind: the card each kind opens with, what the agent has to learn
+before it makes anything, and the workflow each kind starts from, the one above
+for a story and footage edited by code for social and educational video.
+`moody/skills/movie` is the production
 before the edit: the opening questions (the story, the main characters, the art
 style), the library, prompting with references, animation tests, and the shots,
 all of it generated with no engine running. `moody/skills/filmcraft` is the

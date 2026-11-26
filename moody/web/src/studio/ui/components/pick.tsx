@@ -5,13 +5,24 @@
  */
 
 /**
- * The inputs of a card that choose among pictures: `pick`, one or several options shown as
- * pictures, and `reorder`, items the person puts in order.
+ * The inputs of a card that choose among tiles: `pick`, one or several options shown as tiles,
+ * and `reorder`, items the person puts in order.
  *
- * `pick` is a radio group, or checkboxes with `many`, whose labels are the pictures, so it is
+ * `pick` is a radio group, or checkboxes with `many`, whose labels are the tiles, so it is
  * chosen with the keyboard as any radio group is and the chosen one is told to assistive
  * technology by the control itself; the lime frame is what a sighted person sees of the same
- * state.
+ * state. A tile is drawn over one of four things: a picture, a pixel icon (such tiles are
+ * squares, the icon over its words, level with the icons beside it), a sound, or its words alone.
+ *
+ * A tile with a sound plays it: the player sits on the tile, over the control that chooses it,
+ * so each take is heard where it is chosen and two or three are compared by ear. The player's
+ * button and the choice are two controls, both reached by the keyboard, and the card plays one
+ * sound at a time (`Audio.tsx`). Such tiles are never narrower than a waveform and its time
+ * need: `columns` is then the most to a row, and a narrow card shows one take under another.
+ *
+ * On an instant card a press is the answer, so its tiles are buttons, not a selection to move
+ * through: the arrow keys of a radio group would choose, and so lock the card, on the way to
+ * the option meant.
  *
  * `reorder` moves an item three ways that all end in the same change of the list. Dragging its
  * handle follows the pointer, the item changing places with the neighbor whose middle the pointer
@@ -21,13 +32,16 @@
  * @module
  */
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { ArrowDown, ArrowUp, Check, GripVertical } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, Check, GripVertical } from 'lucide-react';
 import { useCard } from '../context';
 import { flag, number, options, type Scalar, type UiOption } from '../tree';
 import { useInput, type ViewProps } from '../view';
+import { Missing } from './Adjusted';
+import { Sound } from './Audio';
+import { PixelIcon } from './PixelIcon';
 
 /**
- * Renders options as pictures to choose from.
+ * Renders options as tiles to choose from.
  *
  * @param props The component's props.
  * @returns The group of choices.
@@ -36,7 +50,7 @@ export function Pick({ node }: ViewProps) {
   const card = useCard();
   const input = useInput(node);
   const many = flag(node, 'many');
-  const choices = options(node);
+  const choices = options(node, 'tile');
   const chosen: unknown[] = Array.isArray(input.value) ? input.value : [input.value];
 
   /**
@@ -59,35 +73,111 @@ export function Pick({ node }: ViewProps) {
   }
 
   return (
+    // Each choice is disabled by itself, not the group, so a tile's sound still plays on a locked card.
     <fieldset
       className="ui-input"
-      disabled={input.frozen}
+      data-frozen={input.frozen ? 'true' : undefined}
       aria-label={input.labeled ? undefined : input.label}
     >
       {input.labeled ? <legend className="ui-label">{input.label}</legend> : null}
-      <div className="ui-grid" data-columns={number(node, 'columns') ?? 3}>
+      <div
+        className="ui-grid"
+        data-columns={number(node, 'columns') ?? 3}
+        data-tiles={choices.some((choice) => choice.audio !== null) ? 'audio' : undefined}
+      >
         {choices.map((choice) => {
+          const picked = chosen.includes(choice.value);
+          const words = (
+            <span className="ui-pick-text">
+              <span className="ui-pick-label">{choice.label}</span>
+              {choice.note === null ? null : <span className="ui-pick-note">{choice.note}</span>}
+            </span>
+          );
+          const control = (
+            <input
+              type={many ? 'checkbox' : 'radio'}
+              className="sr-only"
+              name={input.domId}
+              checked={picked}
+              disabled={input.frozen}
+              onChange={(event) => {
+                choose(choice, event.target.checked);
+              }}
+            />
+          );
+          const press = {
+            type: 'button' as const,
+            disabled: input.frozen,
+            // The one that was pressed is told as the current one, since a button holds no choice.
+            'aria-current': picked ? ('true' as const) : undefined,
+            onClick: () => {
+              choose(choice, true);
+            },
+          };
+          if (choice.audio !== null) {
+            const sound = card.media(choice.audio);
+            return (
+              <div
+                key={String(choice.value)}
+                className="ui-pick"
+                data-art="audio"
+                data-chosen={picked ? 'true' : undefined}
+              >
+                {sound === null ? <Missing name={choice.audio} /> : <Sound url={sound.url} name={choice.label} titled={false} />}
+                {input.instant ? (
+                  <button {...press} className="ui-pick-choose">
+                    {words}
+                    <ArrowRight className="size-4 flex-none" aria-hidden="true" />
+                  </button>
+                ) : (
+                  <label className="ui-pick-choose">
+                    {control}
+                    <span className="ui-check-mark" data-round={many ? undefined : 'true'} aria-hidden="true" />
+                    {words}
+                  </label>
+                )}
+              </div>
+            );
+          }
           const media = card.media(choice.image);
-          return (
-            <label key={String(choice.value)} className="ui-pick">
-              <input
-                type={many ? 'checkbox' : 'radio'}
-                className="sr-only"
-                name={input.domId}
-                checked={chosen.includes(choice.value)}
-                onChange={(event) => {
-                  choose(choice, event.target.checked);
-                }}
-              />
-              {media === null ? null : (
-                <span className="ui-pick-art">
-                  <img src={media.url} alt="" loading="lazy" decoding="async" className="ui-cover" />
-                </span>
-              )}
-              <span className="ui-pick-text">
-                <span className="ui-pick-label">{choice.label}</span>
-                {choice.note === null ? null : <span className="ui-pick-note">{choice.note}</span>}
+          const art =
+            choice.icon !== null ? (
+              <span className="ui-pick-icon">
+                <PixelIcon art={choice.icon} />
               </span>
+            ) : media === null ? null : (
+              <span className="ui-pick-art">
+                <img src={media.url} alt="" loading="lazy" decoding="async" className="ui-cover" />
+              </span>
+            );
+          const kind = choice.icon !== null ? 'icon' : media === null ? 'words' : 'image';
+          // A tile with an icon is sized by what it holds, so its icon and words share one box.
+          const face =
+            choice.icon === null ? (
+              <>
+                {art}
+                {words}
+              </>
+            ) : (
+              <span className="ui-pick-square">
+                {art}
+                {words}
+              </span>
+            );
+          return input.instant ? (
+            <button
+              key={String(choice.value)}
+              {...press}
+              className="ui-pick"
+              data-art={kind}
+              data-chosen={picked ? 'true' : undefined}
+            >
+              {face}
+            </button>
+          ) : (
+            <label key={String(choice.value)} className="ui-pick" data-art={kind}>
+              {control}
+              {face}
               <span className="ui-pick-mark" aria-hidden="true">
                 <Check className="size-3" />
               </span>

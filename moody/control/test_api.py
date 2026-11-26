@@ -1458,16 +1458,16 @@ def test_a_project_made_without_its_kind_opens_on_the_card_that_asks_it_and_lock
         "nor is one of a discipline the catalog gives no opening, which starts with the sections the catalog gives it: none"
     )
 
-    # An icon is the registry's rows, where the registry has the icon and the catalog of cards has icons on options
-    assert not any("icon" in option for option in pick["options"])
-    film_icon, social_icon = ["00111100", "01000010"], ["11110000", "00001111"]
+    # An icon is the registry's rows where the registry has the kind's icon, and the card is checked as any other is
+    tiles = lambda: studio.sessions.opening_card(CATALOG.disciplines["media"])["spec"]["options"]
+    monkeypatch.setitem(CATALOG.data, "icons", {})
+    assert not any("icon" in option for option in tiles())
+    film_icon, social_icon = ["00111100"] * 8, ["11110000"] * 4 + ["00001111"] * 4
     monkeypatch.setitem(CATALOG.data, "icons", {"film": film_icon, "social": social_icon})
-    assert not any("icon" in option for option in studio.sessions.opening_card(CATALOG.disciplines["media"])["spec"]["options"])
-    cards = copy.deepcopy(genui.catalog().data)
-    cards["shapes"]["option"]["props"]["icon"] = {"kind": "any"}
-    monkeypatch.setattr(genui, "catalog", lambda: genui.UiCatalog(cards))
-    pictured = studio.sessions.opening_card(CATALOG.disciplines["media"])["spec"]["options"]
-    assert [option.get("icon") for option in pictured] == [film_icon, social_icon, None, None, None, None, None]
+    assert [option.get("icon") for option in tiles()] == [film_icon, social_icon, None, None, None, None, None]
+    monkeypatch.setitem(CATALOG.data, "icons", {"film": ["01", "10"]})
+    with pytest.raises(genui.Invalid, match="pixel icon"):
+        tiles()
     monkeypatch.undo()
 
     # The message that locks the card sets the kind, or is refused and starts nothing

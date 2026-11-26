@@ -68,14 +68,17 @@ library_upsert(section="Look", name="<Direction name>", tag="@look-<short-name>"
 - `library_upsert` sets the entry's section and name to what you pass: pass the entry's own.
   Never set `approved` to true.
 
-A result tells you the model, the seed, and the cost. Where it does not also show you the
-picture, you have not seen it: describe what you asked for, not what came out.
+A result tells you the model, the seed, and the cost, not the picture. A refinement, which
+becomes the project's look, is generated with `look: true`: check that it shows the style line
+before you report it. Directions are the person's to compare: look at them only where the brief
+asks you to recommend one. What you did not look at, you have not seen: describe what you asked
+for, not what came out.
 
 ## Your report
 
 - **Directions.** For each: its name, its tag, its style line, what it says about the story,
   and what was asked of the frame.
 - **Recommendation.** Which you would choose for this story and audience, and why in a line.
-  Say whether you saw the frames.
+  Say whether you looked at the frames.
 - **Spent.** The number of images and the sum of the `cost_usd` their results gave.
 - **Not done.** Any call that failed, with the refusal's own words.

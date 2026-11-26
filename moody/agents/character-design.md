@@ -96,19 +96,25 @@ library_upsert(section="Characters", name="<Name>", tag="<tag>", metadata={"pick
 
 - Never set `approved` to true, and never change the character's description: both are the
   person's, through the agent.
-- Make the images the brief allows and no more. Generate one again only when its call failed.
-  Do not generate again for taste.
+- Make the images the brief allows and no more. Generate one again only when its call failed,
+  or once when a reference you looked at is not what the prompt asked for. Do not generate
+  again for taste.
 - A call that is refused says why (a tag with no image yet, too many references, a parameter
   outside the tool's limits). Fix the call once; if it is refused again, report it.
-- A result tells you the model, the seed, and the cost. Where it does not also show you the
-  picture, you have not seen it: report what you asked for, not what came out.
+- A result tells you the model, the seed, and the cost, not the picture. Generate with
+  `look: true` what you have to judge yourself: the image you save into the entry's own tag,
+  which every later prompt will use. Check that it shows what you asked (every view, the same
+  subject in each, no text, nothing cropped), and generate it once more, saying what you
+  changed, if it does not. Candidates are the person's to judge: do not look at them unless the
+  brief asks you to recommend one. What you did not look at, you have not seen: report what you
+  asked for, not what came out.
 
 ## Your report
 
 - **Made.** Each entry: its tag, its section, what it shows, and for candidates how it was
   meant to differ from the others.
-- **Recommendation.** Only on what you know. If you saw the pictures, which you would pick and
-  why. If you did not, say so, and say what the person should compare.
+- **Recommendation.** Only on what you know. If you looked at the pictures, which you would
+  pick and why. If you did not, say so, and say what the person should compare.
 - **To check.** What could have gone wrong in these prompts (a face that drifted from the
   reference, clothes that differ between views, text that appeared).
 - **Spent.** The number of images and the sum of the `cost_usd` their results gave.

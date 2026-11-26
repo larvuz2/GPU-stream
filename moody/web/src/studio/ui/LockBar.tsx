@@ -19,25 +19,29 @@
  *
  * Pressing the button hands the value to the conversation, which sends it and, once the log has
  * the answer, renders the card locked. Between the two the button shows that it was pressed and
- * takes no second press; if the card is not locked after a while (the message could not be
- * sent), the button is freed again.
+ * takes no second press (`useSending`).
+ *
+ * An instant card has no button: its one choice locks it. Its foot is the line alone, which says
+ * that choosing is the answer, so a press is never a surprise, and then what was locked in.
  * @module
  */
-import { useEffect, useState } from 'react';
 import { Check, Lock, RotateCcw } from 'lucide-react';
 import { brand } from '../../lib/catalog';
 import type { AnswerLine } from './answer';
-
-/** How long a pressed lock-in button waits for the card to be locked before it can be pressed again. */
-const SENDING_TIMEOUT_MS = 12_000;
+import { useSending } from './hooks';
 
 /** How many of a locked card's values are listed before the rest are counted. */
 const SUMMARY_LINES = 8;
 
 /** Props of {@link LockBar}. */
 interface LockBarProps {
-  /** The lock-in button's label, or `null` for a card with nothing to send back. */
+  /** The lock-in button's label, or `null` for a card with no button. */
   label: string | null;
+  /**
+   * For a card that locks on its one choice: whether it is waiting for that choice or the choice
+   * is on its way. Left out for any other card.
+   */
+  instant?: 'open' | 'sending';
   /** Whether the card is locked in. */
   locked: boolean;
   /** Whether the card can be answered now. */
@@ -60,22 +64,20 @@ interface LockBarProps {
  * @param props The component's props.
  * @returns The bar, or nothing for a card with nothing to send back.
  */
-export function LockBar({ label, locked, live, blocked, summary, changed, onDefault, onLock }: LockBarProps) {
-  const [sending, setSending] = useState(false);
+export function LockBar({
+  label,
+  instant,
+  locked,
+  live,
+  blocked,
+  summary,
+  changed,
+  onDefault,
+  onLock,
+}: LockBarProps) {
+  const [sending, send] = useSending();
 
-  useEffect(() => {
-    if (!sending) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      setSending(false);
-    }, SENDING_TIMEOUT_MS);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [sending]);
-
-  if (label === null) {
+  if (label === null && instant === undefined) {
     return null;
   }
   if (locked) {
@@ -105,6 +107,19 @@ export function LockBar({ label, locked, live, blocked, summary, changed, onDefa
       </footer>
     );
   }
+  if (instant !== undefined) {
+    return (
+      <footer className="ui-lockbar">
+        <p className="ui-hint" role="status">
+          {!live
+            ? `This cannot be answered right now: ${brand} is working, or the conversation has moved past it.`
+            : instant === 'sending'
+              ? 'Sending your choice…'
+              : 'Choose one and it is locked in.'}
+        </p>
+      </footer>
+    );
+  }
   const hint = !live
     ? `You can explore this, but it cannot be locked in right now: ${brand} is working, or the conversation has moved past it.`
     : (blocked ?? 'Nothing is sent until you lock it in.');
@@ -115,7 +130,7 @@ export function LockBar({ label, locked, live, blocked, summary, changed, onDefa
         className="btn btn-primary btn-sm"
         disabled={!live || blocked !== null || sending}
         onClick={() => {
-          setSending(true);
+          send();
           onLock();
         }}
       >
