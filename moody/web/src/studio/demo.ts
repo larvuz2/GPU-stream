@@ -59,7 +59,9 @@
  *
  * The account has the limits of a turn as settings ({@link DEFAULT_LIMITS}, {@link MAX_LIMITS}),
  * which `updateMe` changes and refuses as the control plane does, and which the film's long job
- * keeps to.
+ * keeps to. It also has a name and the catalog's settings, each on its default until changed:
+ * `updateMe` trims the name to its length, refuses a setting or a value the catalog does not
+ * offer in the control plane's words, and changes nothing where it refuses anything.
  * @module
  */
 import {
@@ -83,6 +85,7 @@ import {
   type PreviewItem,
   type Project,
   type Session,
+  type SettingValue,
   type SkillInfo,
   type StudioEvent,
   type TurnId,
@@ -125,6 +128,9 @@ const DEFAULT_LIMITS: TurnLimits = { turn_budget_usd: 15, turn_limit: 200 };
 
 /** The demo deployment's ceilings, which no account sets a limit above. */
 const MAX_LIMITS: TurnLimits = { turn_budget_usd: 100, turn_limit: 1000 };
+
+/** The longest name the control plane keeps. */
+const NAME_LIMIT = 80;
 
 /** The spend for a turn the account of the `limit` scene set itself, low enough for a long job to reach. */
 const LOW_BUDGET_USD = 1;
@@ -1161,8 +1167,13 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     default: DEFAULT_LIMITS,
     max: MAX_LIMITS,
   });
+  /** The name the account gave itself, empty until it gives one. */
+  let name = '';
+  /** The catalog's settings the account changed, by id. */
+  let chosen: Record<string, SettingValue> = {};
   /**
-   * The account, with its limits unless the control plane is one from before the studio.
+   * The account, with its name, limits, and settings unless the control plane is one from before
+   * the studio.
    *
    * @returns The account.
    */
@@ -1171,7 +1182,15 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     email: DEMO_EMAIL,
     credits: 412,
     max_sessions: 3,
-    ...(legacy ? {} : { limits: limits() }),
+    ...(legacy
+      ? {}
+      : {
+          name,
+          limits: limits(),
+          settings: Object.fromEntries(
+            catalog.settings.map((setting) => [setting.id, chosen[setting.id] ?? setting.default]),
+          ),
+        }),
   });
   const health: Health = {
     ok: true,
@@ -1437,10 +1456,30 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
             if (typeof steps === 'number' && steps > MAX_LIMITS.turn_limit) {
               throw new ApiError(400, `A turn may take at most ${creditCount(MAX_LIMITS.turn_limit)} steps here.`);
             }
+            for (const [id, value] of Object.entries(changes.settings ?? {})) {
+              const setting = catalog.settings.find((candidate) => candidate.id === id);
+              if (setting === undefined) {
+                throw new ApiError(400, `There is no setting ${id}.`);
+              }
+              const options = (setting.options ?? []).map((option) => option.value);
+              const offered = setting.kind === 'toggle' ? typeof value === 'boolean' : options.some((option) => option === value);
+              if (value !== null && !offered) {
+                const wanted = setting.kind === 'toggle' ? 'true or false' : options.join(', ');
+                throw new ApiError(400, `${id} is ${wanted}, or null for its default.`);
+              }
+            }
             own = {
               turn_budget_usd: budget === undefined ? own.turn_budget_usd : budget,
               turn_limit: steps === undefined ? own.turn_limit : steps,
             };
+            if (changes.name !== undefined) {
+              name = (changes.name ?? '').trim().replace(/\s+/g, ' ').slice(0, NAME_LIMIT);
+            }
+            chosen = Object.fromEntries(
+              Object.entries({ ...chosen, ...changes.settings }).flatMap(([id, value]) =>
+                value === null ? [] : [[id, value]],
+              ),
+            );
             return me();
           }),
     sessionLink: () => Promise.reject(new ApiError(NOT_CONFIGURED, 'The demo has no stream to open.')),

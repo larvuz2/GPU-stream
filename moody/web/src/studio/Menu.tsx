@@ -8,7 +8,9 @@
  * A button that opens a menu of actions, and the GitHub mark the studio names GitHub with.
  *
  * The menu closes on Escape, which returns focus to its button, on a press anywhere outside, and
- * after any of its items is chosen. The arrow keys move between its items.
+ * after any of its items is chosen. The arrow keys move between its items. Choosing an item gives
+ * the focus back to the button too, before the item's own work shows: a dialog the item opens
+ * then returns the focus there as it closes, where the item itself is gone by then.
  * @module
  */
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
@@ -131,6 +133,7 @@ export function Menu({ label, trigger, triggerClassName, items, placement = 'bel
           onClick={(event) => {
             if (event.target instanceof Element && event.target.closest('[role="menuitem"]') !== null) {
               setOpen(false);
+              button.current?.focus();
             }
           }}
         >

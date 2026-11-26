@@ -165,7 +165,17 @@ export interface Me {
   max_sessions: number;
   /** What a turn of the account's may spend and take; absent from a control plane without such limits. */
   limits?: Limits;
+  /** The name the person gave themselves, empty where they gave none; absent from a control plane without names. */
+  name?: string | null;
+  /**
+   * Every setting of the catalog with the value that applies, the person's own or its default;
+   * absent from a control plane without settings.
+   */
+  settings?: Record<string, SettingValue>;
 }
+
+/** What a setting of the catalog holds: on or off for a toggle, one of its options' values for a choice. */
+export type SettingValue = boolean | string;
 
 /** The limits a turn has, by what reaching one is called: its spend on the model, and its steps. */
 const TURN_LIMITS = ['budget', 'steps'] as const;
@@ -196,6 +206,17 @@ export interface Limits extends TurnLimits {
 
 /** The limits to change; one left out stays as it is, and `null` puts one back on the default. */
 export type LimitChanges = { [Limit in keyof TurnLimits]?: number | null };
+
+/**
+ * What of the account to change. Anything left out stays as it is; a change refused in any part
+ * changes nothing.
+ */
+export interface AccountChanges extends LimitChanges {
+  /** The person's name, at most eighty characters; `null` clears it. */
+  name?: string | null;
+  /** The catalog's settings to change, by id; `null` puts one back on its default. */
+  settings?: Record<string, SettingValue | null>;
+}
 
 /**
  * What the control plane says about itself, to anyone who asks.
@@ -817,10 +838,11 @@ export interface ControlPlane {
   /** Reads the signed-in account. */
   me(): Promise<Me>;
   /**
-   * Changes the limits of the account's turns and returns the account; rejects with status 400 for
-   * a value that is not positive or is over the deployment's ceiling.
+   * Changes the person's name, the limits of their turns, and their settings, and returns the
+   * account; rejects with status 400 for a limit that is not positive or is over the deployment's
+   * ceiling, and for a setting or a value the catalog does not offer.
    */
-  updateMe(changes: LimitChanges): Promise<Me>;
+  updateMe(changes: AccountChanges): Promise<Me>;
   /** Mints a fresh link that opens a running session's desktop, or the picture `stream` names. */
   sessionLink(id: string, stream?: string): Promise<string>;
   /** Stops a session. */
@@ -1081,6 +1103,10 @@ const isLimits: Guard<Limits> = (value): value is Limits =>
   isTurnLimits(value.default) &&
   isTurnLimits(value.max);
 
+/** Checks a value into the settings of an account, each a switch's state or a choice's value. */
+const isSettingValues: Guard<Record<string, SettingValue>> = (value): value is Record<string, SettingValue> =>
+  isRecord(value) && Object.values(value).every((held) => isBoolean(held) || isString(held));
+
 /** Checks a value into a {@link Me}. */
 const isMe: Guard<Me> = (value): value is Me =>
   isRecord(value) &&
@@ -1088,7 +1114,9 @@ const isMe: Guard<Me> = (value): value is Me =>
   isString(value.email) &&
   isNumber(value.credits) &&
   isNumber(value.max_sessions) &&
-  optional(isLimits)(value.limits);
+  optional(isLimits)(value.limits) &&
+  optional(isNullableString)(value.name) &&
+  optional(isSettingValues)(value.settings);
 
 /** Checks a value into a {@link PlanItem}. */
 const isPlanItem: Guard<PlanItem> = (value): value is PlanItem =>

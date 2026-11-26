@@ -63,7 +63,7 @@ export function Notice({ tone, title, children, action, announce = false }: Noti
 interface ErrorNoticeProps {
   /** What a request rejected with, or `null` when nothing failed. */
   error: unknown;
-  /** Opens the credits dialog, offered when the failure is a lack of credits. */
+  /** Opens Settings on Billing, offered when the failure is a lack of credits. */
   onAddCredits?: () => void;
 }
 

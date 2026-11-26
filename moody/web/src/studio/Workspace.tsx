@@ -101,9 +101,9 @@ interface WorkspaceProps {
   firstMessage: string | null;
   /** Called once the first message has been handed to the composer's send. */
   onFirstMessageTaken: () => void;
-  /** Opens the credits dialog. */
+  /** Opens Settings on Billing, where credits are bought. */
   onAddCredits: () => void;
-  /** Opens the dialog of a turn's limits on the one a turn reached, or `null` where there are none to set. */
+  /** Opens Settings on the Agent tab, at the limit a turn reached, or `null` where there are none to set. */
   onLimits: ((reached: TurnLimit) => void) | null;
   /** Drawn instead of the stream, where there is none to show. */
   standIn?: StreamStandIn;

@@ -6,7 +6,7 @@
 
 /**
  * The studio's left sidebar: the brand, "New project", the **Create** shortcuts, the **Pinned** and
- * **Recent** projects, and the account with its credits and the limits of its turns at the foot.
+ * **Recent** projects, and the account at the foot, whose short menu opens Settings.
  *
  * Create lists the catalog's shortcuts (`catalog.shortcuts`): a kind of work by its everyday name.
  * Choosing one starts a project of it, which the studio does in the fewest steps the kind allows
@@ -32,8 +32,6 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 
 import {
   Coins,
   Ellipsis,
-  Gauge,
-  KeyRound,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
@@ -42,6 +40,7 @@ import {
   PinOff,
   Plus,
   Search,
+  Settings,
   Trash2,
   X,
 } from 'lucide-react';
@@ -57,7 +56,8 @@ import { Menu } from './Menu';
 import { ErrorNotice } from './Notice';
 import { DisciplineIcon, ShortcutIcon } from '../components/DisciplineIcon';
 import { ComingDialog } from './ComingDialog';
-import { ago, disciplineName, limitText } from './present';
+import { ago, disciplineName } from './present';
+import { BILLING } from './settings/tabs';
 import type { Projects } from './useAccount';
 
 /** Props of {@link Sidebar}. */
@@ -82,12 +82,8 @@ interface SidebarProps {
   email: string;
   /** Whether the studio is showing the demo's sample data, which the header says. */
   demo: boolean;
-  /** Opens the credits dialog. */
-  onAddCredits: () => void;
-  /** Opens the Connect Claude dialog. */
-  onConnectClaude: () => void;
-  /** Opens the dialog of a turn's limits. */
-  onLimits: () => void;
+  /** Opens Settings, on the tab named (`settings/tabs.ts`) or on its first. */
+  onSettings: (tab?: string) => void;
   /** Signs the person out. */
   onSignOut: () => void;
   /** Whether the region is hidden behind another tab on a narrow screen. */
@@ -832,16 +828,20 @@ interface AccountMenuProps extends SidebarProps {
 }
 
 /**
- * Renders the account button at the sidebar's foot and the menu it opens: the balance, adding
- * credits, a turn's limits where the control plane has them (with the two that apply beside the
- * item), Connect Claude, and signing out.
+ * Renders the account button at the sidebar's foot and the short menu it opens: Settings, the
+ * credit balance (which opens Settings on Billing), and signing out. Everything else that is the
+ * person's to set is in Settings.
+ *
+ * The button names the person by the name they gave themselves, or by their email address where
+ * they gave none.
  *
  * @param props The component's props.
  * @returns The account button and its menu.
  */
-function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onLimits, onSignOut }: AccountMenuProps) {
-  const limits = me?.limits;
-  const initial = email.charAt(0) || '?';
+function AccountMenu({ me, email, compact, onSettings, onSignOut }: AccountMenuProps) {
+  const name = me?.name ?? '';
+  const shown = name === '' ? email : name;
+  const initial = shown.charAt(0) || '?';
   const balance = me === null ? '—' : creditCount(me.credits);
   const avatar = (
     <span className="grid size-8 flex-none place-items-center rounded-md border border-line-strong bg-ink-700 text-[0.8125rem] font-semibold uppercase">
@@ -852,7 +852,7 @@ function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onLimi
     <Menu
       label="Account"
       placement="above-start"
-      menuClassName="w-64"
+      menuClassName="w-56"
       triggerClassName={cx(
         'flex items-center gap-2.5 rounded-xl text-left transition-colors hover:bg-white/[0.05]',
         compact ? 'p-1' : 'w-full p-2',
@@ -865,7 +865,7 @@ function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onLimi
             {avatar}
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium" title={email}>
-                {email || 'Your account'}
+                {shown || 'Your account'}
               </span>
               <span className="flex items-center gap-1 text-xs text-muted">
                 <Coins className="size-3 text-fg" aria-hidden="true" />
@@ -877,40 +877,30 @@ function AccountMenu({ me, email, compact, onAddCredits, onConnectClaude, onLimi
       }
       items={
         <>
-          <div className="px-3 pt-2 pb-2.5">
-            <p className="text-xs text-faint">Signed in as</p>
-            <p className="truncate text-sm font-medium" title={email}>
-              {email}
-            </p>
-          </div>
-          <div className="mx-1 mb-1 flex items-center justify-between gap-2 rounded-xl border border-line bg-white/[0.03] py-2 pr-2 pl-3">
-            <span className="flex items-center gap-2 text-sm">
-              <Coins className="size-4 text-fg" aria-hidden="true" />
-              <span className="font-semibold tabular-nums">{balance}</span>
-              <span className="text-muted">credits</span>
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            onClick={() => {
+              onSettings();
+            }}
+          >
+            <Settings aria-hidden="true" />
+            Settings
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            aria-label={`${balance} credits. Open Billing`}
+            onClick={() => {
+              onSettings(BILLING.id);
+            }}
+          >
+            <Coins aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              <span className="font-semibold tabular-nums">{balance}</span> credits
             </span>
-            <button
-              type="button"
-              role="menuitem"
-              className="btn btn-primary btn-sm h-7 px-2.5 text-xs"
-              onClick={onAddCredits}
-            >
-              <Plus className="size-3.5" aria-hidden="true" />
-              Add
-            </button>
-          </div>
-          {limits === undefined ? null : (
-            <button type="button" role="menuitem" className="menu-item" onClick={onLimits}>
-              <Gauge aria-hidden="true" />
-              <span className="flex-none">Turn limits</span>
-              <span className="min-w-0 flex-1 truncate text-right text-xs text-faint tabular-nums">
-                {limitText('budget', limits.turn_budget_usd)} · {limitText('steps', limits.turn_limit)}
-              </span>
-            </button>
-          )}
-          <button type="button" role="menuitem" className="menu-item" onClick={onConnectClaude}>
-            <KeyRound aria-hidden="true" />
-            Connect Claude
           </button>
           <button type="button" role="menuitem" className="menu-item" onClick={onSignOut}>
             <LogOut aria-hidden="true" />

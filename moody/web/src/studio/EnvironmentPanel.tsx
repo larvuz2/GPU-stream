@@ -121,7 +121,7 @@ interface EngineSectionProps {
   onShow: (id: string) => void;
   /** Puts one picture of an engine on screen, such as an Unreal engine's Desktop. */
   onShowPicture: (id: string, stream: string) => void;
-  /** Opens the credits dialog. */
+  /** Opens Settings on Billing, where credits are bought. */
   onAddCredits: () => void;
   /** Lists the Unreal projects in a running Unreal engine's workspace. */
   unrealProjects: (engineId: string) => Promise<UnrealProject[]>;
@@ -625,7 +625,7 @@ interface StartFormProps {
   epic: Epic;
   /** Starts an engine. */
   onStart: (app: string, tier: string) => Promise<Session>;
-  /** Opens the credits dialog. */
+  /** Opens Settings on Billing, where credits are bought. */
   onAddCredits: () => void;
 }
 

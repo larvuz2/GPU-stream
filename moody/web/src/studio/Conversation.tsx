@@ -134,7 +134,7 @@ interface ConversationProps {
   onChoose: (text: string) => Promise<void>;
   /** Answers an approval the running turn waits on. */
   onApprove: (approvalId: string, decision: ApprovalDecision) => Promise<void>;
-  /** Opens the dialog of a turn's limits on the one a turn reached, or `null` where there are none to set. */
+  /** Opens Settings on the Agent tab, at the limit a turn reached, or `null` where there are none to set. */
   onLimits: ((reached: TurnLimit) => void) | null;
   /** Locks an interactive card in with its state, as the person's next message. */
   onLock: (ui: UiData, value: unknown) => Promise<void>;

@@ -66,6 +66,8 @@ export interface Kind {
   note: string;
   /** Its icon, by name in the catalog's {@link Catalog.icons}. */
   icon: string;
+  /** The library's first sections for a project of the kind, where they differ from the discipline's. */
+  sections?: string[];
 }
 
 /**
@@ -91,6 +93,10 @@ export interface Discipline {
   opening?: string;
   /** What that card says of each format, by the format's name. */
   kinds?: Record<string, Kind>;
+  /** The agent's skill that opens a project of each kind with a card of its own. */
+  opening_skill?: string;
+  /** The library's first sections for a project of the discipline. */
+  sections?: string[];
 }
 
 /** One card of what a shortcut will offer: a tool that may come, and what it is for. */
@@ -195,6 +201,37 @@ export interface CreditPack {
   usd: number;
 }
 
+/** One of the values a setting of kind `choice` offers. */
+export interface SettingOption {
+  /** The value the control plane keeps. */
+  value: string;
+  /** What the page calls it. */
+  label: string;
+}
+
+/**
+ * A setting of the person's account that is a plain switch or choice.
+ *
+ * The control plane reads the same entries: it keeps what a person changed and refuses an id or a
+ * value they do not offer, so a new setting is an entry here and the code that reads it.
+ */
+export interface Setting {
+  /** The identifier its value is kept under. */
+  id: string;
+  /** The tab of Settings it sits on, by the tab's name as shown. */
+  tab: string;
+  /** What the setting is, as its control is labeled. */
+  label: string;
+  /** One line on what it changes. */
+  help: string;
+  /** `toggle` for a switch, on or off, or `choice` for one of {@link Setting.options}. */
+  kind: string;
+  /** What a `choice` offers. */
+  options?: SettingOption[];
+  /** The value that applies until the person changes it. */
+  default: boolean | string;
+}
+
 /** The shape of `catalog.json`. */
 export interface Catalog {
   /** The product's name. */
@@ -215,6 +252,8 @@ export interface Catalog {
   apps: CatalogApp[];
   /** Every tier, cheapest first. */
   tiers: Tier[];
+  /** The settings of a person's account that are a plain switch or choice, in the order they are shown. */
+  settings: Setting[];
   /** Every region, the automatic choice among them. */
   regions: Region[];
   /** Every credit pack, smallest first. */

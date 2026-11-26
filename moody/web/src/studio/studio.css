@@ -623,6 +623,200 @@
     transform: rotate(-90deg);
   }
 
+  /* Settings: the tabs down the side and the open tab's content beside them, scrolling by itself. */
+  .settings {
+    display: grid;
+    grid-template-columns: 13.5rem minmax(0, 1fr);
+    height: 100%;
+  }
+
+  .settings-side {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 0.7rem;
+    padding: 1.5rem 0.45rem;
+    border-right: 1px solid var(--color-line);
+    background: var(--color-ink-900);
+  }
+
+  .settings-title {
+    padding-inline: 1.05rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  /* Padded by the width of a focus ring, which a list that scrolls would otherwise clip. */
+  .settings-tabs {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.3rem;
+    overflow-y: auto;
+  }
+
+  .settings-tab {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 0.65rem;
+    height: 2.25rem;
+    padding-inline: 0.75rem;
+    border-radius: 0.6rem;
+    color: var(--color-muted);
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-align: left;
+    white-space: nowrap;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .settings-tab svg {
+    width: 1rem;
+    height: 1rem;
+    flex: none;
+  }
+
+  .settings-tab:hover {
+    background: rgb(255 255 255 / 0.05);
+    color: var(--color-fg);
+  }
+
+  .settings-tab[aria-selected='true'] {
+    background: rgb(255 255 255 / 0.08);
+    color: var(--color-fg);
+  }
+
+  .settings-panel {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 1.75rem 2rem 2.5rem;
+  }
+
+  /* A part of a tab, set off from the one before it by a line. */
+  .settings-block {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--color-line);
+  }
+
+  .settings-rows > li + li {
+    margin-top: 1.25rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--color-line);
+  }
+
+  .settings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .settings-table :is(th, td) {
+    padding: 0.55rem 0.75rem 0.55rem 0;
+    border-top: 1px solid var(--color-line);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .settings-table thead th {
+    border-top: 0;
+    color: var(--color-faint);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .settings-table tbody th {
+    font-weight: 500;
+  }
+
+  .settings-table td {
+    color: var(--color-muted);
+  }
+
+  /* On a narrow screen the tabs run across the top, and scroll sideways where they do not fit. */
+  @media (max-width: 767.98px) {
+    .settings {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    .settings-side {
+      gap: 0.3rem;
+      padding: 1rem 0 0;
+      border-right: 0;
+      border-bottom: 1px solid var(--color-line);
+    }
+
+    .settings-title {
+      padding-inline: 1.25rem;
+    }
+
+    .settings-tabs {
+      flex-direction: row;
+      gap: 0.25rem;
+      padding: 0.3rem 1rem 0.6rem;
+      overflow: auto hidden;
+      scrollbar-width: none;
+    }
+
+    .settings-panel {
+      padding: 1.25rem 1.25rem 2rem;
+    }
+  }
+
+  /* A setting that is on or off: a square knob in a track, lit while it is on. */
+  .switch {
+    position: relative;
+    width: 2.75rem;
+    height: 1.5rem;
+    flex: none;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.3rem;
+    background: var(--color-ink-950);
+    transition:
+      border-color 0.15s ease,
+      background-color 0.15s ease;
+  }
+
+  .switch:hover {
+    border-color: #777;
+  }
+
+  .switch-knob {
+    position: absolute;
+    top: 0.2rem;
+    left: 0.2rem;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 0.15rem;
+    background: var(--color-muted);
+    transition:
+      transform 0.15s ease,
+      background-color 0.15s ease;
+  }
+
+  .switch[aria-checked='true'] {
+    border-color: var(--color-lime);
+    background: var(--selection-bg);
+  }
+
+  .switch[aria-checked='true'] .switch-knob {
+    background: var(--color-lime);
+    transform: translateX(1.225rem);
+  }
+
+  .switch[aria-busy='true'] {
+    cursor: progress;
+  }
+
   /* The player of the Latest module, which is what goes full screen. */
   .latest-frame {
     overflow: hidden;
