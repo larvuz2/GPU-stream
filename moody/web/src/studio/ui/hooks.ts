@@ -10,6 +10,39 @@
  */
 import { useEffect, useRef, useState, type RefObject } from 'react';
 
+/** How long something sent waits to be seen done before it can be sent again. */
+const SENDING_TIMEOUT_MS = 12_000;
+
+/**
+ * Remembers that the card's answer was just sent.
+ *
+ * Sending hands the value to the conversation, which sends it and, once the log has the answer,
+ * renders the card locked. Between the two the card shows that it was sent and takes no second
+ * answer; if it is not locked after a while (the message could not be sent), it is freed again.
+ *
+ * @returns Whether an answer is on its way, and the function that says one was sent.
+ */
+export function useSending(): [boolean, () => void] {
+  const [sending, setSending] = useState(false);
+  useEffect(() => {
+    if (!sending) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setSending(false);
+    }, SENDING_TIMEOUT_MS);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [sending]);
+  return [
+    sending,
+    () => {
+      setSending(true);
+    },
+  ];
+}
+
 /**
  * Follows an element's width.
  *

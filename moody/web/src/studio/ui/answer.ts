@@ -144,14 +144,21 @@ export function missing(root: UiNode, inputs: ReadonlyMap<string, UiNode>, state
 }
 
 /**
- * A card's answer as a line per input.
+ * A card's answer as a line per input the person was shown.
  *
+ * An input whose condition did not hold was never in view, so its value is no part of what the
+ * person answered, though the card's state still carries it for the agent.
+ *
+ * @param root The card's tree.
  * @param inputs The card's inputs.
  * @param state The values locked in.
  * @returns The lines, in the order of the card.
  */
-export function summarize(inputs: ReadonlyMap<string, UiNode>, state: UiState): AnswerLine[] {
-  return [...inputs].map(([id, node]) => ({ id, label: nameOf(id, node), words: wordsOf(node, state[id]) }));
+export function summarize(root: UiNode, inputs: ReadonlyMap<string, UiNode>, state: UiState): AnswerLine[] {
+  const seen = inView(root, state);
+  return [...inputs]
+    .filter(([id]) => seen.has(id))
+    .map(([id, node]) => ({ id, label: nameOf(id, node), words: wordsOf(node, state[id]) }));
 }
 
 /**
@@ -181,7 +188,7 @@ export function summarizeValue(value: unknown): AnswerLine[] {
 export function describeAnswer(ui: UiData, value: unknown): string {
   const root = ui.kind === 'components' ? readTree(ui.spec) : null;
   const lines =
-    root !== null && isRecord(value) ? summarize(inputsOf(root), value) : summarizeValue(value);
+    root !== null && isRecord(value) ? summarize(root, inputsOf(root), value) : summarizeValue(value);
   const said = lines.map((line) => `${line.label} ${line.words}`).join(', ');
   return said === '' ? `Locked in ${ui.title}.` : `Locked in ${ui.title}: ${said}.`;
 }

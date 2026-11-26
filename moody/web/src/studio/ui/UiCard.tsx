@@ -25,6 +25,11 @@
  *   answered now (the agent is working, or the conversation moved past it), and it says so.
  * - **Locked**: the controls show what was locked in and take no change, and the card lists it.
  *
+ * A card may be `instant`: it has one input, a single choice, and no lock-in button. Its choices
+ * are buttons, and pressing one sends the card's state at once. Until the log shows it locked,
+ * the card holds the choice and takes no second one; while it cannot be answered, its choices
+ * cannot be pressed.
+ *
  * The state lives here, not in the event: the page's event log is append-only and polled, and a
  * card's data may arrive again with fresh signed addresses, which must not reset what the person
  * set. The tree is keyed by each node's place in it, so a card re-read keeps its controls.
@@ -33,11 +38,12 @@
 import { useId, useMemo, useState } from 'react';
 import { isRecord } from '../../lib/narrow';
 import { changed, inputsOf, missing, startState, summarize, wordsOf } from './answer';
-import { CardContext, type Card } from './context';
+import { CardContext, type Card, type UploadFile } from './context';
+import { useSending } from './hooks';
 import { HtmlCard } from './HtmlCard';
 import { LockBar } from './LockBar';
 import { NodeView } from './NodeView';
-import { readTree, type UiData, type UiMedia } from './tree';
+import { instantOf, readTree, type UiData, type UiMedia } from './tree';
 import './ui.css';
 
 /** Props of {@link UiCard}. */
@@ -56,6 +62,11 @@ export interface UiCardProps {
    * how it opened. The gallery shows a card in the middle of a decision with it.
    */
   draft?: Record<string, unknown>;
+  /**
+   * Takes a file the person gave a card's `upload` input into the project's library. A page that
+   * passes none cannot take files, and such an input says so.
+   */
+  onUpload?: UploadFile;
 }
 
 /**
@@ -64,9 +75,10 @@ export interface UiCardProps {
  * @param props The component's props.
  * @returns The card.
  */
-export function UiCard({ ui, locked, live, onSubmit, draft }: UiCardProps) {
+export function UiCard({ ui, locked, live, onSubmit, draft, onUpload }: UiCardProps) {
   const title = useId();
-  const state = locked !== null ? 'Locked in' : ui.submit === null ? 'Take a look' : live ? 'Your call' : 'On hold';
+  const asks = ui.submit !== null || instantOf(ui);
+  const state = locked !== null ? 'Locked in' : !asks ? 'Take a look' : live ? 'Your call' : 'On hold';
   return (
     <section
       className="ai-card ui-card"
@@ -84,7 +96,7 @@ export function UiCard({ ui, locked, live, onSubmit, draft }: UiCardProps) {
       {ui.kind === 'html' ? (
         <HtmlCard ui={ui} locked={locked} live={live} onSubmit={onSubmit} />
       ) : (
-        <ComponentsCard ui={ui} locked={locked} live={live} onSubmit={onSubmit} draft={draft} />
+        <ComponentsCard ui={ui} locked={locked} live={live} onSubmit={onSubmit} draft={draft} onUpload={onUpload} />
       )}
     </section>
   );
@@ -96,15 +108,19 @@ export function UiCard({ ui, locked, live, onSubmit, draft }: UiCardProps) {
  * @param props The component's props.
  * @returns The components and the lock-in bar.
  */
-function ComponentsCard({ ui, locked, live, onSubmit, draft }: UiCardProps) {
+function ComponentsCard({ ui, locked, live, onSubmit, draft, onUpload }: UiCardProps) {
   const uid = useId();
   const root = useMemo(() => readTree(ui.spec), [ui.spec]);
   const inputs = useMemo(() => (root === null ? new Map<string, never>() : inputsOf(root)), [root]);
   const start = useMemo(() => startState(inputs), [inputs]);
   const [changes, setChanges] = useState<Record<string, unknown>>(() => draft ?? {});
   const files = useMemo(() => new Map(ui.media.map((file): [string, UiMedia] => [file.name, file])), [ui.media]);
+  const [sounds] = useState(() => new Set<HTMLAudioElement>());
+  const [sending, send] = useSending();
 
   const frozen = locked !== null;
+  // Only a card of one input can lock on a choice: there is nothing else to set first.
+  const instant = instantOf(ui) && inputs.size === 1;
   const state = useMemo(
     () => ({ ...start, ...(locked === null ? changes : isRecord(locked.value) ? locked.value : {}) }),
     [start, changes, locked],
@@ -113,19 +129,28 @@ function ComponentsCard({ ui, locked, live, onSubmit, draft }: UiCardProps) {
     (): Card => ({
       state,
       set: (id, value) => {
-        if (!frozen) {
-          setChanges((current) => ({ ...current, [id]: value }));
+        if (frozen || (instant && (!live || sending))) {
+          return;
+        }
+        setChanges((current) => ({ ...current, [id]: value }));
+        if (instant) {
+          send();
+          onSubmit({ ...state, [id]: value });
         }
       },
       media: (name) => (typeof name === 'string' ? (files.get(name) ?? null) : null),
-      frozen,
+      // An instant card that cannot be answered, or whose choice is on its way, takes no press.
+      frozen: frozen || (instant && (!live || sending)),
+      instant,
+      upload: onUpload ?? null,
+      sounds,
       words: (id) => {
         const node = inputs.get(id);
         return node === undefined ? '' : wordsOf(node, state[id]);
       },
       uid,
     }),
-    [state, frozen, files, inputs, uid],
+    [state, frozen, instant, live, sending, send, onSubmit, onUpload, sounds, files, inputs, uid],
   );
 
   if (root === null) {
@@ -138,12 +163,13 @@ function ComponentsCard({ ui, locked, live, onSubmit, draft }: UiCardProps) {
         <NodeView node={root} />
       </div>
       <LockBar
-        label={ui.submit}
+        label={instant ? null : ui.submit}
+        instant={instant ? (sending ? 'sending' : 'open') : undefined}
         locked={frozen}
         live={live}
         blocked={unchosen === null ? null : `Still to choose: ${unchosen}`}
-        summary={frozen ? summarize(inputs, state) : []}
-        changed={!frozen && changed(inputs, state, start)}
+        summary={frozen ? summarize(root, inputs, state) : []}
+        changed={!frozen && !instant && changed(inputs, state, start)}
         onDefault={() => {
           setChanges({});
         }}

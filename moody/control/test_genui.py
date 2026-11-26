@@ -240,6 +240,14 @@ SAMPLE: dict[str, Any] = {
         },
         {"type": "select", "id": "finish", "options": list(CATALOG.data["finishes"])},
         {
+            "type": "upload",
+            "id": "track",
+            "label": "The track",
+            "accept": "audio",
+            "section": "Music",
+            "required": True,
+        },
+        {
             "type": "layers",
             "id": "comp",
             "layers": [
@@ -346,6 +354,7 @@ def test_a_card_that_uses_every_component_passes_and_its_inputs_are_its_ids():
         "accent": "color",
         "angle": "model",
         "finish": "select",
+        "track": "upload",
         "comp": "layers",
     }
     assert all(ID.fullmatch(given) for given in check.inputs)
@@ -541,7 +550,15 @@ MISTAKES = [
     (
         "a list item with a property it does not take",
         changed([*CAST, 0, "options", 0, "img"], "mara"),
-        ['options[0] (option) has no property "img"', 'Did you mean "image"?'],
+        ['options[0] (tile) has no property "img"', 'Did you mean "image"?'],
+    ),
+    (
+        "a kind of file an upload does not take",
+        changed(["children", 6, "accept"], "sound"),
+        [
+            "(upload).accept should be one of any, audio, image, video",
+            '"sound"',
+        ],
     ),
     (
         "a child that is not a component",
@@ -651,7 +668,8 @@ def test_a_components_card_becomes_an_event_with_its_tree_and_its_inputs():
         "waits": True,
         "spec": SAMPLE,
     }
-    assert inputs["warmth"] == "slider" and len(inputs) == 16
+    assert inputs["warmth"] == "slider" and len(inputs) == 17
+    assert "instant" not in data, "only an instant card says so"
     plain, none = shown(components={"type": "image", "src": "shot"})
     assert plain["submit"] is None and plain["waits"] is False and none == {}
 
@@ -714,6 +732,134 @@ def test_an_html_card_is_bounded_and_has_to_report_its_value_to_be_locked_in():
         html=page, height=limits["height_max"] + 1
     )
     assert "html should be the card's document" in refusal(html="  ")
+
+
+ICON = [
+    "00111100",
+    "01000010",
+    "10100101",
+    "10000001",
+    "10100101",
+    "10011001",
+    "01000010",
+    "00111100",
+]
+
+
+def kinds_card(**pick: Any) -> dict[str, Any]:
+    """A card of one pick whose tiles are pixel icons, as the card that asks a project's kind is."""
+    return {
+        "type": "pick",
+        "id": "kind",
+        "label": "What are we making?",
+        "options": [
+            {"value": "Film & TV", "icon": ICON, "note": "A story told in scenes"},
+            {"value": "Music Videos", "icon": ICON},
+            "Other",
+        ],
+        **pick,
+    }
+
+
+def test_a_tile_shows_a_pixel_icon_that_is_a_square_of_zeros_and_ones():
+    limits = CATALOG.limits
+    assert problems(kinds_card()) == []
+    widest = ["1" * limits["icon_max"]] * limits["icon_max"]
+    assert problems(kinds_card(options=[{"value": "a", "icon": widest}])) == []
+
+    def said(icon: Any) -> str:
+        (found,) = problems(kinds_card(options=[{"value": "a", "icon": icon}, "b"]))
+        assert found.startswith("components (pick).options[0].icon "), found
+        return found
+
+    asked = f"{limits['icon_min']} to {limits['icon_max']} rows of as many characters, each 0 or 1"
+    assert asked in said("camera") and 'it is "camera"' in said("camera")
+    assert asked in said(ICON[:7]) and "it has 7 rows" in said(ICON[:7])
+    assert "it has 17 rows" in said(["1" * 17] * 17)
+    ragged = [*ICON[:3], "1000001", *ICON[4:]]
+    assert "8 rows of 8 characters each; row 4 has 7" in said(ragged)
+    drawn = [*ICON[:1], "0#....#0", *ICON[2:]]
+    assert 'should hold only 0 and 1; row 2 is "0#....#0"' in said(drawn)
+    assert "has no cell filled" in said(["0" * 8] * 8)
+
+
+def test_a_tile_shows_one_of_a_picture_an_icon_and_a_sound():
+    sounds = {
+        "type": "pick",
+        "id": "cue",
+        "options": [
+            {"value": "a", "label": "A · Harbor", "audio": "theme"},
+            {"value": "b", "label": "B · Market", "audio": "theme", "note": "Faster"},
+        ],
+        "value": "a",
+    }
+    assert problems(sounds) == []
+    both = copy.deepcopy(sounds)
+    both["options"][0]["icon"] = ICON
+    assert problems(both) == [
+        "components (pick).options[0] (tile) has icon and audio, but a tile shows one of image, icon, audio. Keep one."
+    ]
+    picture = copy.deepcopy(sounds)
+    picture["options"][1]["audio"] = "mara"
+    assert problems(picture) == [
+        'components (pick).options[1].audio needs an audio, but the media "mara" is an image.'
+    ]
+    # Icons and sounds are a pick's: the options of any other input are words
+    plain = {
+        "type": "segmented",
+        "id": "cue",
+        "options": [{"value": "a", "icon": ICON}, "b"],
+    }
+    (found,) = problems(plain)
+    assert 'options[0] (option) has no property "icon"' in found
+
+
+def test_an_instant_card_is_one_single_choice_and_has_no_lock_in_button():
+    data, inputs = shown(components=kinds_card(), instant=True, waits=True)
+    assert data["instant"] is True and data["submit"] is None and data["waits"] is True
+    assert inputs == {"kind": "pick"}
+    held = {
+        "type": "stack",
+        "children": [{"type": "text", "text": "Pick one."}, kinds_card()],
+    }
+    assert shown(components=held, instant=True)[0]["instant"] is True, (
+        "what is not an input does not count"
+    )
+    two = {"type": "segmented", "id": "length", "options": ["Short", "Long"]}
+    assert shown(components=two, instant=True)[0]["instant"] is True
+
+    assert "instant is true and there is a submit label" in refusal(
+        components=kinds_card(), instant=True, submit="Go"
+    )
+    assert "instant is for a components card" in refusal(
+        html="<button onclick='moody.submit(1)'>One</button>", instant=True
+    )
+    assert "instant should be true or false" in refusal(
+        components=kinds_card(), instant="yes"
+    )
+    several = {
+        "type": "stack",
+        "children": [kinds_card(), {"type": "field", "id": "note"}],
+    }
+    assert (
+        "instant is for a card whose one input is a single choice (segmented or pick); this card has 2 inputs: "
+        "kind, note. Give submit instead, or ask for the one choice alone."
+    ) in refusal(components=several, instant=True)
+    assert "this card has none" in refusal(
+        components={"type": "text", "text": "Hello"}, instant=True
+    )
+    assert (
+        'instant needs the card\'s one input to be a single choice (segmented or pick); "grain" is a slider'
+        in refusal(components={"type": "slider", "id": "grain"}, instant=True)
+    )
+    assert 'instant needs a single choice, but "kind" takes many' in refusal(
+        components=kinds_card(many=True), instant=True
+    )
+    # A card that waits needs a way to answer, which instant is
+    assert (
+        "Give submit (or instant, for a card of one choice), or leave waits out."
+        in refusal(components=kinds_card(), waits=True)
+    )
 
 
 def test_a_card_is_one_kind_has_a_title_and_waits_only_with_a_way_to_answer():
@@ -826,6 +972,11 @@ def test_the_tools_reference_is_written_from_the_catalog():
         in reference
     )
     assert "- option {value*, label, image, note}" in reference
+    assert "- tile {value*, label, image, icon, audio, note}" in reference
+    assert (
+        '- upload(id*, label, accept="any", section, required=false): A file the person drops or picks'
+        in reference
+    )
     for name, spec in CATALOG.adjustments.items():
         assert f"{name} {spec['min']}..{spec['max']}" in reference
     assert "finishes: original, clay, metal, gloss, wire." in reference
@@ -915,7 +1066,11 @@ def test_show_ui_is_a_tool_whose_definition_carries_the_catalog():
         "waits",
         "media",
         "height",
+        "instant",
     }
+    assert (
+        "segmented or pick, not many" in schema["properties"]["instant"]["description"]
+    )
     assert schema["properties"]["components"]["description"] == CATALOG.reference()
     assert "moody.setState" in schema["properties"]["html"]["description"]
     assert str(CATALOG.limits["media"]) in schema["properties"]["media"]["description"]
@@ -1153,6 +1308,46 @@ def test_an_html_card_carries_its_document_and_a_model_file_is_stored_as_it_is(s
         )
 
 
+def test_an_instant_card_is_shown_and_its_choice_comes_back_as_any_lock_does(stage):
+    client, agent = stage.client, stage.agent
+    film = new_project(client)
+    turn = turn_of(stage, film["id"])
+    result = agent.tool_show_ui(
+        turn,
+        title="What are we making?",
+        components=kinds_card(),
+        instant=True,
+        waits=True,
+    )
+    assert result.ends_turn is True
+    told = json.loads(result.content)
+    assert told["answers_with"] == {
+        "kind": "pick: the option's value, or a list of them with many"
+    }
+    assert (
+        "when they choose, their next message carries what they chose" in told["note"]
+    )
+    (card_shown,) = cards(stage, film["id"])
+    assert card_shown["instant"] is True and card_shown["submit"] is None
+    assert card_shown["spec"]["options"][0]["icon"] == ICON
+
+    going = agent.tool_show_ui(
+        turn,
+        title="How long?",
+        instant=True,
+        components={"type": "segmented", "id": "length", "options": ["Short", "Long"]},
+    )
+    assert (
+        going.ends_turn is False
+        and "may choose whenever they like" in json.loads(going.content)["note"]
+    )
+    with pytest.raises(Refused, match="instant needs a single choice"):
+        agent.tool_show_ui(
+            turn, title="Which ones?", components=kinds_card(many=True), instant=True
+        )
+    assert len(cards(stage, film["id"])) == 2
+
+
 def test_a_card_is_titled_for_the_page_by_what_it_shows(stage):
     film = new_project(stage.client)
     turn = turn_of(stage, film["id"])
@@ -1234,6 +1429,10 @@ def test_every_card_the_cards_skill_writes_out_passes_the_check():
             example.get("waits", False),
             example.get("height"),
             files,
+            example.get("instant", False),
         )
-        assert data["submit"] and data["waits"] is True
+        # Each asks for an answer, by its button or by its one choice, and waits for it
+        assert (
+            bool(data["submit"]) != bool(data.get("instant")) and data["waits"] is True
+        )
         assert inputs or data["kind"] == "html", example["title"]

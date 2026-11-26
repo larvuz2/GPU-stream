@@ -5,7 +5,8 @@
  */
 
 /**
- * A card's sound: its waveform, with a player.
+ * A card's sound: its waveform, with a player. {@link Audio} is the `audio` component, and
+ * {@link Sound} the player itself, which a tile that plays and an uploaded sound also use.
  *
  * The file is fetched once and decoded off the audio device (an offline context, which needs no
  * gesture and makes no sound) to find the loudest sample of each of {@link BARS} slices, which is
@@ -17,6 +18,10 @@
  * Where the file cannot be decoded (a format this browser's decoder lacks, an address that
  * does not allow the read), the player still works over a flat line: the picture of the sound
  * is an aid, and the sound itself never waits on it.
+ *
+ * A card plays one sound at a time: every player joins the card's set of sounds
+ * (`context.ts`), and starting one pauses the others, so two takes are compared by ear without
+ * reaching for a second button.
  * @module
  */
 import { useEffect, useRef, useState } from 'react';
@@ -64,7 +69,7 @@ function peaksOf(audio: AudioBuffer): number[] {
 }
 
 /**
- * Renders a sound with its waveform and a player.
+ * Renders the `audio` component: a sound with its waveform and a player.
  *
  * @param props The component's props.
  * @returns The player, or its placeholder where the card does not carry the file.
@@ -72,7 +77,30 @@ function peaksOf(audio: AudioBuffer): number[] {
 export function Audio({ node }: ViewProps) {
   const card = useCard();
   const media = card.media(node.props.src);
-  const url = media?.url ?? null;
+  if (media === null) {
+    return <Missing name={text(node, 'src') ?? 'A sound'} />;
+  }
+  return <Sound url={media.url} name={text(node, 'label') ?? media.name} />;
+}
+
+/** Props of {@link Sound}. */
+interface SoundProps {
+  /** Where the sound is read from. */
+  url: string;
+  /** What the sound is called, which names its controls. */
+  name: string;
+  /** Whether the name is written over the waveform; a tile that says it elsewhere leaves it out. */
+  titled?: boolean;
+}
+
+/**
+ * Renders a sound's player: a play button, the waveform to seek on, and the time.
+ *
+ * @param props The component's props.
+ * @returns The player, or a placeholder where the browser cannot play the file.
+ */
+export function Sound({ url, name, titled = true }: SoundProps) {
+  const card = useCard();
   const element = useRef<HTMLAudioElement>(null);
   const [peaks, setPeaks] = useState<number[] | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -80,10 +108,20 @@ export function Audio({ node }: ViewProps) {
   const [length, setLength] = useState(0);
   const [failed, setFailed] = useState(false);
 
+  // The card knows its sounds, so that it plays one at a time.
+  const sounds = card.sounds;
   useEffect(() => {
-    if (url === null) {
+    const audio = element.current;
+    if (audio === null) {
       return;
     }
+    sounds.add(audio);
+    return () => {
+      sounds.delete(audio);
+    };
+  }, [sounds, failed]);
+
+  useEffect(() => {
     const leaving = new AbortController();
     void (async () => {
       try {
@@ -102,16 +140,15 @@ export function Audio({ node }: ViewProps) {
     };
   }, [url]);
 
-  if (media === null || failed) {
-    return <Missing name={text(node, 'src') ?? 'A sound'} />;
+  if (failed) {
+    return <Missing name={name} />;
   }
-  const name = text(node, 'label') ?? media.name;
   const played = length > 0 ? time / length : 0;
   return (
     <div className="ui-audio">
       <audio
         ref={element}
-        src={media.url}
+        src={url}
         preload="metadata"
         onLoadedMetadata={(event) => {
           if (Number.isFinite(event.currentTarget.duration)) {
@@ -121,8 +158,13 @@ export function Audio({ node }: ViewProps) {
         onTimeUpdate={(event) => {
           setTime(event.currentTarget.currentTime);
         }}
-        onPlay={() => {
+        onPlay={(event) => {
           setPlaying(true);
+          for (const other of sounds) {
+            if (other !== event.currentTarget) {
+              other.pause();
+            }
+          }
         }}
         onPause={() => {
           setPlaying(false);
@@ -151,7 +193,7 @@ export function Audio({ node }: ViewProps) {
       </button>
       <div className="ui-audio-body">
         <div className="ui-input-head">
-          <span className="ui-label truncate">{name}</span>
+          {titled ? <span className="ui-label truncate">{name}</span> : <span />}
           <span className="ui-readout">
             {clock(time)} / {clock(length)}
           </span>

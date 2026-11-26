@@ -21,9 +21,26 @@
  * @module
  */
 import { isBoolean, isNumber, isRecord, isString } from '../../lib/narrow';
-import { CATALOG, isComponentType, type ComponentType } from './catalog';
+import type { UiData } from '../../lib/api';
+import { CATALOG, isComponentType, limit, type ComponentType } from './catalog';
 
 export type { UiData, UiMedia } from '../../lib/api';
+
+/**
+ * A card's data as this folder reads it: the wire shape, and `instant`, which the `ui` event
+ * carries for a card that locks on its one choice (`moody/STUDIO.md`).
+ */
+export type CardData = UiData & { instant?: boolean };
+
+/**
+ * Whether a card locks as soon as the person chooses, with no lock-in button.
+ *
+ * @param ui The card's data.
+ * @returns `true` where the event says the card is instant.
+ */
+export function instantOf(ui: UiData): boolean {
+  return 'instant' in ui && ui.instant === true;
+}
 
 /** A card's values, by the id of the input each belongs to. */
 export type UiState = Readonly<Record<string, unknown>>;
@@ -43,7 +60,7 @@ export interface UiNode {
   children: readonly UiNode[];
 }
 
-/** One choice of an input, read from the catalog's `option` shape. */
+/** One choice of an input, read from the catalog's `option` shape, or its `tile` shape for a pick. */
 export interface UiOption {
   /** What the answer carries. */
   value: Scalar;
@@ -51,6 +68,10 @@ export interface UiOption {
   label: string;
   /** The name of its picture among the card's files. */
   image: string | null;
+  /** Its pixel icon: a square of rows of `0` and `1`. */
+  icon: readonly string[] | null;
+  /** The name of its sound among the card's files. */
+  audio: string | null;
   /** A line under the label. */
   note: string | null;
 }
@@ -208,13 +229,28 @@ export function items(node: UiNode, name: string, shape: string): Record<string,
 }
 
 /**
+ * Reads a pixel icon: a square of rows of `0` and `1`, of a side within the catalog's limits.
+ *
+ * @param value What the card gave.
+ * @returns The rows, or `null` for anything that is not such a square.
+ */
+function readIcon(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length < limit('icon_min', 8) || value.length > limit('icon_max', 16)) {
+    return null;
+  }
+  const rows = value.filter(isString).filter((row) => row.length === value.length && /^[01]+$/.test(row));
+  return rows.length === value.length ? rows : null;
+}
+
+/**
  * Reads a component's options.
  *
  * @param node The component.
+ * @param shape The catalog's shape of one option: `option`, or `tile` for a pick.
  * @returns Its choices, each with the label the person reads.
  */
-export function options(node: UiNode): UiOption[] {
-  return items(node, 'options', 'option').flatMap((item): UiOption[] => {
+export function options(node: UiNode, shape = 'option'): UiOption[] {
+  return items(node, 'options', shape).flatMap((item): UiOption[] => {
     if (!isScalar(item.value)) {
       return [];
     }
@@ -223,6 +259,8 @@ export function options(node: UiNode): UiOption[] {
         value: item.value,
         label: isString(item.label) ? item.label : String(item.value),
         image: isString(item.image) ? item.image : null,
+        icon: readIcon(item.icon),
+        audio: isString(item.audio) ? item.audio : null,
         note: isString(item.note) ? item.note : null,
       },
     ];
