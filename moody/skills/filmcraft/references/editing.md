@@ -117,7 +117,7 @@ the join.
 
 | Genre or format | Average shot | Notes |
 |---|---|---|
-| Vertical drama | 1.5-3 s | a cut or a new piece of information every few seconds; hold the cliffhanger face |
+| Vertical show | 1.5-3 s | a cut or a new piece of information every few seconds; hold the cliffhanger face |
 | Commercial | 1-2.5 s | slower for luxury, faster for energy drinks; the pack shot holds 2-3 s |
 | Action | 1-2 s | wider shots longer, impacts shortest |
 | Comedy | 2-4 s | hold for the reaction; cut on the laugh's peak, not after |
@@ -275,7 +275,7 @@ captions.setStyle {track: "C1", font: "Inter", fontStyle: "SemiBold", size: 52,
 
 Common subtitle practice: at most two lines of about 42 characters, at least about a second on
 screen and long enough to read at 17-20 characters a second, split at phrase boundaries, never
-across a cut when it can be avoided. Vertical drama burns captions in (`burnCaptions: true` at
+across a cut when it can be avoided. A vertical show burns captions in (`burnCaptions: true` at
 export) at a larger size (`size` 60-72) with `margin` 0.2-0.25, above the platform's own caption
 area. Deliver a sidecar too where the platform takes one (`captionSidecar: "srt"`, or
 `captions.export {path, format}`).

@@ -73,7 +73,7 @@ One line ("A show it is. Where does it come from?"), then:
 | Order of work | The whole film, stage by stage | Episode one end to end before any other: script, shots, and cut. What it teaches (the look in motion, the pace, the cost) sets the rest |
 | Captions | Optional | Burned in, in the edit |
 
-The beat table and the script form are in the `movie` skill's story.md ("Vertical drama"); the
+The beat table and the script form are in the `movie` skill's story.md ("Vertical show"); the
 evidence for the first seconds is in [first-seconds.md](first-seconds.md).
 
 ## The default pipeline
