@@ -26,13 +26,6 @@
  * Each uses the theme's variables and leaves its controls to the frame's base sheet, so it looks
  * like the conversation; each stops moving, or does not start, where the person asked for less
  * motion; and each takes `moody.locked` to mean its controls are for reading only.
- *
- * Each document that asks for an answer opens on the one the agent recommends: its first act is
- * `moody.recommend(value)`, it draws from `moody.state` (the recommendation the first time, the
- * value locked in when the card is shown again), and it writes "(recommended)" in the frame's
- * quiet tone (`class="moody-recommended"`) beside what is still the agent's value. The page does
- * the rest: it says the card stands as recommended, names what changed, and starts the document
- * again as the way back.
  * @module
  */
 
@@ -47,9 +40,8 @@ export const EQ_DOCUMENT = `
   .bar span { color: var(--moody-muted); font-size: 12px; }
   .bands { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
   .band { display: grid; gap: 4px; }
-  .band div { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
-  output { font-family: var(--moody-mono); font-size: 12px; color: var(--moody-fg); white-space: nowrap; }
-  .why { margin: 0; color: var(--moody-muted); font-size: 12px; }
+  .band div { display: flex; justify-content: space-between; align-items: baseline; }
+  output { font-family: var(--moody-mono); font-size: 12px; color: var(--moody-fg); }
   @media (max-width: 420px) { .bands { grid-template-columns: minmax(0, 1fr); } }
 </style>
 <div class="eq">
@@ -60,14 +52,13 @@ export const EQ_DOCUMENT = `
   </div>
   <canvas id="curve" role="img" aria-label="The equalizer's curve"></canvas>
   <div class="bands">
-    <div class="band"><div><label for="low">Low · 120 Hz <span id="low-mark" class="moody-recommended">(recommended)</span></label><output id="low-out"></output></div>
+    <div class="band"><div><label for="low">Low · 120 Hz</label><output id="low-out"></output></div>
       <input id="low" type="range" min="-12" max="12" step="0.5"></div>
-    <div class="band"><div><label for="mid">Mid · 1 kHz <span id="mid-mark" class="moody-recommended">(recommended)</span></label><output id="mid-out"></output></div>
+    <div class="band"><div><label for="mid">Mid · 1 kHz</label><output id="mid-out"></output></div>
       <input id="mid" type="range" min="-12" max="12" step="0.5"></div>
-    <div class="band"><div><label for="high">High · 6 kHz <span id="high-mark" class="moody-recommended">(recommended)</span></label><output id="high-out"></output></div>
+    <div class="band"><div><label for="high">High · 6 kHz</label><output id="high-out"></output></div>
       <input id="high" type="range" min="-12" max="12" step="0.5"></div>
   </div>
-  <p class="why">I pulled the lows down and dipped 1 kHz, where the dialogue sits, then gave a little air back on top.</p>
 </div>
 <script>
   const BANDS = [
@@ -75,10 +66,7 @@ export const EQ_DOCUMENT = `
     { id: 'mid', type: 'peaking', frequency: 1000 },
     { id: 'high', type: 'highshelf', frequency: 6000 },
   ];
-  // The curve the agent recommends. The document opens on it, and says so before anything else.
-  const RECOMMENDED = { low: -4, mid: -3, high: 2 };
-  moody.recommend(RECOMMENDED);
-  const state = Object.assign({}, moody.state);
+  const state = Object.assign({ low: 3, mid: -2, high: 4 }, moody.state || {});
   const token = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const wave = document.getElementById('wave');
   const curve = document.getElementById('curve');
@@ -146,7 +134,6 @@ export const EQ_DOCUMENT = `
     BANDS.forEach((band, index) => {
       document.getElementById(band.id).value = state[band.id];
       document.getElementById(band.id + '-out').textContent = (state[band.id] > 0 ? '+' : '') + state[band.id] + ' dB';
-      document.getElementById(band.id + '-mark').hidden = state[band.id] !== RECOMMENDED[band.id];
       if (live[index]) live[index].gain.value = state[band.id];
     });
     drawCurve();
@@ -181,6 +168,7 @@ export const EQ_DOCUMENT = `
   window.addEventListener('moodylock', () => { BANDS.forEach((band) => { document.getElementById(band.id).disabled = true; }); });
   new ResizeObserver(() => { drawWave(); drawCurve(); }).observe(document.body);
   apply();
+  moody.setState(state);
 
   moody.load('cue').then((bytes) => bench.decodeAudioData(bytes)).then((decoded) => {
     buffer = decoded;
@@ -206,7 +194,7 @@ export const LANTERNS_DOCUMENT = `
   canvas { display: block; width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--moody-line); border-radius: 8px; background: #06050d; }
   .controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
   .control { display: grid; gap: 4px; }
-  .control div { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+  .control div { display: flex; justify-content: space-between; align-items: baseline; }
   output { font-family: var(--moody-mono); font-size: 12px; }
   .bar { display: flex; align-items: center; gap: 12px; }
   .bar span { color: var(--moody-muted); font-size: 12px; }
@@ -215,23 +203,20 @@ export const LANTERNS_DOCUMENT = `
 <div class="sim">
   <canvas id="sky" role="img" aria-label="Lanterns drifting on the wind"></canvas>
   <div class="controls">
-    <div class="control"><div><label for="count">Lanterns <span id="count-mark" class="moody-recommended">(recommended)</span></label><output id="count-out"></output></div>
+    <div class="control"><div><label for="count">Lanterns</label><output id="count-out"></output></div>
       <input id="count" type="range" min="20" max="400" step="10"></div>
-    <div class="control"><div><label for="wind">Wind <span id="wind-mark" class="moody-recommended">(recommended)</span></label><output id="wind-out"></output></div>
+    <div class="control"><div><label for="wind">Wind</label><output id="wind-out"></output></div>
       <input id="wind" type="range" min="0" max="100"></div>
-    <div class="control"><div><label for="lift">Lift <span id="lift-mark" class="moody-recommended">(recommended)</span></label><output id="lift-out"></output></div>
+    <div class="control"><div><label for="lift">Lift</label><output id="lift-out"></output></div>
       <input id="lift" type="range" min="0" max="100"></div>
   </div>
   <div class="bar">
     <button id="run" type="button">Pause</button>
-    <span id="note">I kept the wind under half: past it the lanterns stop drifting and start to read as sparks.</span>
+    <span id="note">Each lantern follows the wind field and rises on its own heat.</span>
   </div>
 </div>
 <script>
-  // The motion the agent recommends. The document opens on it, and says so before anything else.
-  const RECOMMENDED = { count: 160, wind: 45, lift: 35 };
-  moody.recommend(RECOMMENDED);
-  const state = Object.assign({}, moody.state);
+  const state = Object.assign({ count: 160, wind: 45, lift: 35 }, moody.state || {});
   const canvas = document.getElementById('sky');
   const pen = canvas.getContext('2d');
   const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -291,7 +276,6 @@ export const LANTERNS_DOCUMENT = `
     ['count', 'wind', 'lift'].forEach((name) => {
       document.getElementById(name).value = state[name];
       document.getElementById(name + '-out').textContent = state[name];
-      document.getElementById(name + '-mark').hidden = state[name] !== RECOMMENDED[name];
     });
   }
 
@@ -316,7 +300,7 @@ export const LANTERNS_DOCUMENT = `
   run.addEventListener('click', () => { running = !running; run.textContent = running ? 'Pause' : 'Play'; });
   window.addEventListener('moodylock', () => { ['count', 'wind', 'lift'].forEach((name) => { document.getElementById(name).disabled = true; }); });
   new ResizeObserver(() => { size(); draw(); }).observe(canvas);
-  size(); show();
+  size(); show(); moody.setState(state);
   // Where less motion was asked for, the sky is settled out of sight and shown still, with Play to start it.
   for (let warm = 0; warm < 240; warm += 1) step(1 / 30);
   for (let trail = 0; trail < 12; trail += 1) { step(1 / 30); draw(); }
@@ -392,10 +376,7 @@ export const ISOLATION_DOCUMENT = `
     document.getElementById('summary').textContent = leaks.length === 0
       ? 'All ' + results.length + ' ways out are closed.'
       : leaks.length + ' of ' + results.length + ' got out: ' + leaks.join(', ') + '.';
-    // A report has no answer to open on, so what it recommends is the report once it is whole.
-    const report = { done: true, held: results.length - leaks.length, leaks, results };
-    moody.recommend(report);
-    moody.setState(report);
+    moody.setState({ done: true, held: results.length - leaks.length, leaks, results });
   })();
 </script>
 `;
@@ -417,20 +398,15 @@ export const CONTACT_DOCUMENT = `
   .sheet button { position: relative; height: auto; padding: 0; overflow: hidden; aspect-ratio: 3 / 2; background: var(--moody-bg); }
   .sheet img { display: block; width: 100%; height: 100%; object-fit: cover; }
   .sheet button[aria-pressed="true"] { border-color: var(--moody-lime); box-shadow: 0 0 0 1px var(--moody-lime); }
-  .sheet span { position: absolute; bottom: 6px; padding: 1px 6px; border-radius: 4px; background: rgba(8, 8, 8, 0.78); }
-  .sheet .number { left: 6px; font: 11px var(--moody-mono); }
-  .sheet .moody-recommended { right: 6px; }
+  .sheet span { position: absolute; left: 6px; bottom: 6px; padding: 1px 6px; border-radius: 4px; background: rgba(8, 8, 8, 0.78); font: 11px var(--moody-mono); }
   p { margin: 10px 0 0; color: var(--moody-muted); font-size: 12px; }
   @media (max-width: 420px) { .sheet { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>
 <div class="sheet" id="sheet"></div>
-<p>I would print the market: it is the one frame with the lanterns and a crowd under them. Click a frame to choose it. Double-click it, or press Enter on it, to send it straight to print.</p>
+<p>Click a frame to choose it. Double-click it, or press Enter on it, to send it straight to print.</p>
 <script>
-  // The frame the agent recommends. The document opens on it, and says so before anything else.
-  const RECOMMENDED = { frame: 'market' };
-  moody.recommend(RECOMMENDED);
   const sheet = document.getElementById('sheet');
-  let chosen = moody.state.frame;
+  let chosen = moody.state ? moody.state.frame : null;
   const show = () => Array.from(sheet.children).forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.name === chosen)));
   Object.keys(moody.media).forEach((name, index) => {
     const button = document.createElement('button');
@@ -441,15 +417,8 @@ export const CONTACT_DOCUMENT = `
     picture.src = moody.media[name];
     picture.alt = 'Frame ' + (index + 1) + ': ' + name;
     const tag = document.createElement('span');
-    tag.className = 'number';
     tag.textContent = String(index + 1).padStart(2, '0');
     button.append(picture, tag);
-    if (name === RECOMMENDED.frame) {
-      const mark = document.createElement('span');
-      mark.className = 'moody-recommended';
-      mark.textContent = '(recommended)';
-      button.append(mark);
-    }
     button.addEventListener('click', () => { chosen = name; show(); moody.setState({ frame: name }); });
     button.addEventListener('dblclick', () => moody.submit({ frame: name }));
     button.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); moody.submit({ frame: name }); } });

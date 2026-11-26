@@ -837,13 +837,13 @@
     padding: 0.5rem 0.6rem;
   }
 
-  /* A label wraps rather than being cut, so the mark after it moves to a line of its own where the
-     option is narrow. */
   .ui-pick-label {
+    overflow: hidden;
     color: var(--color-fg);
     font-size: 0.8125rem;
     font-weight: 600;
-    overflow-wrap: anywhere;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .ui-pick-note {
@@ -1552,122 +1552,6 @@
     position: absolute;
     right: 0.4rem;
     bottom: 0.4rem;
-    background: rgb(8 8 8 / 0.78);
-  }
-
-  /* What the agent recommends. The mark is quiet words after the label of its choice, and the way
-     back is the same words as something to press. Both are the intelligence's lavender, held
-     back; lime stays the person's own action. */
-  .ui-recommended {
-    color: color-mix(in oklab, var(--color-lavender) 72%, transparent);
-    font-family: var(--font-sans);
-    font-size: 0.6875rem;
-    font-weight: 400;
-    letter-spacing: 0;
-    text-transform: none;
-    white-space: nowrap;
-  }
-
-  /* A label and what follows it about the recommendation share a line, and wrap as one. */
-  .ui-label-line {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.15rem 0.45rem;
-    min-width: 0;
-    min-height: 1.25rem;
-  }
-
-  .ui-toggle-line {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.2rem 0.6rem;
-    min-width: 0;
-  }
-
-  .ui-wayback {
-    display: inline-flex;
-    align-items: center;
-    justify-self: start;
-    gap: 0.3rem;
-    max-width: 100%;
-    /* As tall as the label's own line, so the line does not move when the mark becomes the way back. */
-    min-height: 1.25rem;
-    padding: 0 0.45rem;
-    border: 1px solid var(--ai-line);
-    border-radius: 0.35rem;
-    color: color-mix(in oklab, var(--color-lavender) 82%, transparent);
-    font-size: 0.6875rem;
-    font-weight: 400;
-    line-height: 1.2;
-    transition:
-      color 0.15s ease,
-      border-color 0.15s ease,
-      background-color 0.15s ease;
-  }
-
-  .ui-wayback > span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .ui-wayback:hover {
-    border-color: var(--color-lavender);
-    background: var(--ai-bg);
-    color: var(--color-lavender);
-  }
-
-  .ui-lockbar > .ui-wayback {
-    flex: none;
-    min-height: 1.75rem;
-  }
-
-  /* While the card stands as recommended, the line beside the button is the agent's too. */
-  .ui-lockbar[data-advice='kept'] .ui-hint {
-    color: color-mix(in oklab, var(--color-lavender) 72%, transparent);
-  }
-
-  /* A slider keeps a tick where the recommended value is: behind the track, so the thumb covers
-     it while the slider stands there and it shows once the thumb has left. */
-  .ui-range-wrap {
-    --ui-thumb: 0.9rem;
-
-    position: relative;
-    display: grid;
-    isolation: isolate;
-  }
-
-  @supports (-moz-appearance: none) {
-    .ui-range-wrap {
-      --ui-thumb: 0.65rem;
-    }
-  }
-
-  .ui-range-wrap[data-advised]::before {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: calc(var(--ui-thumb) / 2 + (100% - var(--ui-thumb)) * var(--ui-advised) / 100);
-    z-index: -1;
-    width: 2px;
-    height: 0.7rem;
-    margin-left: -1px;
-    background: color-mix(in oklab, var(--color-lavender) 72%, transparent);
-    transform: translateY(-50%);
-    pointer-events: none;
-  }
-
-  .ui-badge > .ui-recommended {
-    margin-left: 0.4rem;
-  }
-
-  .ui-model-back {
-    position: absolute;
-    right: 0.4rem;
-    bottom: 0.4rem;
-    max-width: calc(100% - 0.8rem);
     background: rgb(8 8 8 / 0.78);
   }
 }

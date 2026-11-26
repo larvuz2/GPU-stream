@@ -11,23 +11,18 @@
  * `pick` is a radio group, or checkboxes with `many`, whose labels are the pictures, so it is
  * chosen with the keyboard as any radio group is and the chosen one is told to assistive
  * technology by the control itself; the lime frame is what a sighted person sees of the same
- * state. The option the agent recommends carries the mark after its label whether or not it is
- * the one chosen (`Recommend.tsx`), so choosing it again is the way back; with `many`, where that
- * could take several clicks, a way back follows the options.
+ * state.
  *
  * `reorder` moves an item three ways that all end in the same change of the list. Dragging its
  * handle follows the pointer, the item changing places with the neighbor whose middle the pointer
  * crosses, so the list is always a valid order and letting go needs no drop target. The arrow
  * buttons move it one place. With the handle focused, the arrow keys do the same. Each move is
- * announced ("Lighthouse, 2 of 5"), since the item's new place is otherwise only seen. The order
- * the card wrote is the one the agent recommends: the list is marked while it stands in it, and
- * offers the way back once it does not.
+ * announced ("Lighthouse, 2 of 5"), since the item's new place is otherwise only seen.
  * @module
  */
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { ArrowDown, ArrowUp, Check, GripVertical } from 'lucide-react';
-import { isRecommended, useCard } from '../context';
-import { Advised, Recommended, WayBack } from '../Recommend';
+import { useCard } from '../context';
 import { flag, number, options, type Scalar, type UiOption } from '../tree';
 import { useInput, type ViewProps } from '../view';
 
@@ -90,15 +85,7 @@ export function Pick({ node }: ViewProps) {
                 </span>
               )}
               <span className="ui-pick-text">
-                <span className="ui-pick-label">
-                  {choice.label}
-                  {isRecommended(input.advice, choice.value) ? (
-                    <>
-                      {' '}
-                      <Recommended />
-                    </>
-                  ) : null}
-                </span>
+                <span className="ui-pick-label">{choice.label}</span>
                 {choice.note === null ? null : <span className="ui-pick-note">{choice.note}</span>}
               </span>
               <span className="ui-pick-mark" aria-hidden="true">
@@ -108,7 +95,6 @@ export function Pick({ node }: ViewProps) {
           );
         })}
       </div>
-      {many && input.advice !== null && !input.advice.kept && !input.frozen ? <WayBack input={input} /> : null}
     </fieldset>
   );
 }
@@ -199,12 +185,7 @@ export function Reorder({ node }: ViewProps) {
 
   return (
     <div className="ui-input" role="group" aria-label={input.label}>
-      {input.labeled || input.advice !== null ? (
-        <p className="ui-label-line">
-          {input.labeled ? <span className="ui-label">{input.label}</span> : null}
-          <Advised input={input} whole="order" />
-        </p>
-      ) : null}
+      {input.labeled ? <p className="ui-label">{input.label}</p> : null}
       <ol ref={list} className="ui-reorder">
         {ordered.map((choice, index) => {
           const media = card.media(choice.image);

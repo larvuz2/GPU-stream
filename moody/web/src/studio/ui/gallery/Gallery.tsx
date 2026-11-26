@@ -57,7 +57,6 @@ function Exchange({ example }: ExchangeProps) {
             ui={example.ui}
             locked={answer}
             live={example.idle !== true}
-            draft={example.changed}
             onSubmit={(value) => {
               setAnswer({ value });
             }}

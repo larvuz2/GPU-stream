@@ -14,8 +14,7 @@
  *
  * The view the person leaves the model at is kept here in every case, so the stage's readout
  * follows the hand; with an id it is also the card's value, which is how a card asks "from which
- * angle" and gets back two angles and a zoom the agent can frame a render by. The angles the card
- * gives are then the view the agent recommends, which the stage marks and returns to.
+ * angle" and gets back two angles and a zoom the agent can frame a render by.
  * @module
  */
 import { lazy, Suspense, useState } from 'react';
@@ -71,7 +70,6 @@ export function Model({ node }: ViewProps) {
         finish={isString(finish) && isFinishName(finish) ? finish : PLAIN}
         color={isString(color) ? color : null}
         spin={isBoolean(spin) ? spin : false}
-        advised={input.advice === null ? null : input.advice.kept}
         frozen={card.frozen}
         onView={(next) => {
           setSeen(next);

@@ -15,11 +15,6 @@
  * its budget, two cues to choose between, and three documents of the agent's own
  * (`documents.ts`): an equalizer, a simulation, and the frame's self-test.
  *
- * Every card that asks for an answer recommends one, as the agent has to: it opens on the answer
- * the agent would give, and where the reason matters a line of the card says it. The last cards
- * are the states a recommendation adds to a card: one the person has changed, with the ways back
- * in view, one locked in as recommended, and one locked in with the person's own values.
- *
  * The photographs are the site's own artwork (`public/media`), named here for the part they play.
  * The rest was made for the gallery, computed from nothing but code (`public/media/card-*`):
  *
@@ -50,8 +45,6 @@ export interface Example {
   ui: UiData;
   /** What it was locked in with, for a card shown locked. */
   locked?: unknown;
-  /** What the person has changed on it so far, by input id, for a card shown in the middle of a decision. */
-  changed?: Record<string, unknown>;
   /** Whether it is shown as one that cannot be answered now. */
   idle?: boolean;
 }
@@ -87,11 +80,6 @@ const LOOK_SPEC = {
     },
     { type: 'text', tone: 'muted', text: 'Left of the handle is the frame as generated. Right of it is the grade.' },
     {
-      type: 'text',
-      tone: 'muted',
-      text: 'I would keep it warm with some grain: the brief is lantern light, and grain hides the noise in the shadows.',
-    },
-    {
       type: 'row',
       children: [
         {
@@ -117,50 +105,12 @@ const LOOK_SPEC = {
   ],
 };
 
-/** The casting card, which the card locked as recommended shares. */
-const CAST_SPEC = {
-  type: 'stack',
-  children: [
-    {
-      type: 'pick',
-      id: 'lead',
-      label: 'Who carries the film?',
-      recommended: 'mara',
-      options: [
-        { value: 'mara', label: 'Mara', image: 'mara', note: 'Night courier. Guarded, quick.' },
-        { value: 'iris', label: 'Iris', image: 'iris', note: 'Street musician. Hopeful.' },
-        { value: 'theo', label: 'Theo', image: 'theo', note: 'Repairman. Has seen it all.' },
-      ],
-    },
-    {
-      type: 'text',
-      tone: 'muted',
-      text: 'Her guarded look carries the night scenes, and her silhouette reads at thumbnail size.',
-    },
-    {
-      type: 'field',
-      id: 'note',
-      label: 'Anything to change about them?',
-      placeholder: 'Older, a scar, a different coat…',
-      lines: 2,
-      value: '',
-    },
-  ],
-};
-
-/** Its portraits. */
-const CAST_MEDIA = [
-  file('mara', 'character-mara.webp'),
-  file('iris', 'character-iris.webp'),
-  file('theo', 'character-theo.webp'),
-];
-
 /** The gallery's cards, in the order of a production. */
 export const EXAMPLES: Example[] = [
   {
     id: 'look',
     asked: 'The night market shot feels too clean. Can we find a look for it?',
-    says: 'Here is the frame under the grade I would give it. Drag the handle to compare, lock it in if it feels right, or push the sliders around first: I will grade the whole scene to match.',
+    says: 'Here is the frame with a grade you can push around. Drag the handle to compare, move the sliders until it feels right, and lock it in: I will grade the whole scene to match.',
     ui: {
       ui_id: 'ui-look',
       title: 'The look of the night market',
@@ -174,21 +124,46 @@ export const EXAMPLES: Example[] = [
   {
     id: 'cast',
     asked: 'I like all three sketches. Who should carry the film?',
-    says: 'I would cast Mara, but it is yours to call. Pick the lead, and tell me anything you would change about them before I build their reference sheet.',
+    says: 'That one is yours to call. Pick the lead, and tell me anything you would change about them before I build their reference sheet.',
     ui: {
       ui_id: 'ui-cast',
       title: 'Cast the lead',
       kind: 'components',
-      spec: CAST_SPEC,
+      spec: {
+        type: 'stack',
+        children: [
+          {
+            type: 'pick',
+            id: 'lead',
+            label: 'Who carries the film?',
+            options: [
+              { value: 'mara', label: 'Mara', image: 'mara', note: 'Night courier. Guarded, quick.' },
+              { value: 'iris', label: 'Iris', image: 'iris', note: 'Street musician. Hopeful.' },
+              { value: 'theo', label: 'Theo', image: 'theo', note: 'Repairman. Has seen it all.' },
+            ],
+          },
+          {
+            type: 'field',
+            id: 'note',
+            label: 'Anything to change about them?',
+            placeholder: 'Older, a scar, a different coat…',
+            lines: 2,
+          },
+        ],
+      },
       submit: 'Cast this lead',
       waits: true,
-      media: CAST_MEDIA,
+      media: [
+        file('mara', 'character-mara.webp'),
+        file('iris', 'character-iris.webp'),
+        file('theo', 'character-theo.webp'),
+      ],
     },
   },
   {
     id: 'style',
     asked: 'What could this film look like?',
-    says: 'Three directions, each with its references and palette, opened on the one I would take. The tab you leave open is your answer.',
+    says: 'Three directions, each with its references and palette. Open the one you want; the tab you leave open is your answer.',
     ui: {
       ui_id: 'ui-style',
       title: 'An art style for the film',
@@ -199,7 +174,6 @@ export const EXAMPLES: Example[] = [
           {
             type: 'tabs',
             id: 'style',
-            recommended: 'neon-noir',
             children: [
               {
                 type: 'tab',
@@ -226,11 +200,6 @@ export const EXAMPLES: Example[] = [
                     ],
                   },
                   { type: 'text', tone: 'muted', text: 'High contrast, long lenses, light from signs and windows only.' },
-                  {
-                    type: 'text',
-                    tone: 'muted',
-                    text: 'This is the one I would take: your script lives at night and in the rain, and this style is built on both.',
-                  },
                 ],
               },
               {
@@ -297,14 +266,14 @@ export const EXAMPLES: Example[] = [
                 id: 'surface',
                 label: 'Surface',
                 options: ['Clean digital', '35mm grain', 'Visible brushwork', 'Halftone print'],
-                recommended: '35mm grain',
+                value: '35mm grain',
               },
               {
                 type: 'segmented',
                 id: 'push',
                 label: 'How far to push it',
                 options: ['Subtle', 'Balanced', 'Bold'],
-                recommended: 'Balanced',
+                value: 'Balanced',
               },
             ],
           },
@@ -325,7 +294,7 @@ export const EXAMPLES: Example[] = [
   {
     id: 'storyboard',
     asked: 'The opening drags. Can I try a different order?',
-    says: 'Here are the six frames of the opening in the order I would try: Mara first, then the city she is waiting in. Lock it in, or move anything first, and I will recut the animatic to it.',
+    says: 'Here are the six frames of the opening as they are cut now. Put them in the order you want to see, and I will recut the animatic to it.',
     ui: {
       ui_id: 'ui-storyboard',
       title: 'The opening, in order',
@@ -336,21 +305,17 @@ export const EXAMPLES: Example[] = [
           {
             type: 'reorder',
             id: 'order',
-            label: 'The opening’s frames',
+            label: 'Drag a frame by its handle, or use the arrows',
             options: [
-              { value: 'mara', label: 'Mara, waiting', image: 'f_mara', note: 'Close · 3s' },
               { value: 'towers', label: 'The city, far below', image: 'f_towers', note: 'Wide · 5s' },
               { value: 'market', label: 'The market wakes', image: 'f_market', note: 'Crane down · 6s' },
-              { value: 'letter', label: 'The letter', image: 'f_letter', note: 'Insert · 2s' },
+              { value: 'mara', label: 'Mara, waiting', image: 'f_mara', note: 'Close · 3s' },
               { value: 'workshop', label: 'Theo’s workshop', image: 'f_workshop', note: 'Medium · 4s' },
+              { value: 'letter', label: 'The letter', image: 'f_letter', note: 'Insert · 2s' },
               { value: 'vista', label: 'The road out', image: 'f_vista', note: 'Wide · 5s' },
             ],
           },
-          {
-            type: 'text',
-            tone: 'muted',
-            text: 'Opening on a face gives the wide shots someone to belong to. Drag a frame by its handle, or use the arrows: it is twenty-five seconds in all, whatever the order.',
-          },
+          { type: 'text', tone: 'muted', text: 'Twenty-five seconds in all, whatever the order.' },
         ],
       },
       submit: 'Lock the order',
@@ -368,7 +333,7 @@ export const EXAMPLES: Example[] = [
   {
     id: 'layers',
     asked: 'The poster feels busy. What can go?',
-    says: 'Here is the poster as its layers, set the way I would thin it: the moon gone and the fog pulled back. Pick a layer in the dropdown to change it, and lock in what you want kept: I will rebuild the poster in PhotoCraft from that.',
+    says: 'Here is the poster as its layers. Pick one in the dropdown, hide it or pull it back, and lock in what you want kept: I will rebuild the poster in PhotoCraft from that.',
     ui: {
       ui_id: 'ui-layers',
       title: 'The poster, layer by layer',
@@ -381,18 +346,14 @@ export const EXAMPLES: Example[] = [
             id: 'poster',
             layers: [
               { name: 'Sky', src: 'sky' },
-              { name: 'Moon', src: 'moon', visible: false },
+              { name: 'Moon', src: 'moon' },
               { name: 'Skyline', src: 'skyline' },
               { name: 'Lanterns', src: 'lanterns', blend: 'screen' },
-              { name: 'Fog', src: 'fog', opacity: 45 },
+              { name: 'Fog', src: 'fog', opacity: 80 },
               { name: 'Title', src: 'title' },
             ],
           },
-          {
-            type: 'text',
-            tone: 'muted',
-            text: 'Six layers, the sky at the bottom. The moon competes with the title for the top of the frame, and the lanterns already light the street, so I would lose the moon and halve the fog.',
-          },
+          { type: 'text', tone: 'muted', text: 'Six layers, the sky at the bottom. The lanterns are screened over the street.' },
         ],
       },
       submit: 'Keep these layers',
@@ -410,7 +371,7 @@ export const EXAMPLES: Example[] = [
   {
     id: 'model',
     asked: 'Can I see Pip before we rig him?',
-    says: 'Here he is, straight out of Blender, at the angle I would render him from. Turn him around, try a finish, and leave him at the angle you want for the hero render.',
+    says: 'Here he is, straight out of Blender. Turn him around, try a finish, and leave him at the angle you want for the hero render.',
     ui: {
       ui_id: 'ui-model',
       title: 'Pip, the lantern robot',
@@ -418,12 +379,11 @@ export const EXAMPLES: Example[] = [
       spec: {
         type: 'stack',
         children: [
-          { type: 'model', id: 'angle', src: 'pip', azimuth: 35, elevation: 12, finish: '$finish', color: '$paint' },
+          { type: 'model', id: 'angle', src: 'pip', finish: '$finish', color: '$paint', spin: true },
           {
             type: 'segmented',
             id: 'finish',
             label: 'Finish',
-            recommended: 'original',
             options: [
               { value: 'original', label: 'Painted' },
               { value: 'clay', label: 'Clay' },
@@ -440,11 +400,7 @@ export const EXAMPLES: Example[] = [
             suggest: ['#c6c0f5', '#d6fa72', '#e8a04a', '#f2f0e8', '#5f8f4e'],
             when: { finish: { not: 'original' } },
           },
-          {
-            type: 'text',
-            tone: 'muted',
-            text: 'Three-quarters from the front and a little above shows both eyes and the lantern on his chest. Drag to orbit, scroll to zoom: the angle you leave him at is the one I render.',
-          },
+          { type: 'text', tone: 'muted', text: 'Drag to orbit, scroll to zoom. The angle you leave him at is the one I render.' },
         ],
       },
       submit: 'Render from this angle',
@@ -455,7 +411,7 @@ export const EXAMPLES: Example[] = [
   {
     id: 'shots',
     asked: 'We are over budget on the opening. What do we cut?',
-    says: 'Every shot of the opening with what it costs to generate and finish, and where the money goes. I ticked the one I would cut. Tick the shots you can live without: they light up in the chart, so you see what each cut buys back.',
+    says: 'Every shot of the opening with what it costs to generate and finish, and where the money goes. Tick the shots you can live without: they light up in the chart, so you see what each cut buys back.',
     ui: {
       ui_id: 'ui-shots',
       title: 'The opening: shots and budget',
@@ -476,12 +432,7 @@ export const EXAMPLES: Example[] = [
               ['3A', 'The letter', '100mm macro', 2, 95],
               ['3B', 'The road out', '24mm', 5, 455],
             ],
-            recommended: ['3B'],
-          },
-          {
-            type: 'text',
-            tone: 'muted',
-            text: 'I would cut 3B: it is the second most expensive shot, and the tension has already peaked at 3A.',
+            value: ['3B'],
           },
           {
             type: 'row',
@@ -539,7 +490,7 @@ export const EXAMPLES: Example[] = [
   {
     id: 'cue',
     asked: 'What should the opening sound like?',
-    says: 'Two sketches of the opening cue, eight seconds each. I would open on the harbor. Play both and tell me which one the film opens on.',
+    says: 'Two sketches of the opening cue, eight seconds each. Play both and tell me which one the film opens on.',
     ui: {
       ui_id: 'ui-cue',
       title: 'A cue for the opening',
@@ -553,7 +504,6 @@ export const EXAMPLES: Example[] = [
             type: 'segmented',
             id: 'cue',
             label: 'Which one opens the film?',
-            recommended: 'a',
             options: [
               { value: 'a', label: 'A · Harbor' },
               { value: 'b', label: 'B · Market' },
@@ -566,13 +516,7 @@ export const EXAMPLES: Example[] = [
             label: 'What should it be instead?',
             placeholder: 'Slower, no percussion, a solo instrument…',
             required: true,
-            value: '',
             when: { cue: 'neither' },
-          },
-          {
-            type: 'text',
-            tone: 'muted',
-            text: 'The pad leaves room for the city’s own sound in the first shot; the pulse would arrive before the market does.',
           },
         ],
       },
@@ -584,7 +528,7 @@ export const EXAMPLES: Example[] = [
   {
     id: 'eq',
     asked: 'The market cue is muddy under the dialogue. Can you clear it up?',
-    says: 'I put the cue through three bands of equalization, set to the curve I would use, so you can hear the difference yourself. Press play, shape it if you hear it differently, and lock in the curve: I will apply it to the stem in SoundCraft.',
+    says: 'I put the cue through three bands of equalization so you can hear the difference yourself. Press play, shape it, and lock in the curve: I will apply it to the stem in SoundCraft.',
     ui: {
       ui_id: 'ui-eq',
       title: 'Shape the market cue',
@@ -599,7 +543,7 @@ export const EXAMPLES: Example[] = [
   {
     id: 'lanterns',
     asked: 'How should the lanterns move in the last shot?',
-    says: 'Easier to feel than to describe, so here is a small simulation, set to the motion I would give the shot: every lantern rides the same wind and rises on its own heat. Change it until it feels right and I will match the particle pass to it.',
+    says: 'Easier to feel than to describe, so here is a small simulation: every lantern rides the same wind and rises on its own heat. Set it the way the shot should feel and I will match the particle pass to it.',
     ui: {
       ui_id: 'ui-lanterns',
       title: 'Lanterns on the wind',
@@ -614,7 +558,7 @@ export const EXAMPLES: Example[] = [
   {
     id: 'contact',
     asked: 'One of the opening frames should be the poster. Which?',
-    says: 'Here is the contact sheet, with the frame I would print chosen. Click another if you see it differently, or double-click one to send it to print right away.',
+    says: 'Here is the contact sheet. Click the frame you want, or double-click it to send it to print right away.',
     ui: {
       ui_id: 'ui-contact',
       title: 'A frame for the poster',
@@ -664,39 +608,9 @@ export const EXAMPLES: Example[] = [
     },
   },
   {
-    id: 'changed',
-    asked: 'Warmer than that, and more grain. Am I far from what you had?',
-    says: 'Not far. The card shows where you left each slider and where I had it: the tick on a track and the button after its label are my value, and one press takes you back.',
-    ui: {
-      ui_id: 'ui-look-changed',
-      title: 'The look of the night market',
-      kind: 'components',
-      spec: LOOK_SPEC,
-      submit: 'Lock in this look',
-      waits: true,
-      media: [file('shot', 'discipline-media.webp')],
-    },
-    changed: { warmth: 46, grain: 44 },
-  },
-  {
-    id: 'kept',
-    asked: 'Who did we cast in the end?',
-    says: 'Mara. You locked the card in as I had it, so she is the lead on every sheet since.',
-    ui: {
-      ui_id: 'ui-cast-kept',
-      title: 'Cast the lead',
-      kind: 'components',
-      spec: CAST_SPEC,
-      submit: 'Cast this lead',
-      waits: true,
-      media: CAST_MEDIA,
-    },
-    locked: { lead: 'mara', note: '' },
-  },
-  {
     id: 'locked',
     asked: 'Show me the look we settled on for the market.',
-    says: 'This is the grade you locked in on Tuesday, pushed further than mine. It is what every shot of the scene is matched to.',
+    says: 'This is the grade you locked in on Tuesday. It is what every shot of the scene is matched to.',
     ui: {
       ui_id: 'ui-look-locked',
       title: 'The look of the night market',

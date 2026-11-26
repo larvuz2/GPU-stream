@@ -14,17 +14,15 @@
  * Tabs follow the tabs pattern of the ARIA practices: one tab is in the tab order, the arrow
  * keys, Home, and End move between tabs and open the one they land on, and each panel is named
  * by its tab. A `tabs` with an id is also an answer, the open tab's value, which is how a card
- * asks "which of these directions" with a whole board per direction. Such tabs open on the tab
- * the agent recommends, which carries the mark after its label (`Recommend.tsx`), so opening it
- * again is the way back. Every panel stays mounted, hidden while its tab is not open, so what the
- * person set in one tab is still there when they come back to it.
+ * asks "which of these directions" with a whole board per direction. Every panel stays mounted,
+ * hidden while its tab is not open, so what the person set in one tab is still there when they
+ * come back to it.
  * @module
  */
 import { useState, type KeyboardEvent } from 'react';
 import { cx } from '../../../lib/cx';
-import { isRecommended, useCard } from '../context';
-import { Recommended } from '../Recommend';
-import { idOf, isScalar, number, text } from '../tree';
+import { useCard } from '../context';
+import { idOf, number, text } from '../tree';
 import { tabValues } from '../values';
 import type { ViewProps } from '../view';
 
@@ -83,13 +81,9 @@ export function Tabs({ node, render }: ViewProps) {
   const values = tabValues(node);
   const [browsed, setBrowsed] = useState<number | null>(null);
   const answer = id === null ? -1 : values.findIndex((value) => value === card.state[id]);
-  const advice = id === null ? null : card.advice(id);
-  // Tabs that answer nothing still open on the one the card names.
-  const named: unknown = node.props.recommended;
-  const first = isScalar(named) ? Math.max(values.indexOf(named), 0) : 0;
   // On an open card with an id the answer is the open tab. Anywhere else it is the tab last
   // opened, starting from the answer: a locked card keeps its answer while its tabs are looked at.
-  const open = id !== null && !card.frozen && answer !== -1 ? answer : (browsed ?? (answer === -1 ? first : answer));
+  const open = id !== null && !card.frozen && answer !== -1 ? answer : (browsed ?? Math.max(answer, 0));
   const base = `${card.uid}-${node.path}`;
 
   /**
@@ -146,12 +140,6 @@ export function Tabs({ node, render }: ViewProps) {
             onKeyDown={onKeyDown}
           >
             {text(tab, 'label')}
-            {isRecommended(advice, values[index]) ? (
-              <>
-                {' '}
-                <Recommended />
-              </>
-            ) : null}
           </button>
         ))}
       </div>

@@ -11,9 +11,7 @@
  * The person orbits and zooms by dragging and the wheel, or with the keyboard on the focused
  * stage: the arrow keys orbit, plus and minus zoom, and Home returns to the card's view, as the
  * reset button does. The view is shown as a readout in the corner, and each time a gesture ends
- * it is handed to the card. Where the view is an answer, the card's view is the one the agent
- * recommends: the readout is marked while the model stands in it, and the reset button is the way
- * back to it by name.
+ * it is handed to the card.
  *
  * With reduced motion asked for, the model does not turn by itself and the controls stop where
  * they are let go. A browser that cannot start WebGL, or a file that is not a model, leaves a
@@ -27,7 +25,6 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { RotateCcw } from 'lucide-react';
 import type { FinishName } from '../catalog';
 import { useReducedMotion } from '../hooks';
-import { Recommended } from '../Recommend';
 import type { ModelView } from '../values';
 import { ModelScene } from './model-scene';
 
@@ -53,11 +50,6 @@ export interface ModelStageProps {
   color: string | null;
   /** Whether the model turns by itself until the person takes over. */
   spin: boolean;
-  /**
-   * Whether the view is the one the agent recommends, where the view is an answer on a card
-   * that asks for one; `null` where there is no recommendation to mark.
-   */
-  advised: boolean | null;
   /** Whether the view is fixed: a locked card shows the view that was locked in. */
   frozen: boolean;
   /** Takes the view each time the person has changed it. */
@@ -70,18 +62,7 @@ export interface ModelStageProps {
  * @param props The component's props.
  * @returns The stage, or a line where the browser cannot draw 3D or the model cannot be read.
  */
-export default function ModelStage({
-  url,
-  name,
-  view,
-  home,
-  finish,
-  color,
-  spin,
-  advised,
-  frozen,
-  onView,
-}: ModelStageProps) {
+export default function ModelStage({ url, name, view, home, finish, color, spin, frozen, onView }: ModelStageProps) {
   const frame = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const scene = useRef<ModelScene | null>(null);
@@ -202,14 +183,8 @@ export default function ModelStage({
         className="ui-model-canvas"
         role="img"
         tabIndex={0}
-        aria-label={`${name}, a 3D model seen from ${view.azimuth} degrees around and ${view.elevation} degrees up${
-          advised === true ? ' (recommended)' : ''
-        }.${
-          frozen
-            ? ''
-            : ` Drag to orbit and scroll to zoom, or use the arrow keys, plus, and minus; Home ${
-                advised === null ? 'resets the view' : 'returns to the recommended view'
-              }.`
+        aria-label={`${name}, a 3D model seen from ${view.azimuth} degrees around and ${view.elevation} degrees up.${
+          frozen ? '' : ' Drag to orbit and scroll to zoom, or use the arrow keys, plus, and minus; Home resets the view.'
         }`}
         onKeyDown={onKeyDown}
       />
@@ -221,29 +196,9 @@ export default function ModelStage({
       ) : (
         <span className="ui-badge bottom-1.5 left-1.5" aria-hidden="true">
           {view.azimuth}° · {view.elevation}° · {view.zoom}×
-          {advised === true ? (
-            <>
-              {' '}
-              <Recommended />
-            </>
-          ) : null}
         </span>
       )}
-      {frozen || state !== 'ready' ? null : advised === false ? (
-        <button
-          type="button"
-          className="ui-wayback ui-model-back"
-          aria-label={`${name}: back to ${home.azimuth}° · ${home.elevation}° (recommended)`}
-          onClick={() => {
-            go(home);
-          }}
-        >
-          <RotateCcw className="size-3 flex-none" aria-hidden="true" />
-          <span>
-            {home.azimuth}° · {home.elevation}° (recommended)
-          </span>
-        </button>
-      ) : (
+      {frozen || state !== 'ready' ? null : (
         <button
           type="button"
           className="ui-icon-button ui-model-reset"

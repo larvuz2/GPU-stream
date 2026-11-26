@@ -15,9 +15,8 @@
  * crosses.
  *
  * The frame has no network and an origin of its own (`sandbox.ts`), so the bridge is the card's
- * only way out, and it is narrow. Out go the value the document opened on, which is the agent's
- * recommendation (`recommend`), the card's value (`setState`, which the page keeps for the
- * lock-in button, and `submit`, which locks in at once), a request for one of the card's own
+ * only way out, and it is narrow. Out go the card's value (`setState`, which the page keeps for
+ * the lock-in button, and `submit`, which locks in at once), a request for one of the card's own
  * files as bytes (`load`), the document's height, and a last word when the document is unloaded
  * (`gone`), which only happens when it tried to navigate away: the page then says so in the
  * card's place, rather than leaving the browser's refusal there. In come the bytes asked for and
@@ -27,14 +26,6 @@
  * A value is passed through JSON on its way out, so what reaches the agent is plain data
  * whatever the document held (a function, a DOM node, or a cycle is an error where the card
  * calls, not a surprise later).
- *
- * A document opens on the answer the agent recommends and says so with `recommend(value)` before
- * anything else. The page cannot see into the frame, so this one call is what lets it tell the
- * person the card stands as recommended, notice when a later value differs, and offer the way
- * back, which starts the document again. The call also makes the recommendation the card's
- * value while it has none, so a card locked in untouched sends it, and `moody.state` is what the
- * document draws from either way: the recommendation the first time, the value locked in when
- * the card is shown again.
  *
  * The bridge also keeps the lit part of every range input's track in step with its value
  * (`--moody-fill`), which is what makes a plain `<input type="range">` in a card look like a
@@ -56,17 +47,12 @@ export interface BridgeInit {
 
 /** What the card's document finds as `window.moody`. */
 export interface MoodyBridge {
-  /** The card's value: the recommendation once `recommend` was called, else what was last set or locked in. */
+  /** The card's value: `null` at first, else what was last set or locked in. */
   state: unknown;
   /** Whether the card is locked in: show the value and change nothing. */
   readonly locked: boolean;
   /** The card's files by name, each an address for an `img`, `audio`, or `video` element. */
   readonly media: Readonly<Record<string, string>>;
-  /**
-   * Says which value the document opened on: the answer the agent recommends. It becomes the
-   * card's value while the card has none.
-   */
-  recommend: (value: unknown) => void;
   /** Reports the card's value, which the lock-in button sends. */
   setState: (value: unknown) => void;
   /** Locks the card in with a value at once. */
@@ -98,13 +84,6 @@ export function bridge(init: BridgeInit): void {
       return locked;
     },
     media: Object.freeze({ ...init.media }),
-    recommend(value) {
-      const sent = plain(value);
-      if (api.state === null) {
-        api.state = sent;
-      }
-      post({ type: 'recommend', value: sent });
-    },
     setState(value) {
       const sent = plain(value);
       api.state = sent;

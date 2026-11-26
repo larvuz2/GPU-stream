@@ -13,7 +13,7 @@
  * @module
  */
 import type { ReactNode } from 'react';
-import { useCard, type Advice } from './context';
+import { useCard } from './context';
 import { idOf, text, type UiNode } from './tree';
 
 /** Props of a component's renderer. */
@@ -33,13 +33,6 @@ export interface InputBinding {
   value: unknown;
   /** Replaces its value. */
   set: (value: unknown) => void;
-  /**
-   * What the agent recommends for it, or `null` where there is nothing to mark: the card sends no
-   * answer back, or the component has no id and so answers nothing.
-   */
-  advice: Advice | null;
-  /** Returns it to what the agent recommends. */
-  reset: () => void;
   /** Whether the card is locked in, so the control shows its value and takes no change. */
   frozen: boolean;
   /** The `id` of its control in the document, unique to this card. */
@@ -65,12 +58,6 @@ export function useInput(node: UiNode): InputBinding {
     set: (value) => {
       if (id !== null) {
         card.set(id, value);
-      }
-    },
-    advice: id === null ? null : card.advice(id),
-    reset: () => {
-      if (id !== null) {
-        card.reset(id);
       }
     },
     frozen: card.frozen,

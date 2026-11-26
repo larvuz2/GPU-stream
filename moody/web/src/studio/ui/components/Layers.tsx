@@ -14,15 +14,11 @@
  * With an id, the composite is an input. A dropdown picks a layer, and a switch and a slider set
  * that layer's visibility and opacity; the picture answers as they move. Its answer is every
  * layer's setting by name and the layer last in the inspector, which is how a card asks "which
- * of these stays, and how strong". Each layer's own visibility and opacity in the card are what
- * the agent recommends for it, so the switch and the slider of the layer in the inspector are
- * each marked while they hold it and offer the way back once they do not (`Recommend.tsx`);
- * which layer is in the inspector is where the person looks, and no part of the recommendation.
+ * of these stays, and how strong".
  * @module
  */
 import { useState } from 'react';
 import { useCard } from '../context';
-import { Recommended, WayBack } from '../Recommend';
 import { isLayersValue, layerSpecs, type LayerSetting } from '../values';
 import { useInput, type ViewProps } from '../view';
 import { Missing } from './Adjusted';
@@ -65,11 +61,6 @@ export function Layers({ node }: ViewProps) {
     return <Missing name="The composite" />;
   }
   const current = selected === undefined ? null : settingOf(selected.name);
-  // What the agent recommends for the layer in the inspector, which each of its two controls is held against.
-  const advised =
-    input.advice !== null && isLayersValue(input.advice.value) && selected !== undefined
-      ? (input.advice.value.layers[selected.name] ?? null)
-      : null;
   return (
     <div className="ui-stack">
       <div
@@ -134,81 +125,42 @@ export function Layers({ node }: ViewProps) {
               ))}
             </select>
           </div>
-          <div className="ui-toggle-line">
-            <label className="ui-toggle">
-              <input
-                type="checkbox"
-                role="switch"
-                className="sr-only"
-                checked={current.visible}
-                disabled={input.frozen}
-                onChange={(event) => {
-                  change(selected.name, { visible: event.target.checked });
-                }}
-              />
-              <span className="ui-switch" aria-hidden="true" />
-              <span className="ui-label">Visible</span>
-            </label>
-            {advised === null ? null : advised.visible === current.visible || input.frozen ? (
-              <Recommended words={advised.visible ? 'on' : 'off'} />
-            ) : (
-              <WayBack
-                input={{ ...input, label: `${selected.name}, visible` }}
-                words={advised.visible ? 'on' : 'off'}
-                onBack={() => {
-                  change(selected.name, { visible: advised.visible });
-                }}
-              />
-            )}
-          </div>
+          <label className="ui-toggle">
+            <input
+              type="checkbox"
+              role="switch"
+              className="sr-only"
+              checked={current.visible}
+              disabled={input.frozen}
+              onChange={(event) => {
+                change(selected.name, { visible: event.target.checked });
+              }}
+            />
+            <span className="ui-switch" aria-hidden="true" />
+            <span className="ui-label">Visible</span>
+          </label>
           <div className="ui-input">
             <div className="ui-input-head">
-              <span className="ui-label-line">
-                <label htmlFor={`${input.domId}-opacity`} className="ui-label">
-                  Opacity
-                </label>
-                {advised === null ? null : advised.opacity === current.opacity ? (
-                  <Recommended />
-                ) : input.frozen ? (
-                  <Recommended words={`${Math.round(advised.opacity)}%`} />
-                ) : (
-                  <WayBack
-                    input={{ ...input, label: `${selected.name}, opacity` }}
-                    words={`${Math.round(advised.opacity)}%`}
-                    onBack={() => {
-                      change(selected.name, { opacity: advised.opacity });
-                    }}
-                  />
-                )}
-              </span>
+              <label htmlFor={`${input.domId}-opacity`} className="ui-label">
+                Opacity
+              </label>
               <output htmlFor={`${input.domId}-opacity`} className="ui-readout">
                 {Math.round(current.opacity)}%
               </output>
             </div>
-            <div
-              className="ui-range-wrap"
-              data-advised={advised === null ? undefined : 'true'}
-              style={advised === null ? undefined : { '--ui-advised': `${advised.opacity}` }}
-            >
-              <input
-                id={`${input.domId}-opacity`}
-                type="range"
-                className="ui-range"
-                min={0}
-                max={100}
-                value={current.opacity}
-                disabled={input.frozen || !current.visible}
-                aria-valuetext={
-                  advised?.opacity === current.opacity
-                    ? `${Math.round(current.opacity)}% (recommended)`
-                    : `${Math.round(current.opacity)}%`
-                }
-                style={{ '--ui-from': '0%', '--ui-to': `${current.opacity}%` }}
-                onChange={(event) => {
-                  change(selected.name, { opacity: event.target.valueAsNumber });
-                }}
-              />
-            </div>
+            <input
+              id={`${input.domId}-opacity`}
+              type="range"
+              className="ui-range"
+              min={0}
+              max={100}
+              value={current.opacity}
+              disabled={input.frozen || !current.visible}
+              style={{ '--ui-from': '0%', '--ui-to': `${current.opacity}%` }}
+              onChange={(event) => {
+                change(selected.name, { opacity: event.target.valueAsNumber });
+              }}
+            />
           </div>
         </div>
       )}

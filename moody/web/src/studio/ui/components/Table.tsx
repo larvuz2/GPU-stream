@@ -11,9 +11,7 @@
  * out as rows: each row leads with its control, named by the row's first cell, so it is chosen by
  * keyboard as any radio or checkbox is, and a click anywhere on the row chooses it too. The
  * answer is the first cell of each picked row, in the table's order, which is what the agent
- * named the row by. A row the agent recommends carries the mark after its first cell
- * (`Recommend.tsx`), and a table of several picks offers the way back under it once the picks
- * differ.
+ * named the row by.
  *
  * Numbers align right in tabular figures so a column of them compares by eye. A table wider
  * than its card scrolls inside its own frame, which takes the focus so the keyboard can scroll
@@ -21,8 +19,6 @@
  * @module
  */
 import { isNumber, isString } from '../../../lib/narrow';
-import { isRecommended } from '../context';
-import { Recommended, WayBack } from '../Recommend';
 import { isScalar, show, text, type Scalar } from '../tree';
 import { rowKeys } from '../values';
 import { useInput, type ViewProps } from '../view';
@@ -60,7 +56,7 @@ export function Table({ node }: ViewProps) {
     input.set(keys.filter((one) => (one === key ? on : chosen.includes(one))));
   }
 
-  const table = (
+  return (
     <div className="ui-table-frame" role="region" aria-label={input.label} tabIndex={0}>
       <table className="ui-table" data-picks={picks}>
         <thead>
@@ -100,7 +96,7 @@ export function Table({ node }: ViewProps) {
                       type={many ? 'checkbox' : 'radio'}
                       className="sr-only"
                       name={input.domId}
-                      aria-label={isRecommended(input.advice, key) ? `${show(key)} (recommended)` : show(key)}
+                      aria-label={show(key)}
                       checked={picked}
                       disabled={input.frozen}
                       onClick={(event) => {
@@ -119,12 +115,6 @@ export function Table({ node }: ViewProps) {
                 {row.map((cell, column) => (
                   <td key={columns[column] ?? column} data-number={numeric[column] === true ? 'true' : undefined}>
                     {show(cell)}
-                    {column === 0 && isRecommended(input.advice, key) ? (
-                      <>
-                        {' '}
-                        <Recommended />
-                      </>
-                    ) : null}
                   </td>
                 ))}
               </tr>
@@ -132,15 +122,6 @@ export function Table({ node }: ViewProps) {
           })}
         </tbody>
       </table>
-    </div>
-  );
-  if (!many || input.advice === null || input.advice.kept || input.frozen) {
-    return table;
-  }
-  return (
-    <div className="ui-input">
-      {table}
-      <WayBack input={input} />
     </div>
   );
 }

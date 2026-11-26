@@ -5,8 +5,7 @@
  */
 
 /**
- * The values a card's inputs hold: what each starts as, how each reads in words, and when two
- * of them are the same answer.
+ * The values a card's inputs hold: what each starts as, and how each reads in words.
  *
  * A card's answer is `{id: value}`, and the shape of a value is its component's: a number for a
  * slider, an option's value for a select, a list for checkboxes, an order for a reorderable
@@ -14,13 +13,6 @@
  * is the one place that knows those shapes. The functions are taken by component in
  * `registry.ts`, beside the renderers, so a component's start, its words, and its drawing are
  * registered together.
- *
- * What an input starts as is the agent's recommendation ("The agent recommends" in
- * `moody/STUDIO.md`): the option named in `recommended` for an input that chooses, and the value
- * it is given for one that sets a value. The catalog names those properties per component
- * (`start` in `moody/ui.json`) and the control plane refuses a card that asks for an answer
- * without them, so on such a card a start is never a guess of this module's; the fallbacks here
- * (the first option, zero) serve the card that only shows something.
  * @module
  */
 import { isBoolean, isNumber, isRecord, isString } from '../../lib/narrow';
@@ -153,26 +145,15 @@ function startNumber(node: UiNode): number {
 }
 
 /**
- * The one choice a component recommends.
- *
- * @param node The component.
- * @param allowed The values that may be chosen.
- * @returns Its `recommended` where that is one of them, else `null`.
- */
-function recommendedOne(node: UiNode, allowed: Scalar[]): Scalar | null {
-  const given = node.props.recommended;
-  return isScalar(given) && allowed.includes(given) ? given : null;
-}
-
-/**
  * What an input of one choice starts at.
  *
  * @param node The component.
- * @returns The option it recommends, else its first option, else nothing.
+ * @returns Its value where that is one of its options, else its first option, else nothing.
  */
 function startChoice(node: UiNode): Scalar | null {
   const values = options(node).map((option) => option.value);
-  return recommendedOne(node, values) ?? values[0] ?? null;
+  const given = node.props.value;
+  return isScalar(given) && values.includes(given) ? given : (values[0] ?? null);
 }
 
 /**
@@ -180,10 +161,10 @@ function startChoice(node: UiNode): Scalar | null {
  *
  * @param node The component.
  * @param allowed The values that may be chosen.
- * @returns The ones it recommends, in the order they can be chosen in.
+ * @returns The ones of its value that are allowed.
  */
 function startChoices(node: UiNode, allowed: Scalar[]): Scalar[] {
-  const given = node.props.recommended;
+  const given = node.props.value;
   return Array.isArray(given) ? allowed.filter((value) => given.includes(value)) : [];
 }
 
@@ -237,16 +218,21 @@ export const STARTS = {
   },
   pick: (node: UiNode): Scalar | Scalar[] | null => {
     const values = options(node).map((option) => option.value);
-    return flag(node, 'many') ? startChoices(node, values) : recommendedOne(node, values);
+    const given = node.props.value;
+    if (flag(node, 'many')) {
+      return startChoices(node, values);
+    }
+    return isScalar(given) && values.includes(given) ? given : null;
   },
   reorder: (node: UiNode): Scalar[] => options(node).map((option) => option.value),
-  tabs: (node: UiNode): Scalar | null => {
-    const values = tabValues(node);
-    return recommendedOne(node, values) ?? values[0] ?? null;
-  },
+  tabs: (node: UiNode): Scalar | null => tabValues(node)[0] ?? null,
   table: (node: UiNode): Scalar | Scalar[] | null => {
     const keys = rowKeys(node);
-    return text(node, 'pick') === 'many' ? startChoices(node, keys) : recommendedOne(node, keys);
+    const given = node.props.value;
+    if (text(node, 'pick') === 'many') {
+      return startChoices(node, keys);
+    }
+    return isScalar(given) && keys.includes(given) ? given : null;
   },
   model: (node: UiNode): ModelView => ({
     azimuth: number(node, 'azimuth') ?? 0,
@@ -318,53 +304,6 @@ export const WORDS = {
           .map(([name, layer]) => `${name} ${layer.visible ? `${Math.round(layer.opacity)}%` : 'hidden'}`)
           .join(', ')
       : show(value),
-};
-
-/**
- * Whether two values are the same plain data: equal scalars, lists equal in order, records equal
- * by their keys.
- *
- * @param one A value.
- * @param other Another.
- * @returns Whether they are the same answer.
- */
-export function sameValue(one: unknown, other: unknown): boolean {
-  if (Array.isArray(one) || Array.isArray(other)) {
-    return (
-      Array.isArray(one) &&
-      Array.isArray(other) &&
-      one.length === other.length &&
-      one.every((item, index) => sameValue(item, other[index]))
-    );
-  }
-  if (isRecord(one) && isRecord(other)) {
-    const keys = Object.keys(one);
-    return keys.length === Object.keys(other).length && keys.every((key) => sameValue(one[key], other[key]));
-  }
-  return one === other;
-}
-
-/** How far two views of a model may differ and still be one view: what the stage rounds to. */
-const VIEW_SLACK = { degrees: 0.5, zoom: 0.011 };
-
-/**
- * When two values of a component are the same answer, where that is not plain equality.
- *
- * A composite's answer also carries the layer open in its inspector, which is where the person
- * is looking and no part of the mix; a view of a model is rounded by the stage that reports it;
- * a color reads the same in either case.
- */
-export const SAME = {
-  layers: (one: unknown, other: unknown): boolean =>
-    isLayersValue(one) && isLayersValue(other) ? sameValue(one.layers, other.layers) : sameValue(one, other),
-  model: (one: unknown, other: unknown): boolean =>
-    isModelView(one) && isModelView(other)
-      ? Math.abs(one.azimuth - other.azimuth) <= VIEW_SLACK.degrees &&
-        Math.abs(one.elevation - other.elevation) <= VIEW_SLACK.degrees &&
-        Math.abs(one.zoom - other.zoom) <= VIEW_SLACK.zoom
-      : sameValue(one, other),
-  color: (one: unknown, other: unknown): boolean =>
-    isString(one) && isString(other) ? one.toLowerCase() === other.toLowerCase() : sameValue(one, other),
 };
 
 /**
