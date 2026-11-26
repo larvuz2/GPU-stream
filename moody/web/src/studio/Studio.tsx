@@ -194,9 +194,7 @@ export function Studio({
         projects={projects}
         selectedId={selected?.id ?? null}
         onSelect={select}
-        onNewProject={() => {
-          openNewProject();
-        }}
+        onNewProject={openNewProject}
         collapsed={(sideCollapsed || focus) && !narrow}
         onCollapse={(collapsed) => {
           setSideCollapsed(collapsed);

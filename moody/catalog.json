@@ -82,7 +82,8 @@
       "formats": [
         "Illustration",
         "Concept art",
-        "Painting"
+        "Painting",
+        "3D object"
       ],
       "blurb": "Illustration, concept art, and generative pieces.",
       "engines": [
@@ -229,6 +230,50 @@
         "craft-anything",
         "comfyui"
       ]
+    }
+  ],
+  "shortcuts": [
+    {
+      "id": "video",
+      "label": "Video",
+      "status": "available",
+      "discipline": "media"
+    },
+    {
+      "id": "image",
+      "label": "Image",
+      "status": "available",
+      "discipline": "art"
+    },
+    {
+      "id": "audio",
+      "label": "Audio",
+      "status": "available",
+      "discipline": "music"
+    },
+    {
+      "id": "architecture",
+      "label": "Architecture",
+      "status": "available",
+      "discipline": "architecture"
+    },
+    {
+      "id": "games",
+      "label": "Games",
+      "status": "available",
+      "discipline": "games"
+    },
+    {
+      "id": "object",
+      "label": "3D Object",
+      "status": "available",
+      "discipline": "art",
+      "format": "3D object"
+    },
+    {
+      "id": "immersive",
+      "label": "Immersive",
+      "status": "soon"
     }
   ],
   "categories": [

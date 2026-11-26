@@ -325,6 +325,62 @@
     color: var(--color-faint);
   }
 
+  /*
+   * The row of a sidebar list's heading. It is as tall as the search field that opens in the
+   * Recent heading's place, so opening and closing the search moves nothing under it.
+   */
+  .section-head {
+    display: flex;
+    align-items: center;
+    height: 1.75rem;
+    margin-bottom: 0.125rem;
+    padding-inline: 0.5rem;
+  }
+
+  /* A shortcut of the Create list: a project row's look, closer set, with nothing at its end. */
+  .create-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 2rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 0.7rem;
+    color: var(--color-muted);
+    font-size: 0.875rem;
+    text-align: left;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .create-row svg {
+    color: var(--color-faint);
+    transition: color 0.15s ease;
+  }
+
+  button.create-row:not(:disabled):hover,
+  button.create-row:focus-visible {
+    background: rgb(255 255 255 / 0.045);
+    color: var(--color-fg);
+  }
+
+  button.create-row:not(:disabled):hover svg,
+  button.create-row:focus-visible svg {
+    color: var(--color-fg);
+  }
+
+  button.create-row:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* One the catalog does not offer yet is plainly not a control: dimmed, and unmoved by the pointer. */
+  .create-row[data-soon] {
+    opacity: 0.45;
+    cursor: default;
+  }
+
   /* A popover menu, anchored by its container. */
   .menu {
     position: absolute;
@@ -429,6 +485,11 @@
   select.field-sm {
     padding-right: 2rem;
     background-position: right 0.6rem center;
+  }
+
+  /* A search field has its own way to close, so the browser's clear button would be a second one. */
+  .field[type='search']::-webkit-search-cancel-button {
+    appearance: none;
   }
 
   /* A row of a list in the Environment panel: a repository, a connector, a subagent, a permission. */

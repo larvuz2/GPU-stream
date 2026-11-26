@@ -5,7 +5,8 @@
  */
 
 /**
- * The icon each discipline is drawn with on both pages: pixel art in the wordmark's grid language.
+ * The icon each discipline is drawn with on both pages, and each shortcut of the studio's Create
+ * list: pixel art in the wordmark's grid language.
  *
  * Every icon is twelve rows of twelve cells, written as rows of `1` and `0` the way the motion
  * library writes its shapes (`lib/moody.ts`), and drawn as squares in the current text color. On
@@ -13,8 +14,13 @@
  * beside small text and `size-6` and up where it leads. The icons are chosen here by discipline
  * identifier, since the catalog says what a discipline is and not how it looks; one the catalog
  * adds later is drawn as a plain block until it is given its own.
+ *
+ * A shortcut is drawn with its discipline's icon (Video is Media's camera, Image is Art's picture)
+ * unless its name is something its discipline's icon does not show, in which case it has one of
+ * its own here, by shortcut identifier: a 3D object is an Art project and is not a picture.
  * @module
  */
+import type { Shortcut } from '../lib/catalog';
 import { cx } from '../lib/cx';
 
 /** The side of every icon's grid, in cells. */
@@ -192,6 +198,38 @@ const ICONS: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
+/** The icon of each shortcut that is not drawn with its discipline's, by catalog identifier. */
+const SHORTCUT_ICONS: Readonly<Record<string, readonly string[]>> = {
+  object: [
+    '000001100000',
+    '000110011000',
+    '011000000110',
+    '110000000011',
+    '101100001111',
+    '100011111111',
+    '100001111111',
+    '100001111111',
+    '100001111111',
+    '011001111110',
+    '000111111000',
+    '000001100000',
+  ],
+  immersive: [
+    '111111111111',
+    '110000000011',
+    '101000000101',
+    '100111111001',
+    '100100001001',
+    '100100001001',
+    '100100001001',
+    '100100001001',
+    '100111111001',
+    '101000000101',
+    '110000000011',
+    '111111111111',
+  ],
+};
+
 /** The icon of a discipline that has none of its own yet. */
 const FALLBACK: readonly string[] = [
   '000000000000',
@@ -208,6 +246,17 @@ const FALLBACK: readonly string[] = [
   '000000000000',
 ];
 
+/**
+ * Looks an icon up in one of the tables.
+ *
+ * @param icons The table.
+ * @param id The identifier, or `undefined` for none.
+ * @returns The icon's rows, or `undefined` where the table has none under that identifier.
+ */
+function find(icons: Readonly<Record<string, readonly string[]>>, id: string | undefined): readonly string[] | undefined {
+  return id !== undefined && Object.hasOwn(icons, id) ? icons[id] : undefined;
+}
+
 /** Props of {@link DisciplineIcon}. */
 interface DisciplineIconProps {
   /** The discipline's catalog identifier. */
@@ -223,7 +272,43 @@ interface DisciplineIconProps {
  * @returns The icon.
  */
 export function DisciplineIcon({ id, className }: DisciplineIconProps) {
-  const art = Object.hasOwn(ICONS, id) ? (ICONS[id] ?? FALLBACK) : FALLBACK;
+  return <Pixels art={find(ICONS, id) ?? FALLBACK} className={className} />;
+}
+
+/** Props of {@link ShortcutIcon}. */
+interface ShortcutIconProps {
+  /** The shortcut. */
+  shortcut: Shortcut;
+  /** Classes that size and color the icon. */
+  className?: string;
+}
+
+/**
+ * Renders a shortcut's icon: its own where it has one, else its discipline's.
+ *
+ * @param props The component's props.
+ * @returns The icon.
+ */
+export function ShortcutIcon({ shortcut, className }: ShortcutIconProps) {
+  const art = find(SHORTCUT_ICONS, shortcut.id) ?? find(ICONS, shortcut.discipline) ?? FALLBACK;
+  return <Pixels art={art} className={className} />;
+}
+
+/** Props of {@link Pixels}. */
+interface PixelsProps {
+  /** The icon, as twelve rows of twelve cells. */
+  art: readonly string[];
+  /** Classes that size and color the icon. */
+  className: string | undefined;
+}
+
+/**
+ * Draws an icon's cells as squares in the current text color.
+ *
+ * @param props The component's props.
+ * @returns The drawing.
+ */
+function Pixels({ art, className }: PixelsProps) {
   return (
     <svg
       viewBox={`0 0 ${SIZE} ${SIZE}`}
