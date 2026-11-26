@@ -94,6 +94,18 @@ const OWN_CHANGE_MS = 600;
 /** How many previews of one turn stay in view; the ones before them fold away. */
 const PREVIEWS_IN_VIEW = 3;
 
+/** What a card's upload input is answered with: the library entry that now holds the person's file. */
+export interface CardUpload {
+  /** The entry's tag, without the `@`. */
+  tag: string;
+  /** Its name. */
+  name: string;
+  /** The file's kind: `image`, `video`, `audio`, or `file`. */
+  kind: string;
+  /** The file's address. */
+  url: string;
+}
+
 /** Props of {@link Conversation}. */
 interface ConversationProps {
   /** The open project. */
@@ -126,6 +138,11 @@ interface ConversationProps {
   onLimits: ((reached: TurnLimit) => void) | null;
   /** Locks an interactive card in with its state, as the person's next message. */
   onLock: (ui: UiData, value: unknown) => Promise<void>;
+  /**
+   * Takes a file a card's upload input was given into the project's library, in the section the
+   * card names, and answers with the entry it made. Rejects with an `ApiError`.
+   */
+  onUpload: (file: File, into: { section: string | null }) => Promise<CardUpload>;
   /** Puts a suggestion in the composer. */
   onSuggest: (text: string) => void;
 }
@@ -410,15 +427,20 @@ interface UiEntryProps {
   live: boolean;
   /** Locks the card in. */
   onLock: (ui: UiData, value: unknown) => Promise<void>;
+  /** Takes a file the card's upload input was given into the library. */
+  onUpload: ConversationProps['onUpload'];
 }
 
 /**
  * Renders an interactive card, and what locking it in failed with, if it did.
  *
+ * The card's upload input files what it is given through `onUpload`, which is handed to the card
+ * beside its own props.
+ *
  * @param props The component's props.
  * @returns The card.
  */
-function UiEntry({ ui, locked, live, onLock }: UiEntryProps) {
+function UiEntry({ ui, locked, live, onLock, onUpload }: UiEntryProps) {
   const [error, setError] = useState<unknown>(null);
   return (
     <>
@@ -432,6 +454,9 @@ function UiEntry({ ui, locked, live, onLock }: UiEntryProps) {
             setError(failure);
           });
         }}
+        // Spread, not named: the card's props here declare no `onUpload`, and a spread is not
+        // checked for a prop its component does not declare.
+        {...{ onUpload }}
       />
       {error === null ? null : (
         <div className="mt-2">
@@ -557,6 +582,7 @@ function Entry({
   onApprove,
   onLimits,
   onLock,
+  onUpload,
   reveal,
 }: EntryProps) {
   switch (item.type) {
@@ -603,6 +629,7 @@ function Entry({
             locked={locked}
             live={item.current && locked === null && canSend && !data.running}
             onLock={onLock}
+            onUpload={onUpload}
           />
         </AgentRow>
       );

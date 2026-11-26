@@ -34,7 +34,7 @@ import { ALWAYS, isActive, type ControlPlane, type Project, type Session, type T
 import { AUTO_REGION } from '../lib/catalog';
 import { isBoolean, isRecord, type Guard } from '../lib/narrow';
 import { Composer } from './Composer';
-import { Conversation } from './Conversation';
+import { Conversation, type CardUpload } from './Conversation';
 import { AgentEnvironment } from './EnvironmentAgent';
 import { EngineSection, GitHubSection, type EpicReturn, type GitHubReturn } from './EnvironmentPanel';
 import { GitHubMark } from './Menu';
@@ -43,7 +43,7 @@ import { LibraryBody } from './LibraryPanel';
 import { Panel } from './Panel';
 import { PlanBody } from './PlanPanel';
 import { DisciplineIcon } from '../components/DisciplineIcon';
-import { disciplineName, planProgress } from './present';
+import { disciplineName, normalizeTag, planProgress } from './present';
 import { describeAnswer } from './ui/answer';
 import { Stage, type StreamStandIn } from './Stage';
 import { buildTranscript, openQuestion, processMedia, type ProcessEntry, type Reveal } from './transcript';
@@ -290,6 +290,31 @@ export function Workspace(props: WorkspaceProps) {
     showEngine(id);
   }
 
+  /**
+   * Takes a file a card's upload input was given into the library: a new entry named after the
+   * file, with it as the entry's first file, in the section the card names or, where it names
+   * none, the library's first one.
+   *
+   * @param file The file.
+   * @param into Where the card wants it.
+   * @returns The entry as the card is answered with it.
+   * @throws ApiError When the entry could not be made or the file could not be stored.
+   */
+  async function upload(file: File, into: { section: string | null }): Promise<CardUpload> {
+    const name = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Upload';
+    const tag = normalizeTag(name);
+    const made = await data.createAsset(
+      {
+        section: into.section ?? data.library?.sections[0] ?? 'Uploads',
+        name,
+        ...(tag === '' ? {} : { tag }),
+      },
+      file,
+    );
+    const stored = made.media.at(-1);
+    return { tag: made.tag ?? '', name: made.name, kind: stored?.kind ?? 'file', url: stored?.url ?? '' };
+  }
+
   const toggle = (name: keyof PanelState) => () => {
     setPanels({ ...panels, [name]: !panels[name] });
   };
@@ -386,6 +411,7 @@ export function Workspace(props: WorkspaceProps) {
                 });
             }
           }}
+          onUpload={upload}
           onSuggest={setDraft}
         />
         <Composer
