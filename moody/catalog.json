@@ -101,6 +101,7 @@
       "blurb": "Films, series, ads, and social video, from script to final cut.",
       "engines": [
         "filmcraft",
+        "cutroom",
         "photocraft",
         "nuke",
         "effectcraft"
@@ -600,6 +601,18 @@
         "animation"
       ],
       "source": "https://github.com/storytold/filmcraft"
+    },
+    {
+      "id": "cutroom",
+      "name": "Cut Room",
+      "version": "",
+      "status": "available",
+      "tagline": "Social clips and explainers edited by code: moments found, captions and hooks burned in, voice and music laid, every cut a command your agent runs.",
+      "accent": "#f25c54",
+      "disciplines": [
+        "media"
+      ],
+      "source": "https://github.com/larvuz2/GPU-stream/tree/main/addons/modal/cutroom"
     },
     {
       "id": "blender",

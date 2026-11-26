@@ -22,8 +22,9 @@ speech at all still gets a word or two, which the model invents on silence
 ("You", "Thank you"): read the footage's level (`sheet.py`) before trusting a
 short transcript.
 
-Prints the language, then `start  end  word` a line, and with `--out`
-writes `[{"w", "s", "e"}, ...]`, the transcript form the cutters read.
+Prints the language, then `start  end  word` a line, in the media's own
+seconds whichever stretch was asked for, and with `--out` writes
+`[{"w", "s", "e"}, ...]`, the transcript form the cutters read.
 """
 
 from __future__ import annotations
@@ -46,7 +47,8 @@ def heard(
 ) -> tuple[list[dict[str, Any]], str, float]:
     """The words of a stretch of media, with the language heard and how probable the model holds it.
 
-    Word times are seconds from `start`, plus `offset`.
+    Word times are the media's own seconds, whatever stretch was heard,
+    plus `offset`.
     """
     segments, info = model(model_name).transcribe(
         pcm(media, start, end),
@@ -55,11 +57,12 @@ def heard(
         beam_size=5,
         language=language,
     )
+    shift = start + offset
     words = [
         {
             "w": word.word.strip(),
-            "s": round(word.start + offset, 2),
-            "e": round(word.end + offset, 2),
+            "s": round(word.start + shift, 2),
+            "e": round(word.end + shift, 2),
         }
         for segment in segments
         for word in (segment.words or [])
