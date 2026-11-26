@@ -1366,13 +1366,45 @@ def test_the_deployed_image_carries_the_catalog_and_the_module_that_reads_it():
 # The skill
 
 
+def written_cards(path: Path) -> list[dict[str, Any]]:
+    """Every `show_ui` call a skill's file writes out in full: its JSON blocks that have a title and a body."""
+    blocks = [
+        json.loads(block)
+        for block in re.findall(r"```json\n(.*?)```", path.read_text(), flags=re.DOTALL)
+    ]
+    return [
+        block
+        for block in blocks
+        if isinstance(block, dict)
+        and "title" in block
+        and ("components" in block or "html" in block)
+    ]
+
+
 def skill_examples() -> list[dict[str, Any]]:
     """Every `show_ui` call the cards skill writes out in full."""
-    text = (skills_directory() / "cards" / "SKILL.md").read_text()
-    return [
-        json.loads(block)
-        for block in re.findall(r"```json\n(.*?)```", text, flags=re.DOTALL)
-    ]
+    return written_cards(skills_directory() / "cards" / "SKILL.md")
+
+
+def checked(example: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    """A written card as `show_ui` would make it, with each file it names taken as the kind it asks for."""
+    asked = media_requests(CATALOG, example.get("media", []))
+    files = {
+        one.name: one.kind or (CATALOG.kind_of(one.path) if one.path else "image")
+        for one in asked
+    }
+    return card(
+        CATALOG,
+        "ui-skill",
+        example["title"],
+        example.get("components"),
+        example.get("html"),
+        example.get("submit"),
+        example.get("waits", False),
+        example.get("height"),
+        files,
+        example.get("instant", False),
+    )
 
 
 def test_the_cards_skill_is_read_for_every_project_and_names_only_what_exists():
@@ -1415,25 +1447,30 @@ def test_every_card_the_cards_skill_writes_out_passes_the_check():
     assert len(examples) == 6 and sum("html" in example for example in examples) == 1
     assert sum(example.get("instant", False) for example in examples) == 1
     for example in examples:
-        asked = media_requests(CATALOG, example.get("media", []))
-        files = {
-            one.name: one.kind or (CATALOG.kind_of(one.path) if one.path else "image")
-            for one in asked
-        }
-        data, inputs = card(
-            CATALOG,
-            "ui-skill",
-            example["title"],
-            example.get("components"),
-            example.get("html"),
-            example.get("submit"),
-            example.get("waits", False),
-            example.get("height"),
-            files,
-            example.get("instant", False),
-        )
+        data, inputs = checked(example)
         # Each asks for an answer, by its button or by its one choice, and waits for it
         assert (
             bool(data["submit"]) != bool(data.get("instant")) and data["waits"] is True
         )
         assert inputs or data["kind"] == "html", example["title"]
+
+
+def test_every_card_any_skill_writes_out_passes_the_check():
+    written = {
+        path: written_cards(path) for path in sorted(skills_directory().rglob("*.md"))
+    }
+    for path, examples in written.items():
+        for example in examples:
+            try:
+                checked(example)
+            except Invalid as refused:
+                raise AssertionError(
+                    f"{path.name}, {example['title']!r}: {refused.problems}"
+                ) from refused
+    # Each kind of video opens on a card of its own, which waits for its answer
+    references = skills_directory() / "video" / "references"
+    for kind in PRODUCTS.disciplines["media"]["formats"]:
+        name = re.sub(r"[^a-z]+", "-", kind.lower()).strip("-")
+        examples = written.get(references / f"{name}.md")
+        assert examples, f"{kind} has no reference that writes out its opening card"
+        assert examples[0].get("waits") is True, kind
