@@ -90,8 +90,12 @@ library_upsert(section="Tests", name="Test: Mara in the kitchen", tag="@test-mar
   it, stop and report.
 - Never set a take's `status` to `selected`, and never set `approved`: the person chooses.
 
-A result tells you the model, the seed, and the cost. Where it does not also show you the clip,
-you have not seen it: report what you asked for and what to check, not how it looks.
+A result tells you the model, the seed, and the cost, not the clip. Generate a test with
+`look: true`, which hands you four of its frames on one sheet, and say what they show against
+the references: the face, the clothes, the place, text that appeared. Four frames show no
+motion and no sound, so say that those are the person's to judge. A take of a shot is looked at
+only where the brief asks you to check it. What you did not look at, you have not seen: report
+what you asked for and what to check, not how it looks.
 
 ## Your report
 

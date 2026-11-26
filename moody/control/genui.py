@@ -21,8 +21,9 @@ renderers cannot drift apart:
   takes, and the shorthand of each list item.
 - `Check` walks a card's tree against the catalog. Every component's
   properties are checked by their `kind` (a string, a number in a range, one
-  of an enumeration, the name of a file the card carries, a list of a named
-  shape, a condition, a map of adjustments), ids are collected, and whatever
+  of an enumeration, the name of a file the card carries, a pixel icon, a
+  list of a named shape, a condition, a map of adjustments), ids are
+  collected, and whatever
   follows an input (`"$id"` in a bindable property, `{id}` in a text, a key of
   `when`) has to name one that exists. The rules that span properties are
   written against the properties, never against a component's name (a
@@ -38,6 +39,12 @@ component and property, what was expected, and the nearest name where one was
 misspelled. A card with several problems is refused with all of them, up to
 `limits.problems`, so it is fixed in one more call rather than one per
 mistake.
+
+A card with a `submit` label locks when its button is pressed. A card may be
+`instant` instead: it has no button, and choosing locks it at once. That is
+only sound where the choice is all there is to set, so the check allows it for
+a `components` card whose one input is a single choice: a component the
+catalog marks `instant`, not taking several.
 
 A card names the files it shows in `media`, each by a library tag or by a
 file an engine wrote in the project's folder (`media_requests`); the
@@ -236,6 +243,8 @@ class Check:
         self.media = media
         self.problems: list[str] = []
         self.inputs: dict[str, str] = {}
+        # Each input as the card wrote it, by its id
+        self.written: dict[str, dict[str, Any]] = {}
         # Where each id was defined, to name it when another component takes the same one
         self.defined: dict[str, str] = {}
         # What follows an input, to resolve once every id is known: where, and the id
@@ -318,6 +327,7 @@ class Check:
         else:
             self.defined[given] = here
             self.inputs[given] = component
+            self.written[given] = value
 
     def children(
         self, spec: dict[str, Any], value: Any, where: str, depth: int, parent: str
@@ -435,6 +445,35 @@ class Check:
         if not isinstance(value, str) or not COLOR.fullmatch(value):
             self.wrong(where, self.bindable(spec, "a color as #rrggbb"), value)
 
+    def kind_icon(self, spec: dict[str, Any], value: Any, where: str) -> None:
+        """Check a pixel icon: a square of rows of `0` and `1`, of a side within the catalog's limits."""
+        low, high = self.catalog.limits["icon_min"], self.catalog.limits["icon_max"]
+        asked = f'a pixel icon: {low} to {high} rows of as many characters, each 0 or 1, such as ["00111100", "01000010", ...]'
+        if not isinstance(value, list) or not all(
+            isinstance(row, str) for row in value
+        ):
+            self.wrong(where, asked, value)
+            return
+        side = len(value)
+        uneven = next(
+            (index for index, row in enumerate(value) if len(row) != side), None
+        )
+        marked = next(
+            (index for index, row in enumerate(value) if set(row) - {"0", "1"}), None
+        )
+        if not low <= side <= high:
+            self.problem(f"{where} should be {asked}; it has {side} rows.")
+        elif uneven is not None:
+            self.problem(
+                f"{where} should be a square: {side} rows of {side} characters each; row {uneven + 1} has {len(value[uneven])}."
+            )
+        elif marked is not None:
+            self.problem(
+                f"{where} should hold only 0 and 1; row {marked + 1} is {json.dumps(value[marked])}."
+            )
+        elif not any("1" in row for row in value):
+            self.problem(f"{where} has no cell filled: draw the icon with 1s.")
+
     def kind_value(self, spec: dict[str, Any], value: Any, where: str) -> None:
         if not isinstance(value, SCALARS):
             self.wrong(where, "a string, a number, or true or false", value)
@@ -487,6 +526,13 @@ class Check:
                 self.prop(spec, value[prop], f"{where}.{prop}")
             elif spec.get("required"):
                 self.problem(f'{where} ({name}) is missing "{prop}".')
+        # What an item shows in one place, it shows one of
+        either = shape.get("one_of", [])
+        given = [prop for prop in either if prop in value]
+        if len(given) > 1:
+            self.problem(
+                f"{where} ({name}) has {' and '.join(given)}, but {article(name)} shows one of {', '.join(either)}. Keep one."
+            )
 
     def kind_when(self, spec: dict[str, Any], value: Any, where: str) -> None:
         if not isinstance(value, dict) or not value:
@@ -645,6 +691,30 @@ class Check:
 
     # The whole card
 
+    def single_choice(self) -> str | None:
+        """Why the card cannot be instant, or `None` where its one input is a single choice."""
+        allowed = instant_inputs(self.catalog)
+        kinds = " or ".join(allowed)
+        if len(self.inputs) != 1:
+            has = (
+                f"{len(self.inputs)} inputs: {', '.join(self.inputs)}"
+                if self.inputs
+                else "none"
+            )
+            return (
+                f"instant is for a card whose one input is a single choice ({kinds}); this card has {has}. "
+                "Give submit instead, or ask for the one choice alone."
+            )
+        ((given, component),) = self.inputs.items()
+        if component not in allowed:
+            return (
+                f'instant needs the card\'s one input to be a single choice ({kinds}); "{given}" is {article(component)}. '
+                "Give submit instead."
+            )
+        if self.written[given].get("many") is True:
+            return f'instant needs a single choice, but "{given}" takes many. Give submit instead, or leave many out.'
+        return None
+
     def run(self, spec: Any) -> None:
         """Check a card's tree and what in it follows which input.
 
@@ -785,16 +855,19 @@ def card(
     waits: Any,
     height: Any,
     media: dict[str, str],
+    instant: Any = False,
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """A card's `ui` event without its files, and its inputs by id, once it is known to render.
 
     `media` is the card's files by name, each with its kind. The event
     carries `spec` for a `components` card and `html` (with `height`, the
-    frame's first height in pixels) for an `html` one.
+    frame's first height in pixels) for an `html` one, and `instant` for a
+    card that locks on its one choice.
 
     Raises:
         Invalid: for a card that is not exactly one of the two kinds, one the catalog does not
-            allow, one over a limit, or one that waits for an answer it gives no way to send.
+            allow, one over a limit, one that waits for an answer it gives no way to send, or an
+            instant card that is anything but one single choice.
     """
     limits = catalog.limits
     problems: list[str] = []
@@ -812,9 +885,22 @@ def card(
         problems.append(
             f"submit should be the lock-in button's label, up to {limits['submit_chars']} characters, such as Lock in this look."
         )
-    if waits and submit is None:
+    if not isinstance(instant, bool):
+        problems.append("instant should be true or false.")
+    elif instant and submit is not None:
         problems.append(
-            "waits is true but there is no submit label, so the person could never lock the card in. Give submit, or leave waits out."
+            "instant is true and there is a submit label, but an instant card has no lock-in button: the choice itself "
+            "locks it. Give one of the two."
+        )
+    elif instant and html is not None:
+        problems.append(
+            "instant is for a components card whose one input is a single choice. An html card locks on a gesture of "
+            "its own by calling moody.submit(value), under a submit label."
+        )
+    if waits and submit is None and instant is not True:
+        problems.append(
+            "waits is true but there is no submit label, so the person could never lock the card in. Give submit (or "
+            "instant, for a card of one choice), or leave waits out."
         )
     if (components is None) == (html is None):
         problems.append(
@@ -832,6 +918,11 @@ def card(
     if html is None:
         check = Check(catalog, media)
         check.run(components)
+        if instant:
+            refused = check.single_choice()
+            if refused is not None:
+                raise Invalid([refused])
+            data["instant"] = True
         return {**data, "spec": components}, check.inputs
     if not isinstance(html, str) or not html.strip():
         raise Invalid(
@@ -872,8 +963,9 @@ DESCRIPTION = (
     "prose or a list of options would make them imagine it. Give `components`, a tree of the catalog's components "
     "(which covers most cards with no code), or `html`, a document of your own run in a sandboxed frame (for what the "
     "catalog cannot express). With `submit`, the card has a lock-in button of that label, and pressing it sends the "
-    "card's values back to you as the person's next message; `waits: true` also ends your turn until they do. A "
-    "card that is not valid is not shown, and the result says what to fix."
+    "card's values back to you as the person's next message; `waits: true` also ends your turn until they do. For "
+    "one choice among a few, `instant: true` in place of `submit` makes the choice itself lock the card: one click "
+    "and it is sent. A card that is not valid is not shown, and the result says what to fix."
 )
 HTML_REFERENCE = (
     "The card's document, or a fragment of one, with its style and script inline; it runs in a sandboxed frame with no "
@@ -890,6 +982,11 @@ HTML_REFERENCE = (
 )
 
 
+def instant_inputs(catalog: UiCatalog) -> list[str]:
+    """The components that can be the one input of an instant card."""
+    return [name for name, entry in catalog.components.items() if entry.get("instant")]
+
+
 def properties(catalog: UiCatalog) -> dict[str, Any]:
     """The properties of `show_ui`'s input, the catalog's reference among them."""
     limits = catalog.limits
@@ -902,11 +999,17 @@ def properties(catalog: UiCatalog) -> dict[str, Any]:
         "html": {"type": "string", "description": HTML_REFERENCE},
         "submit": {
             "type": "string",
-            "description": "The lock-in button's label, such as Lock in this look. Left out: the card sends nothing back.",
+            "description": "The lock-in button's label, such as Lock in this look. Left out: the card sends nothing back, "
+            "unless it is instant.",
+        },
+        "instant": {
+            "type": "boolean",
+            "description": "Lock the card as soon as the person chooses, with no lock-in button. Only for a components card "
+            f"whose one input is a single choice ({' or '.join(instant_inputs(catalog))}, not many). Leave submit out.",
         },
         "waits": {
             "type": "boolean",
-            "description": "End your turn here until the person locks the card in. Needs submit.",
+            "description": "End your turn here until the person locks the card in. Needs submit or instant.",
         },
         "media": {
             "type": "array",

@@ -176,9 +176,10 @@ library_upsert(section="Shots", name="S01 SH10 T1", tag="@s01-sh10-t1",
 
 - `status` is `candidate`, `selected`, or `rejected`. The person selects; you recommend. Set
   `selected` on their word, and write the tag into the shot list's Selected column.
-- **Reviewing a take.** Tell the person what to check: faces against the sheet, hands, text,
-  physics, screen direction, the line as spoken. Where a result did not hand you the clip, you
-  have not seen it; say so, and never present a take as fine on its facts alone.
+- **Reviewing a take.** `look: true` on the call, or `library_look` afterwards, hands you four
+  frames of the clip: check the face against the sheet, hands, and text. Frames show no motion
+  and no sound, so tell the person what is theirs to check: the movement, physics, screen
+  direction, the line as spoken. Never present a take as fine on its facts alone.
 - **A retake** changes one thing and says which (prompting.md, "Fixing a take"). It is a new
   take with a new tag; the old one stays as `rejected`.
 - Generated files are kept only in the library: a clip made without `save_to` is not there for

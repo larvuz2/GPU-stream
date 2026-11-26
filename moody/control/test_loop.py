@@ -30,6 +30,7 @@ agent counts on.
 - The pictures a tool hands over reach the model as pictures.
 - A turn stops at its person's own limit of steps or of spending, and says
   which.
+- A project that was asked its kind begins its first turn knowing it.
 
 The tests are skipped, with the reason, where the bundled program is not
 there or does not start (an install of the SDK for another platform). Run as
@@ -691,6 +692,41 @@ def test_the_pictures_the_agent_asks_to_look_at_reach_the_model_as_pictures(
     assert [jpeg_size(base64.b64decode(source["data"])) for source in pictures] == [
         (1280, 720)
     ] * 2
+
+
+def test_a_project_asked_its_kind_begins_its_first_turn_knowing_it(studio):
+    client, model = studio.client, studio.model
+    made = client.post(
+        "/v1/projects",
+        headers=auth("alice-token"),
+        json={"name": "Reel", "discipline": "media"},
+    ).json()["project"]
+    (card,) = [e["data"] for e in events(client, made["id"])["events"]]
+    assert (card["instant"], card["sets"]) == (True, "format") and model.requests == []
+    model.script(AGENT, reply(say("A social video. What is it about?")))
+    locked = client.post(
+        f"/v1/projects/{made['id']}/messages",
+        headers=auth("alice-token"),
+        json={
+            "text": "",
+            "ui": {"ui_id": card["ui_id"], "value": {"format": "Social Media"}},
+        },
+    )
+    assert locked.status_code == 202
+    body = model.asked(AGENT)[0]
+    assert messages(body) == [
+        '[The person chose this project\'s kind on the card "What kind of video are you making?": Social Media]'
+    ], "a message that is only the choice reaches the model as the line that says it"
+    assert "Kind: Social Media" in spoken(
+        body
+    ) and "Its kinds: Film & TV" in system_text(body)
+    assert kinds(client, made["id"]) == [
+        "ui",
+        "user_message",
+        "text",
+        "usage",
+        "turn_end",
+    ]
 
 
 def test_a_session_resumes_in_a_fresh_process_that_has_nothing_of_the_first_but_the_database(

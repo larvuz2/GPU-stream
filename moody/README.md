@@ -16,7 +16,10 @@ user works in, and this directory is everything around it.
 | [`agents/`](agents) | The subagents the Studio's agent hands jobs to, one definition per file | Carried into the control plane's image |
 
 `catalog.json` is the one place to change a price, switch an app from `soon`
-to `available`, or rename the service (`brand`).
+to `available`, or rename the service (`brand`). It is also where a
+discipline's kinds are (`formats`, with the card that asks a new project's
+kind: `opening`, and each kind's line, icon, and first library sections under
+`kinds`), and where a setting of the app's Settings is added (`settings`).
 
 ## How a session happens
 
@@ -62,7 +65,7 @@ in the docblocks of [`control/agent.py`](control/agent.py),
 
 **What to configure.** Each part below says how; this is the whole list.
 
-1. A Supabase project with the five migrations run, and its Site URL and
+1. A Supabase project with the six migrations run, and its Site URL and
    redirect URL.
 2. The Modal Secret `moody`: at least `SUPABASE_URL`, `SUPABASE_SECRET_KEY`,
    `MOODY_SITE_URL`, and `MOODY_SECRET_KEY`, then whichever integrations are
@@ -94,7 +97,10 @@ which adds what the agent's loop keeps: a project's session and its transcript
 (`projects.permissions`), then
 [`20261127000000_limits.sql`](supabase/migrations/20261127000000_limits.sql),
 which lets an account set what one turn of the agent may spend and how many
-steps it may take (`profiles.turn_budget_usd`, `profiles.turn_limit`). A
+steps it may take (`profiles.turn_budget_usd`, `profiles.turn_limit`), then
+[`20261128000000_settings.sql`](supabase/migrations/20261128000000_settings.sql),
+which keeps a person's name and the settings they changed (`profiles.name`,
+`profiles.settings`). A
 project that already ran the earlier ones runs
 only those it has not. `github_app` deletes the GitHub connections an OAuth
 App made before, whose users connect again. `agent_loop` drops
@@ -133,7 +139,7 @@ and set:
 | `MOODY_LOOP_ENV` | Variables of this Secret, comma-separated, the loop's program also gets (a proxy's address, a certificate bundle). It gets `ANTHROPIC_API_KEY` and nothing else of the Secret unless named here |
 | `MOODY_LOOP_ROOT` | Under which a turn's working directory is made, `/tmp/moody-loop` unless set. The loop keys a project's session by that path, so changing it starts every project's conversation anew |
 | `MOODY_LOOP_CLI` | The `claude` program the loop runs, where not the one the SDK's package carries |
-| `FAL_KEY` | fal.ai's key, for the agent's image and video generation; without it those tools say generation is not configured |
+| `FAL_KEY` | fal.ai's key, for the agent's image, video, and sound generation; without it those tools say generation is not configured |
 | `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | The client ID and a client secret of the GitHub App users connect their accounts through (below) |
 | `GITHUB_APP_SLUG` | That app's name in its address, `https://github.com/apps/<slug>`, where "Don't see your repository?" sends a user to install it |
 | `EPIC_GITHUB_CLIENT_ID`, `EPIC_GITHUB_CLIENT_SECRET` | The client ID and a client secret of the OAuth App that reads packages, through which a user's own copy of Unreal Engine is pulled (below) |
@@ -281,7 +287,10 @@ runs the API, the MCP endpoint, and the agent against stand-ins for Supabase,
 Modal, Anthropic, fal, and GitHub: who a credential names, what each route and
 tool returns and refuses, that one user's sessions, projects, and connections do not exist
 for another, the agent driven by a scripted model through every tool, its
-subagents, approvals, and skills, that `ask_user` ends a turn and a second
+subagents, approvals, and skills, that a project made without its kind opens
+on the card that asks it and the message that locks the card sets it, the
+sound the agent generates by kind, an account's name and settings, that
+`ask_user` ends a turn and a second
 message waits for the first, that a question may name the option the agent
 recommends, that a turn runs on its person's own limits and says which one
 stopped it, the pictures the agent looks at its generations
@@ -343,7 +352,9 @@ pick one. The GPU tiers are switched off until the Modal account can start
 GPUs, and the session has not been run on one.
 
 The Studio's backend has run only against its tests' stand-ins: not yet against
-Anthropic, fal, GitHub, or Supabase Storage. The agent's loop has run as it
+Anthropic, GitHub, or Supabase Storage, and against fal only for sound, where
+one instrumental, one sound effect, and one spoken line were generated
+through the agent's tool. The agent's loop has run as it
 ships, on Modal too, with the model scripted; no turn has been answered by a
 real model, so how the model uses its subagents, skills, and approvals, what a
 turn costs, and how the loop summarizes a conversation that outgrows the
