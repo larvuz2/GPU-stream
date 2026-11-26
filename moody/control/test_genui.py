@@ -1412,7 +1412,8 @@ def test_the_cards_skill_is_read_for_every_project_and_names_only_what_exists():
 
 def test_every_card_the_cards_skill_writes_out_passes_the_check():
     examples = skill_examples()
-    assert len(examples) == 4 and sum("html" in example for example in examples) == 1
+    assert len(examples) == 6 and sum("html" in example for example in examples) == 1
+    assert sum(example.get("instant", False) for example in examples) == 1
     for example in examples:
         asked = media_requests(CATALOG, example.get("media", []))
         files = {
