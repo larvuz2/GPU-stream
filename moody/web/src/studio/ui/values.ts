@@ -5,7 +5,8 @@
  */
 
 /**
- * The values a card's inputs hold: what each starts as, and how each reads in words.
+ * The values a card's inputs hold: what each starts as, how each reads in words, and when two
+ * of them are the same.
  *
  * A card's answer is `{id: value}`, and the shape of a value is its component's: a number for a
  * slider, an option's value for a select, a list for checkboxes, an order for a reorderable
@@ -305,6 +306,30 @@ export const WORDS = {
           .join(', ')
       : show(value),
 };
+
+/**
+ * Whether two values are the same plain data: equal scalars, lists equal in order, records equal
+ * by their keys.
+ *
+ * @param one A value.
+ * @param other Another.
+ * @returns Whether they are the same answer.
+ */
+export function sameValue(one: unknown, other: unknown): boolean {
+  if (Array.isArray(one) || Array.isArray(other)) {
+    return (
+      Array.isArray(one) &&
+      Array.isArray(other) &&
+      one.length === other.length &&
+      one.every((item, index) => sameValue(item, other[index]))
+    );
+  }
+  if (isRecord(one) && isRecord(other)) {
+    const keys = Object.keys(one);
+    return keys.length === Object.keys(other).length && keys.every((key) => sameValue(one[key], other[key]));
+  }
+  return one === other;
+}
 
 /**
  * Whether a value is nothing: no choice, no words, an empty list.

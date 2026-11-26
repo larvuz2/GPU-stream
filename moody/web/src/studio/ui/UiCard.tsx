@@ -19,7 +19,8 @@
  * A card has three states, and says which it is in:
  *
  * - **Open and live**: the controls change the card, and the lock-in button sends its state to
- *   `onSubmit`. A required choice not yet made holds the button and names what is missing.
+ *   `onSubmit`. A required choice not yet made holds the button and names what is missing. Once
+ *   anything differs from how the card opened, the foot offers the way back to that.
  * - **Open but not live**: the controls still work, so the card can be explored, but it cannot be
  *   answered now (the agent is working, or the conversation moved past it), and it says so.
  * - **Locked**: the controls show what was locked in and take no change, and the card lists it.
@@ -31,7 +32,7 @@
  */
 import { useId, useMemo, useState } from 'react';
 import { isRecord } from '../../lib/narrow';
-import { inputsOf, missing, startState, summarize, wordsOf } from './answer';
+import { changed, inputsOf, missing, startState, summarize, wordsOf } from './answer';
 import { CardContext, type Card } from './context';
 import { HtmlCard } from './HtmlCard';
 import { LockBar } from './LockBar';
@@ -49,6 +50,12 @@ export interface UiCardProps {
   live: boolean;
   /** Locks the card in with its value. */
   onSubmit: (value: unknown) => void;
+  /**
+   * What the person had already changed on a `components` card, by input id, where whoever draws
+   * the card kept it: the card shows these in place of the values it opens with, and still knows
+   * how it opened. The gallery shows a card in the middle of a decision with it.
+   */
+  draft?: Record<string, unknown>;
 }
 
 /**
@@ -57,7 +64,7 @@ export interface UiCardProps {
  * @param props The component's props.
  * @returns The card.
  */
-export function UiCard({ ui, locked, live, onSubmit }: UiCardProps) {
+export function UiCard({ ui, locked, live, onSubmit, draft }: UiCardProps) {
   const title = useId();
   const state = locked !== null ? 'Locked in' : ui.submit === null ? 'Take a look' : live ? 'Your call' : 'On hold';
   return (
@@ -77,7 +84,7 @@ export function UiCard({ ui, locked, live, onSubmit }: UiCardProps) {
       {ui.kind === 'html' ? (
         <HtmlCard ui={ui} locked={locked} live={live} onSubmit={onSubmit} />
       ) : (
-        <ComponentsCard ui={ui} locked={locked} live={live} onSubmit={onSubmit} />
+        <ComponentsCard ui={ui} locked={locked} live={live} onSubmit={onSubmit} draft={draft} />
       )}
     </section>
   );
@@ -89,12 +96,12 @@ export function UiCard({ ui, locked, live, onSubmit }: UiCardProps) {
  * @param props The component's props.
  * @returns The components and the lock-in bar.
  */
-function ComponentsCard({ ui, locked, live, onSubmit }: UiCardProps) {
+function ComponentsCard({ ui, locked, live, onSubmit, draft }: UiCardProps) {
   const uid = useId();
   const root = useMemo(() => readTree(ui.spec), [ui.spec]);
   const inputs = useMemo(() => (root === null ? new Map<string, never>() : inputsOf(root)), [root]);
   const start = useMemo(() => startState(inputs), [inputs]);
-  const [changes, setChanges] = useState<Record<string, unknown>>({});
+  const [changes, setChanges] = useState<Record<string, unknown>>(() => draft ?? {});
   const files = useMemo(() => new Map(ui.media.map((file): [string, UiMedia] => [file.name, file])), [ui.media]);
 
   const frozen = locked !== null;
@@ -136,6 +143,10 @@ function ComponentsCard({ ui, locked, live, onSubmit }: UiCardProps) {
         live={live}
         blocked={unchosen === null ? null : `Still to choose: ${unchosen}`}
         summary={frozen ? summarize(inputs, state) : []}
+        changed={!frozen && changed(inputs, state, start)}
+        onDefault={() => {
+          setChanges({});
+        }}
         onLock={() => {
           onSubmit(state);
         }}

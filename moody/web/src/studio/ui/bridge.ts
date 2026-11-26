@@ -27,6 +27,12 @@
  * whatever the document held (a function, a DOM node, or a cycle is an error where the card
  * calls, not a surprise later).
  *
+ * Every value goes out with a word on whether the person has done anything in the document yet
+ * (`touched`: a real press, key, or edit, not one the document made up). A document may report
+ * the value it opens with, and may go on changing it by itself; the page tells that apart from
+ * the person's own change by this word, which is how it knows when a card differs from how it
+ * opened.
+ *
  * The bridge also keeps the lit part of every range input's track in step with its value
  * (`--moody-fill`), which is what makes a plain `<input type="range">` in a card look like a
  * slider of the conversation with no script of the card's own.
@@ -72,6 +78,7 @@ export function bridge(init: BridgeInit): void {
   const waiting = new Map<number, { resolve: (bytes: ArrayBuffer) => void; reject: (reason: Error) => void }>();
   let requests = 0;
   let locked = init.locked;
+  let touched = false;
 
   const post = (message: Record<string, unknown>): void => {
     page.postMessage({ moodyCard: init.id, ...message }, '*');
@@ -87,12 +94,12 @@ export function bridge(init: BridgeInit): void {
     setState(value) {
       const sent = plain(value);
       api.state = sent;
-      post({ type: 'state', value: sent });
+      post({ type: 'state', value: sent, touched });
     },
     submit(value) {
       const sent = plain(value);
       api.state = sent;
-      post({ type: 'submit', value: sent });
+      post({ type: 'submit', value: sent, touched });
     },
     load(name) {
       return new Promise((resolve, reject) => {
@@ -128,6 +135,16 @@ export function bridge(init: BridgeInit): void {
       window.dispatchEvent(new CustomEvent('moodylock', { detail: message.value }));
     }
   });
+
+  for (const kind of ['pointerdown', 'keydown', 'input', 'change']) {
+    document.addEventListener(
+      kind,
+      (event) => {
+        touched = touched || event.isTrusted;
+      },
+      true,
+    );
+  }
 
   const lit = (target: EventTarget | null): void => {
     if (target instanceof HTMLInputElement && target.type === 'range') {

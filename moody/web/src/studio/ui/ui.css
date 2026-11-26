@@ -986,6 +986,28 @@
     color: var(--color-faint);
   }
 
+  /* The way back to how the card opened: a quiet, secondary control, never the action's lime. */
+  .ui-default {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    gap: 0.35rem;
+    min-height: 1.75rem;
+    padding: 0 0.6rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.4rem;
+    color: var(--color-muted);
+    font-size: 0.75rem;
+    transition:
+      color 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  .ui-default:hover {
+    border-color: var(--color-muted);
+    color: var(--color-fg);
+  }
+
   .ui-lockbar[data-locked='true'] {
     display: grid;
     grid-template-columns: minmax(0, 1fr);

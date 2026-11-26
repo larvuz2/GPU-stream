@@ -5,8 +5,8 @@
  */
 
 /**
- * A card's answer: the state its inputs start with, what still has to be chosen before it can be
- * locked in, and the answer in words.
+ * A card's answer: the state its inputs start with, whether the person has changed it since,
+ * what still has to be chosen before it can be locked in, and the answer in words.
  *
  * The answer the agent receives is the card's state, `{id: value}` for a `components` card and
  * whatever the document reported for an `html` one. A person reads it as words: on a locked card
@@ -18,7 +18,7 @@
 import { isRecord } from '../../lib/narrow';
 import { COMPONENTS } from './registry';
 import { flag, holds, idOf, readTree, show, text, walk, type UiData, type UiNode, type UiState } from './tree';
-import { isEmpty } from './values';
+import { isEmpty, sameValue } from './values';
 
 /** One input's value, in words. */
 export interface AnswerLine {
@@ -88,6 +88,18 @@ function nameOf(id: string, node: UiNode): string {
  */
 export function wordsOf(node: UiNode, value: unknown): string {
   return COMPONENTS[node.type].words?.(node, value) ?? show(value);
+}
+
+/**
+ * Whether a card's values differ from the ones it opened with.
+ *
+ * @param inputs The card's inputs.
+ * @param state The card's values.
+ * @param opened The state the card started with.
+ * @returns `true` once any input holds something else.
+ */
+export function changed(inputs: ReadonlyMap<string, UiNode>, state: UiState, opened: UiState): boolean {
+  return [...inputs.keys()].some((id) => !sameValue(state[id], opened[id]));
 }
 
 /**

@@ -72,7 +72,9 @@ nothing they left on the card counts. Never act on a value they did not send.
 The tool's own definition lists every component and property, so this section is how to combine
 them. A card is one component, usually a `stack`, with the rest in `children`. Inputs have an
 `id`. A property marked `~` in the tool's reference can follow an input as `"$id"`; a text shows
-an input's value as `{id}`; any component takes `when` to appear only while a condition holds.
+an input's value as `{id}`; any component takes `when` to appear only while a condition holds. An
+input opens on the `value` you give it, and once the person changes anything the card offers
+"Back to default", which restores it as it opened.
 
 ### A look, tuned over the frame
 
@@ -171,6 +173,8 @@ Everything is inline, and files come through `media`.
   and once at the start if the starting values are an answer. The lock-in button sends the last
   value. Use `moody.submit(value)` only for a gesture that is itself the answer, such as a
   double-click on the chosen frame. It is ignored unless the person is in the card.
+- **The document's first state is the card's default.** "Back to default" starts your document
+  again from the top, so whatever it draws before the person touches it is what they return to.
 - **Make the value small, named JSON** you will want to read: `{"low": 3, "mid": -2, "high": 4}`.
 - **Start from `moody.state`** when it is set, and when `moody.locked` is true (or on the window's
   `moodylock` event) show the value and disable the controls.

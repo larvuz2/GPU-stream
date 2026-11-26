@@ -13,6 +13,10 @@
  * why the card cannot be answered now. A card that cannot be answered is said to be so in words,
  * not only by a dimmed button.
  *
+ * Once the person has changed anything from how the card opened, a second, quiet button appears:
+ * "Back to default", which restores the whole card as it opened in one press, so trying things
+ * costs nothing. It is a secondary control and takes none of the lock-in button's lime.
+ *
  * Pressing the button hands the value to the conversation, which sends it and, once the log has
  * the answer, renders the card locked. Between the two the button shows that it was pressed and
  * takes no second press; if the card is not locked after a while (the message could not be
@@ -20,7 +24,7 @@
  * @module
  */
 import { useEffect, useState } from 'react';
-import { Check, Lock } from 'lucide-react';
+import { Check, Lock, RotateCcw } from 'lucide-react';
 import { brand } from '../../lib/catalog';
 import type { AnswerLine } from './answer';
 
@@ -42,6 +46,10 @@ interface LockBarProps {
   blocked: string | null;
   /** What was locked in, a line per value. */
   summary: AnswerLine[];
+  /** Whether the card differs from how it opened. */
+  changed: boolean;
+  /** Restores the card as it opened. */
+  onDefault: () => void;
   /** Locks the card in. */
   onLock: () => void;
 }
@@ -52,7 +60,7 @@ interface LockBarProps {
  * @param props The component's props.
  * @returns The bar, or nothing for a card with nothing to send back.
  */
-export function LockBar({ label, locked, live, blocked, summary, onLock }: LockBarProps) {
+export function LockBar({ label, locked, live, blocked, summary, changed, onDefault, onLock }: LockBarProps) {
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
@@ -121,6 +129,12 @@ export function LockBar({ label, locked, live, blocked, summary, onLock }: LockB
       <p className="ui-hint" role={live ? undefined : 'status'}>
         {hint}
       </p>
+      {changed ? (
+        <button type="button" className="ui-default" onClick={onDefault}>
+          <RotateCcw className="size-3.5 flex-none" aria-hidden="true" />
+          Back to default
+        </button>
+      ) : null}
     </footer>
   );
 }

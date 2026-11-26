@@ -13,7 +13,9 @@
  * tuned by sliders over a before and after pair, a lead picked from portraits, a style chosen
  * from boards, a storyboard put in order, a poster taken apart into its layers, a shot list with
  * its budget, two cues to choose between, and three documents of the agent's own
- * (`documents.ts`): an equalizer, a simulation, and the frame's self-test.
+ * (`documents.ts`): an equalizer, a simulation, and the frame's self-test. The last cards are the
+ * states a card can be in besides open: changed, with the way back to how it opened in view,
+ * locked in, and unable to be answered for now.
  *
  * The photographs are the site's own artwork (`public/media`), named here for the part they play.
  * The rest was made for the gallery, computed from nothing but code (`public/media/card-*`):
@@ -45,6 +47,8 @@ export interface Example {
   ui: UiData;
   /** What it was locked in with, for a card shown locked. */
   locked?: unknown;
+  /** What the person has changed on it so far, by input id, for a card shown in the middle of a decision. */
+  changed?: Record<string, unknown>;
   /** Whether it is shown as one that cannot be answered now. */
   idle?: boolean;
 }
@@ -606,6 +610,21 @@ export const EXAMPLES: Example[] = [
       waits: false,
       media: [file('shot', 'discipline-media.webp')],
     },
+  },
+  {
+    id: 'changed',
+    asked: 'Warmer than that, and more grain. Like this?',
+    says: 'That holds up. If you would rather start over from where the card opened, "Back to default" beside the button does that in one press.',
+    ui: {
+      ui_id: 'ui-look-changed',
+      title: 'The look of the night market',
+      kind: 'components',
+      spec: LOOK_SPEC,
+      submit: 'Lock in this look',
+      waits: true,
+      media: [file('shot', 'discipline-media.webp')],
+    },
+    changed: { warmth: 46, grain: 44 },
   },
   {
     id: 'locked',
