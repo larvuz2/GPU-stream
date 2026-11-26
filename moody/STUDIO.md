@@ -527,6 +527,20 @@ the conversation itself.
   locks it. Its data carries `sets: "format"`, and the message that locks it
   sets the project's format to the chosen one before the turn begins, so the
   agent's first turn already knows the kind.
+
+  The event has no `turn_id`, and its data is `{ui_id, title, kind:
+  "components", spec: {type: "pick", id: "format", options: [{value, label,
+  note?, icon?}]}, submit: null, waits: true, instant: true, sets: "format",
+  media: []}`. An option's `value` and `label` are the format, its `note` the
+  kind's line, and its `icon` the rows the catalog's `icons` has under the
+  name the kind gives, left out where it has none. The pick's id is what the
+  card sets, so the message that locks it carries `ui.value` `{format: <the
+  kind>}`. A kind the discipline does not offer is a 400 and starts no turn.
+  With the kind, a project whose library is untouched takes that kind's first
+  sections (`kinds.<format>.sections` in the catalog, else the discipline's
+  `sections`). The project's state names the kind at the start of every turn
+  (`Kind:`, and `not chosen yet` where the person wrote before choosing), and
+  the turn that chose it reads that as a line after the person's words.
 - **The agent opens each kind with a card of its own**, written by the
   `video` skill for that kind: where the story comes from for Film & TV, the
   track for a music video, the platform and the goal for social media. It
@@ -544,7 +558,17 @@ the conversation itself.
   "music" | "sound" | "speech", lyrics?, instrumental?, voice?, style?,
   seconds?, count?, save_to?)` makes a song, an instrumental, a sound effect,
   or a spoken line through fal, shows each result with a player, and keeps it
-  in the library where `save_to` says.
+  in the library where `save_to` says. The models are data beside the image
+  and video models (`moody/control/generation.py`): MiniMax Music 3 for
+  `music` (up to 300 seconds; lyrics, or `instrumental`, never both), ElevenLabs
+  Sound Effects v3 for `sound` (half a second to thirty, from at most 450
+  characters; the model chooses the length where `seconds` is left out), and
+  Gemini 3.8 Flash TTS for `speech` (`prompt` is the words, `voice` one of its
+  thirty, `style` a line of direction that is not spoken, and no `seconds`).
+  `count` is one to four takes, each a call of its own, run at once: a take
+  that does not come back is told, and the others are kept. What a kind does
+  not take is refused before anything is paid for. A result is a `tool_end`
+  with `media` of kind `audio`.
 - **Video is also edited by code.** The Cut Room engine (`cutroom`) is a
   machine with no application to click: FFmpeg, speech-to-text with word
   timings, voice mastering, captions, and the scripts that find the moments
@@ -556,7 +580,8 @@ the conversation itself.
   leaves when the work or the person calls for something else.
 - **The latest version is always at hand.** `preview` takes an optional
   `version`, a short label ("Rough cut", "v3") that marks what it shows as a
-  version of the piece itself, and the event carries it. The page's right
+  version of the piece itself, and the event carries it, trimmed and at most
+  forty characters; a preview without one has no `version`. The page's right
   pane has a **Latest** module that plays the newest version (failing one,
   the newest video or sound the session showed), full screen on request, and
   lists the versions before it.
@@ -572,7 +597,12 @@ the conversation itself.
   `choice`, with the options), and its default. The control plane keeps what a
   person changed (`profiles.settings`) and refuses an id or a value the
   catalog does not offer, so adding one is a catalog entry and the code that
-  reads it.
+  reads it. An entry is `{id, tab, label, help, kind: "toggle" | "choice",
+  options?: [{value, label}], default}`: a toggle is `true` or `false`, a
+  choice one of its options' `value`. A value kept from before the catalog
+  stopped offering it does not apply, and the default does. The name
+  (`profiles.name`) is at most eighty characters, and `null` clears it. A
+  change that is refused in any part changes nothing.
 - **HyperFrames is the other way to edit by code.** The `hyperframes` engine
   runs HeyGen's open-source HyperFrames (Apache 2.0): a video written as HTML,
   CSS, and seekable animation, rendered by a headless browser and FFmpeg, with
@@ -582,7 +612,10 @@ the conversation itself.
   reaches for when a video is edited by code is the person's setting
   (`video_hyperframes`, a switch on the Video editing tab, off by default, so
   the Cut Room unless they turn it on); the turn's state names the one that
-  applies.
+  applies, as `A video edited by code is made in: <App> (app `<id>`)`:
+  `hyperframes` where the person switched it on and the catalog has that app
+  as one that can be started, `cutroom` otherwise, and no line where the
+  catalog has neither to start.
 
 Additions to the API and the events:
 
