@@ -73,7 +73,8 @@ Open with what it is for, because the deliverable decides the rest:
 > What should come out at the end: pictures (which views), a short clip (a turntable or a
 > fly-around), or a file to print or to put on a site?
 
-Then one at a time, only what you cannot infer:
+Then one at a time, only what you cannot infer. Where the project already has a brief (an
+Architecture project's sizes, direction, and palette), these are answered: ask what is missing.
 
 1. **What is fixed.** A plan drawn in CADCraft, dimensions, a photograph, a sketch. For a
    product: its real size. Without a drawing, ask for the three numbers that matter most.
@@ -332,10 +333,13 @@ rules):
 ```text
 preview(engine_id, path="previews/exterior-clay.png", caption="The massing from the south-east, 10:30 in March, in clay")
 preview(engine_id, paths=["previews/exterior-clay.png", "previews/exterior-draft.png"], caption="The same view in clay and with materials", compare=true)
-preview(engine_id, path="previews/house-orbit.mp4", caption="One turn around the building, 4 seconds")
+preview(engine_id, path="previews/exterior-final.png", caption="The exterior at full size, 10:30 in March", version="Exterior v1")
+preview(engine_id, path="previews/house-orbit.mp4", caption="One turn around the building, 4 seconds", version="Orbit v1")
 ```
 
 - A still: `render.py --out previews/<name>.png`; in clay with `--clay`; smaller with `--percent`.
+- A final frame or a clip the person may present gets a `version`; a draft and a clay view do
+  not.
 - A clip: `render.py --frames 1 96 --out previews/<name>/frame`, then the `ffmpeg` line of
   rendering.md writes `previews/<name>.mp4`.
 - A model to turn in the conversation or on a page: `print_check.py` (objects.md) writes a
