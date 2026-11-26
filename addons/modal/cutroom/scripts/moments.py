@@ -122,7 +122,7 @@ def fetch(source: str, folder: Path, max_minutes: int) -> tuple[Path, dict[str, 
             chat += ["--sub-langs", "live_chat", "-o", str(folder / "chat")]
             run([*chat, source], check=False)
     else:
-        video = Path(source).resolve()
+        video = Path(source)
         save_json(
             folder / "info.json", {"title": video.stem, "webpage_url": str(video)}
         )

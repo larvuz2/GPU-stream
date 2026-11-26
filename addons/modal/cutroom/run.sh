@@ -31,6 +31,8 @@ list() {
   echo "usage: cutroom NAME [ARGUMENTS...]   (cutroom NAME --help for one script; cutroom versions for the image)"
   for script in "${HOME_DIR}"/scripts/*.py; do
     name="$(basename "${script}" .py)"
+    # What the scripts share is a module, not a command
+    [ "${name}" = common ] && continue
     # The summary is the first line of the module docstring, which follows the license header
     summary="$(sed -n 's/^"""\(.*\)$/\1/p' "${script}" | head -n 1)"
     printf '  %-10s %s\n' "${name}" "${summary%\"\"\"}"

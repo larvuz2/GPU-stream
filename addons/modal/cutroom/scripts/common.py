@@ -31,7 +31,9 @@
 Work is kept per source in `jobs/<name>-<hash>` under the folder a script
 runs in, which `cutroom` makes the session's project folder: the footage, its
 sound, its transcript, the moments found in it, and the cuts made from it
-(`edits/`). `CUTROOM_HOME` names another folder.
+(`edits/`). Every path a script keeps or prints is relative to that folder, as
+the caller gave it, so a job made in one session reads the same in the next,
+wherever the machine mounts the folder.
 
 The speech models and the face detector are files of the image
 (`CUTROOM_MODELS`, `/opt/cutroom/models`), put there when it was built, so no
@@ -54,8 +56,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-ROOT = Path(os.environ.get("CUTROOM_HOME", Path.cwd()))
-JOBS = ROOT / "jobs"
+JOBS = Path("jobs")
 MODELS = Path(os.environ.get("CUTROOM_MODELS", "/opt/cutroom/models"))
 FACE_MODEL = MODELS / "face_detection_yunet_2023mar.onnx"
 

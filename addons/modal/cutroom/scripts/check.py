@@ -29,7 +29,7 @@
 """Check a finished cut before it goes anywhere: one PASS or FAIL per check, and a status of 1 on any FAIL.
 
     cutroom check CLIP.mp4 [--size 1080x1920] [--rules rules.md] [--caption "post text"] [--lang en]
-        [--lufs -17:-13] [--allow-profanity]
+        [--lufs -17:-13] [--ass CAPTIONS.ass] [--allow-profanity]
 
 What is checked:
 
@@ -40,7 +40,9 @@ What is checked:
   a single pass of `loudnorm` lands within about a unit of it;
 - that no swear is heard, by two speech models each listening on two
   alignments (`clean.heard_twice`), read in the captions (the `.ass` beside
-  the clip), or written in the hook (the `.json` beside it) or the post text;
+  the clip, or the one `--ass` names where the clip was rendered on from
+  another file), or written in the hook (the `.json` beside it) or the post
+  text;
 - what a rules file asks for.
 
 A rules file is any text with lines of this form, for a platform's or a
@@ -196,6 +198,9 @@ def main() -> None:
         help="LOW:HIGH integrated loudness",
     )
     ap.add_argument(
+        "--ass", default="", help="the clip's captions (default: the .ass beside it)"
+    )
+    ap.add_argument(
         "--allow-profanity", action="store_true", help="skip the clean-language checks"
     )
     a = ap.parse_args()
@@ -252,7 +257,7 @@ def main() -> None:
             not heard_words,
             ", ".join(f"{word} at {start:.1f}s" for start, _, word in heard_words),
         )
-        ass = clip.with_suffix(".ass")
+        ass = Path(a.ass) if a.ass else clip.with_suffix(".ass")
         shown = shown_bad(ass) if ass.exists() else []
         where = "" if ass.exists() else " (no .ass found, hook and caption only)"
         add(

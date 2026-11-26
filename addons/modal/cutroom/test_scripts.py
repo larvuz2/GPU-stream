@@ -9,27 +9,22 @@ runs FFmpeg or loads a model: what those do with what the scripts hand them
 is proven on a running engine, by the recipes of `moody/skills/cutroom`.
 
 The scripts import one another by name, as they do where `cutroom` runs
-them, so their folder goes on the path first. NumPy and Pillow are needed for
-the scripts that use them; a machine without one skips those tests, saying
-which is missing. Run with `pytest addons/modal/cutroom`.
+them, so `conftest.py` puts their folder on the path. NumPy and Pillow are
+needed for the scripts that use them; a machine without one skips those
+tests, saying which is missing. Run with `pytest addons/modal/cutroom`.
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
+import check
+import cut
+import explainer
+import fit
+import join
+import narrate
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
-
-import check  # noqa: E402
-import cut  # noqa: E402
-import explainer  # noqa: E402
-import fit  # noqa: E402
-import join  # noqa: E402
-import narrate  # noqa: E402
-import sheet  # noqa: E402
+import sheet
+import translate
 
 EBUR128 = """
 [Parsed_ebur128_1 @ 0x55] t: 2.9 TARGET:-23 LUFS M: -13.1 S: -14.0 I: -14.9 LUFS LRA: 1.0 LU
@@ -490,3 +485,30 @@ def test_a_sign_pops_in_past_its_size_and_settles():
     assert (
         reveal.parse_sign("art/sign.png")[1] != reveal.parse_sign("art/sign.png")[1]
     ), "no second is not a number"
+
+
+def test_a_translation_is_spread_over_the_time_each_sentence_took():
+    spoken = words(
+        ("Wait,", 1.0, 1.4), ("what?", 1.4, 2.0), ("Look", 3.5, 3.8), ("here", 3.8, 4.1)
+    )
+    parts = translate.sentences(spoken)
+    assert [[w["w"] for w in part] for part in parts] == [
+        ["Wait,", "what?"],
+        ["Look", "here"],
+    ], "closing punctuation ends a sentence, and so does a pause"
+    placed = translate.spread(parts, ["Espera, ¿qué es eso?", "Mira"])
+    assert [(w["w"], round(w["s"], 2), round(w["e"], 2)) for w in placed] == [
+        ("Espera,", 1.0, 1.25),
+        ("¿qué", 1.25, 1.5),
+        ("es", 1.5, 1.75),
+        ("eso?", 1.75, 2.0),
+        ("Mira", 3.5, 4.1),
+    ]
+
+
+def test_a_translation_with_the_wrong_number_of_sentences_is_refused(tmp_path):
+    file = tmp_path / "es.json"
+    file.write_text('{"hook": "Un gancho", "sentences": ["Una sola."]}')
+    assert translate.given(str(file), 1) == ("Un gancho", ["Una sola."])
+    with pytest.raises(SystemExit, match="has 1 sentences and the clip has 2"):
+        translate.given(str(file), 2)
