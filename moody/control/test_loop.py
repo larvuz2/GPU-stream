@@ -133,11 +133,13 @@ def backend(
     store: FakeStore | None = None,
     loop_root: Path | None = None,
     key: str = "sk-ant-scripted",
+    model: str = "",
 ) -> SimpleNamespace:
     """The Studio's backend on the real loop: the stand-ins of `test_api.py` for everything but the SDK.
 
     `api_url` is where the loop's program reaches the Messages API, empty for
-    Anthropic's own, which `key` is then a real key for (`trial.py`).
+    Anthropic's own, which `key` is then a real key for (`trial.py`). `model`
+    is the agent's model, the deployment's default where it is left empty.
     """
     skills_folder, agents_folder = write_definitions(folder)
     store, launcher, jobs, github, fal = (
@@ -155,6 +157,7 @@ def backend(
         approval_seconds=20,
         turn_budget_usd=5.0,
         turn_limit=30,
+        agent_model=model,
     )
     sessions = Sessions(settings, CATALOG, store, launcher, jobs, github)
     jobs.sessions = sessions

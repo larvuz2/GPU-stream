@@ -25,7 +25,8 @@ It then runs the suites of `test_loop.py` and `test_api.py` in the same image.
 model: the worker's Anthropic key comes from the Modal Secret `moody`
 (`ANTHROPIC_API_KEY`), nothing is scripted, and each turn asks the model in
 words for what the check needs to see. It spends a few model calls and starts
-no engine. Whatever else the Secret holds is in those workers' environment
+no engine, and says what each turn cost. `--model` names the model the agent
+runs on for the trial, the deployment's default where left out. Whatever else the Secret holds is in those workers' environment
 and, as in the deployment, does not reach the loop's program (`loop.py`).
 
 The checks read the conversation the page would be shown, the project's
@@ -64,6 +65,8 @@ PYTEST = "pytest==9.1.1"
 # Where a turn's working directory is made, on both machines: the loop keys a session by that path
 LOOP_ROOT = "/tmp/moody-trial-loop"
 SECRET, KEY = "moody", "ANTHROPIC_API_KEY"
+# The variable a worker reads the model of a real trial from, where one was named
+MODEL = "MOODY_TRIAL_MODEL"
 # The program's own tools the agent keeps, as the program names them when it starts (`Task` is its subagent tool)
 KEPT = {"Task", "Agent", "Read", "Skill", "WebFetch", "WebSearch"}
 WORD = "HELIOTROPE"
@@ -147,10 +150,13 @@ class Trial:
             pickle.loads(state) if state else None,
             Path(LOOP_ROOT),
             key=os.environ[KEY] if real else "sk-ant-scripted",
+            model=os.environ.get(MODEL, "") if real else "",
         )
         self.made.agent.loop = lambda options: Heard(sdk_loop(options), self.heard)
         self.checks: list[dict[str, Any]] = []
         self.turns: dict[str, float] = {}
+        # What each turn's `usage` event said it took: tokens in and out, and the model's price for them
+        self.spent: dict[str, dict[str, Any]] = {}
 
     def script(self, marker: str, *steps: Any) -> None:
         """What the scripted model answers next to requests under a system prompt; nothing where the model is real."""
@@ -169,7 +175,10 @@ class Trial:
             raise RuntimeError(
                 f"the message was refused: {sent.status_code} {sent.text}"
             )
-        return events(client, project_id)["events"][before:]
+        wrote = events(client, project_id)["events"][before:]
+        used = next((e["data"] for e in wrote if e["kind"] == "usage"), {})
+        self.spent[name] = {key: used.get(key, 0) for key in ("input_tokens", "output_tokens", "cost_usd")}
+        return wrote
 
     def check(self, name: str, ok: bool, saw: Any) -> None:
         """Record one check with what was seen, which is what a failure is read from."""
@@ -191,6 +200,7 @@ class Trial:
             "start_seconds": round(arrived - sent, 2),
             "import_seconds": self.import_seconds,
             "turn_seconds": self.turns,
+            "turn_usage": self.spent,
             "worker_peak_mib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
             // 1024,
             "program_peak_mib": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
@@ -447,6 +457,10 @@ def show(title: str, report: dict[str, Any]) -> int:
     print(
         f"  peak memory: worker {report['worker_peak_mib']} MiB, the loop's program {report['program_peak_mib']} MiB"
     )
+    for name, used in report["turn_usage"].items():
+        print(
+            f"  turn {name}: {used['input_tokens']} tokens in, {used['output_tokens']} out, ${used['cost_usd']}"
+        )
     for check in report["checks"]:
         print(
             f"  {'ok  ' if check['ok'] else 'FAIL'} {check['name']}"
@@ -477,9 +491,16 @@ def scripted() -> None:
 
 
 @app.local_entrypoint()
-def real() -> None:
-    """The four checks with a real model, the key from the Modal Secret `moody`."""
+def real(model: str = "") -> None:
+    """The four checks with a real model, the key from the Modal Secret `moody`.
+
+    `--model` names the agent's model for the trial (`claude-haiku-5-5` to see
+    that the key, the worker, and the loop meet for a few cents); left out, it
+    is the deployment's default.
+    """
     secrets = [modal.Secret.from_name(SECRET, required_keys=[KEY])]
+    if model:
+        secrets.append(modal.Secret.from_dict({MODEL: model}))
     failed = run(
         first.with_options(secrets=secrets), second.with_options(secrets=secrets), True
     )
