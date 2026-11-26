@@ -15,6 +15,10 @@
  * format is the project's own text. A shortcut of the sidebar's Create list opens it the same way,
  * at the details of its discipline, on its format where it names one.
  *
+ * A discipline that asks its kind (`asksKind`) needs no format here: "Choose later" is its first
+ * choice, and a project made that way opens on the card that asks. Its first message then waits in
+ * the message box, since the kind is answered first.
+ *
  * A Games project can also be imported from GitHub: "Import from GitHub" lists the repositories of
  * the control plane's GitHub App the person reaches, and the project is made already linked to
  * the one picked, so an Unreal engine started in it clones it. "Create new" is the project made
@@ -26,7 +30,7 @@ import { useEffect, useId, useRef, useState, type SubmitEvent } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { Dialog } from '../components/Dialog';
 import type { NewProject } from '../lib/api';
-import { catalog, findApp, findDiscipline, type Discipline } from '../lib/catalog';
+import { asksKind, catalog, findApp, findDiscipline, type Discipline } from '../lib/catalog';
 import { cx } from '../lib/cx';
 import { midSentence } from '../lib/format';
 import { ErrorNotice } from './Notice';
@@ -209,8 +213,9 @@ function Details({ titleId, discipline, draft, github, onBack, onCreate }: Detai
     requested === '' || discipline.formats.some((format) => format.toLowerCase() === requested.toLowerCase())
       ? discipline.formats
       : [...discipline.formats, requested];
+  const asks = asksKind(discipline);
   const [format, setFormat] = useState(
-    formats.find((candidate) => candidate.toLowerCase() === requested.toLowerCase()) ?? formats[0] ?? '',
+    formats.find((candidate) => candidate.toLowerCase() === requested.toLowerCase()) ?? (asks ? '' : (formats[0] ?? '')),
   );
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState(draft.prompt ?? '');
@@ -248,7 +253,11 @@ function Details({ titleId, discipline, draft, github, onBack, onCreate }: Detai
     setBusy(true);
     setError(null);
     try {
-      const made: NewProject = { name: name.trim() || fallbackName, discipline: discipline.id, format };
+      const made: NewProject = {
+        name: name.trim() || fallbackName,
+        discipline: discipline.id,
+        ...(format === '' ? {} : { format }),
+      };
       await onCreate(importing && repo !== null ? { ...made, github_repo: repo } : made, prompt.trim());
     } catch (failure) {
       setError(failure);
@@ -275,9 +284,11 @@ function Details({ titleId, discipline, draft, github, onBack, onCreate }: Detai
       <p className="lede mt-2 text-sm">{discipline.blurb}</p>
 
       <fieldset className="mt-6">
-        <legend className="text-sm font-semibold text-muted">Format</legend>
+        <legend className="text-sm font-semibold text-muted">
+          Format {asks ? <span className="font-normal text-faint">(optional)</span> : null}
+        </legend>
         <div className="mt-2.5 flex flex-wrap gap-2">
-          {formats.map((candidate) => (
+          {(asks ? ['', ...formats] : formats).map((candidate) => (
             <label key={candidate} className="chip h-9 px-3.5 text-sm">
               <input
                 type="radio"
@@ -289,10 +300,13 @@ function Details({ titleId, discipline, draft, github, onBack, onCreate }: Detai
                   setFormat(candidate);
                 }}
               />
-              {candidate}
+              {candidate === '' ? 'Choose later' : candidate}
             </label>
           ))}
         </div>
+        {asks && format === '' ? (
+          <p className="mt-2 text-xs text-faint">The conversation opens by asking, with a card to choose from.</p>
+        ) : null}
       </fieldset>
 
       {importable ? (
@@ -385,9 +399,13 @@ function Details({ titleId, discipline, draft, github, onBack, onCreate }: Detai
       )}
 
       <div className="mt-7 flex justify-end">
-        <button type="submit" className="btn btn-primary" disabled={busy || format === '' || (importing && repo === null)}>
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={busy || (format === '' && !asks) || (importing && repo === null)}
+        >
           {busy ? <span className="spinner" aria-hidden="true" /> : null}
-          {prompt.trim() === '' ? 'Create project' : 'Create and send'}
+          {prompt.trim() === '' || format === '' ? 'Create project' : 'Create and send'}
           {busy ? null : <ArrowRight className="size-4" aria-hidden="true" />}
         </button>
       </div>

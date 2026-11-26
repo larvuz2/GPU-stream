@@ -25,7 +25,8 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { FolderOpen, LayoutGrid, MessageSquare, MonitorPlay, Plus } from 'lucide-react';
 import type { ControlPlane, NewProject, TurnLimit } from '../lib/api';
-import { brand, catalog } from '../lib/catalog';
+import { asksKind, brand, catalog, shortcutDiscipline, type Shortcut } from '../lib/catalog';
+import { midSentence } from '../lib/format';
 import { isBoolean, isNumber } from '../lib/narrow';
 import { ConnectClaudeDialog } from './ConnectClaude';
 import { CreditsDialog } from './CreditsDialog';
@@ -173,6 +174,39 @@ export function Studio({
     setCreating(true);
   };
 
+  /**
+   * Starts from a shortcut of the Create list.
+   *
+   * A shortcut that names a format, or whose discipline asks nothing first, opens the new-project
+   * dialog on it. One whose discipline asks its kind makes the project at once, since the
+   * conversation asks the rest. So that a stray click leaves nothing behind, a project of that
+   * discipline with no kind yet, in which the person has said nothing, is opened again instead of
+   * a second one being made.
+   *
+   * @param shortcut The shortcut chosen.
+   * @throws ApiError When the project could not be made, or the one waiting could not be read.
+   */
+  const startShortcut = async (shortcut: Shortcut): Promise<void> => {
+    const discipline = shortcutDiscipline(shortcut);
+    if (discipline === undefined) {
+      return;
+    }
+    if (shortcut.format !== undefined || !asksKind(discipline)) {
+      openNewProject({ discipline: discipline.id, format: shortcut.format });
+      return;
+    }
+    const plane = connected(client);
+    for (const waiting of projects.list.filter((project) => project.discipline === discipline.id && project.format === '')) {
+      const { events } = await plane.listEvents(waiting.id, 0);
+      if (!events.some((event) => event.kind === 'user_message')) {
+        select(waiting.id);
+        return;
+      }
+    }
+    const made = await projects.create({ discipline: discipline.id, name: `Untitled ${midSentence(shortcut.label)}` });
+    select(made.id);
+  };
+
   const listKeys = useCallback(() => connected(client).listApiKeys(), [client]);
   const createKey = useCallback((name: string) => connected(client).createApiKey(name), [client]);
   const revokeKey = useCallback((id: string) => connected(client).revokeApiKey(id), [client]);
@@ -194,7 +228,10 @@ export function Studio({
         projects={projects}
         selectedId={selected?.id ?? null}
         onSelect={select}
-        onNewProject={openNewProject}
+        onNewProject={() => {
+          openNewProject();
+        }}
+        onShortcut={startShortcut}
         collapsed={(sideCollapsed || focus) && !narrow}
         onCollapse={(collapsed) => {
           setSideCollapsed(collapsed);

@@ -266,7 +266,10 @@ export interface Project {
   name: string;
   /** The catalog discipline it belongs to. */
   discipline: string;
-  /** The kind of work within the discipline, such as `Movie`. */
+  /**
+   * The kind of work within the discipline, such as `Film & TV`, or the empty string for a project
+   * that has not been given one yet: one that opened on the card that asks.
+   */
   format: string;
   /** Whether it is pinned to the top of the sidebar. */
   pinned: boolean;
@@ -297,12 +300,15 @@ export const ALWAYS = 'always';
 
 /** What a project is created with. */
 export interface NewProject {
-  /** Its name. */
-  name: string;
+  /** Its name; the control plane names a project made without one. */
+  name?: string;
   /** The catalog discipline. */
   discipline: string;
-  /** The kind of work within the discipline. */
-  format: string;
+  /**
+   * The kind of work within the discipline. Left out, in a discipline that asks its kind, the
+   * project opens on the card that asks.
+   */
+  format?: string;
   /** The repository it starts linked to, as `owner/name`: a project imported from GitHub. */
   github_repo?: string;
 }
@@ -518,6 +524,11 @@ export interface PreviewData {
   items: PreviewItem[];
   /** Whether two items are a before and after pair, the one before first. */
   compare: boolean;
+  /**
+   * A short label, such as "Rough cut" or "v3", for a preview that shows a version of the piece
+   * itself rather than a step on the way to it.
+   */
+  version?: string;
 }
 
 /** Something went wrong in the turn. */
@@ -625,6 +636,13 @@ export interface UiData {
   height?: number;
   /** The lock-in button's label, or `null` for a card with nothing to send back. */
   submit: string | null;
+  /** Whether choosing locks the card, with no button: a card whose one input is a single choice. */
+  instant?: boolean;
+  /**
+   * What of the project the card's answer sets: `format`, on the card that asks a new project's
+   * kind, whose locking message gives the project its format before the turn begins.
+   */
+  sets?: string;
   /** Whether the agent's turn ended to wait for the card. */
   waits: boolean;
   /** The files the card shows, each signed for the reading of the log that returned it. */
@@ -1082,13 +1100,26 @@ const isPlan = arrayOf(isPlanItem);
 const isAnswers: Guard<Record<string, string>> = (value): value is Record<string, string> =>
   isRecord(value) && Object.values(value).every(isString);
 
-/** Checks a value into a {@link Project}. */
-const isProject: Guard<Project> = (value): value is Project =>
+/** A project as it is sent, before a format that is absent or `null` is read as none. */
+type ProjectReport = Omit<Project, 'format'> & { format?: string | null };
+
+/**
+ * Reads a project as it is sent.
+ *
+ * @param report The project as sent.
+ * @returns The project, its format the empty string where it has none yet.
+ */
+function toProject(report: ProjectReport): Project {
+  return { ...report, format: report.format ?? '' };
+}
+
+/** Checks a value into a {@link ProjectReport}. */
+const isProjectReport: Guard<ProjectReport> = (value): value is ProjectReport =>
   isRecord(value) &&
   isString(value.id) &&
   isString(value.name) &&
   isString(value.discipline) &&
-  isString(value.format) &&
+  optional(isNullableString)(value.format) &&
   isBoolean(value.pinned) &&
   isString(value.created_at) &&
   isString(value.updated_at) &&
@@ -1120,7 +1151,8 @@ const isPreview: Guard<PreviewData> = (value): value is PreviewData =>
   isString(value.engine_id) &&
   isString(value.caption) &&
   arrayOf(isPreviewItem)(value.items) &&
-  isBoolean(value.compare);
+  isBoolean(value.compare) &&
+  optional(isString)(value.version);
 
 /** Checks a value into an {@link Asset}. */
 const isAsset: Guard<Asset> = (value): value is Asset =>
@@ -1223,6 +1255,8 @@ const isUi: Guard<UiData> = (value): value is UiData =>
   optional(isString)(value.html) &&
   optional(isNumber)(value.height) &&
   isNullableString(value.submit) &&
+  optional(isBoolean)(value.instant) &&
+  optional(isString)(value.sets) &&
   isBoolean(value.waits) &&
   arrayOf(isUiMedia)(value.media);
 
@@ -1597,11 +1631,13 @@ export function createControlPlane(baseUrl: string, accessToken: () => Promise<s
       await request('DELETE', `/v1/api-keys/${encodeURIComponent(id)}`);
     },
     checkout: async (pack) => field(await request('POST', '/v1/billing/checkout', { pack }), 'url', isWebUrl),
-    listProjects: async () => field(await request('GET', '/v1/projects'), 'projects', arrayOf(isProject)),
-    createProject: async (project) => field(await request('POST', '/v1/projects', project), 'project', isProject),
-    getProject: async (id) => field(await request('GET', projectPath(id)), 'project', isProject),
+    listProjects: async () =>
+      field(await request('GET', '/v1/projects'), 'projects', arrayOf(isProjectReport)).map(toProject),
+    createProject: async (project) =>
+      toProject(field(await request('POST', '/v1/projects', project), 'project', isProjectReport)),
+    getProject: async (id) => toProject(field(await request('GET', projectPath(id)), 'project', isProjectReport)),
     updateProject: async (id, changes) =>
-      field(await request('PATCH', projectPath(id), changes), 'project', isProject),
+      toProject(field(await request('PATCH', projectPath(id), changes), 'project', isProjectReport)),
     deleteProject: async (id) => {
       await request('DELETE', projectPath(id));
     },
@@ -1662,9 +1698,9 @@ export function createControlPlane(baseUrl: string, accessToken: () => Promise<s
       await request('DELETE', '/v1/github');
     },
     linkRepo: async (projectId, link) =>
-      field(await request('POST', projectPath(projectId, '/github'), link), 'project', isProject),
+      toProject(field(await request('POST', projectPath(projectId, '/github'), link), 'project', isProjectReport)),
     unlinkRepo: async (projectId) =>
-      field(await request('DELETE', projectPath(projectId, '/github')), 'project', isProject),
+      toProject(field(await request('DELETE', projectPath(projectId, '/github')), 'project', isProjectReport)),
     epic: async () => {
       const report = expect(await request('GET', '/v1/epic'), isEpicReport);
       return {

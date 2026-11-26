@@ -148,7 +148,11 @@ export function Workspace(props: WorkspaceProps) {
     },
   });
   const [panels, setPanels] = usePreference<PanelState>('panels', ALL_OPEN, isPanelState);
-  const [draft, setDraft] = useState('');
+  // A first message for a project that opened on the card asking its kind waits here, since the
+  // kind is answered first.
+  const [draft, setDraft] = useState(() =>
+    props.firstMessage !== null && project.format === '' ? props.firstMessage : '',
+  );
   const [screenId, setScreenId] = useState<string | null>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
   const [openAssetId, setOpenAssetId] = useState<string | null>(null);
@@ -202,11 +206,14 @@ export function Workspace(props: WorkspaceProps) {
     }
     firstTaken.current = true;
     onFirstMessageTaken();
+    if (project.format === '') {
+      return;
+    }
     send(firstMessage).catch(() => {
       // Refused (a turn already running, say): the message waits in the composer instead.
       setDraft(firstMessage);
     });
-  }, [firstMessage, onFirstMessageTaken, send, blocked, data.eventsStatus]);
+  }, [firstMessage, onFirstMessageTaken, send, blocked, data.eventsStatus, project.format]);
 
   /**
    * Unfolds a panel and brings it into view, switching to its tab on a narrow screen.
@@ -298,7 +305,13 @@ export function Workspace(props: WorkspaceProps) {
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-[0.9375rem] leading-tight font-semibold tracking-tight">{project.name}</h1>
             <p className="truncate text-xs text-muted">
-              {disciplineName(project.discipline)} <span className="text-faint">·</span> {project.format}
+              {disciplineName(project.discipline)}
+              {project.format === '' ? null : (
+                <>
+                  {' '}
+                  <span className="text-faint">·</span> {project.format}
+                </>
+              )}
             </p>
           </div>
           {data.running ? (
@@ -361,7 +374,18 @@ export function Workspace(props: WorkspaceProps) {
           onChoose={data.send}
           onApprove={data.approve}
           onLimits={props.onLimits}
-          onLock={(ui, value) => data.send(describeAnswer(ui, value), { ui_id: ui.ui_id, value })}
+          onLock={async (ui, value) => {
+            await data.send(describeAnswer(ui, value), { ui_id: ui.ui_id, value });
+            if (ui.sets !== undefined) {
+              // The answer changed the project itself (its kind), which the header and the sidebar show.
+              client
+                ?.getProject(project.id)
+                .then(projects.accept)
+                .catch(() => {
+                  // The project is read again with the next change to it.
+                });
+            }
+          }}
           onSuggest={setDraft}
         />
         <Composer

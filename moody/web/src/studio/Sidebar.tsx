@@ -9,10 +9,11 @@
  * **Recent** projects, and the account with its credits and the limits of its turns at the foot.
  *
  * Create lists the catalog's shortcuts (`catalog.shortcuts`): a kind of work by its everyday name.
- * Each opens the new-project dialog on its discipline, and on its format where it names one, so a
- * project of that kind is two clicks away and the first of them makes nothing. A shortcut the
- * catalog does not offer yet is drawn dimmed with "Soon": it starts nothing, and where the catalog
- * says what to expect of it, choosing it shows that (`ComingDialog.tsx`).
+ * Choosing one starts a project of it, which the studio does in the fewest steps the kind allows
+ * (`Studio.tsx`, `startShortcut`): at once where the conversation asks the rest, else through the
+ * new-project dialog on its discipline and format. A shortcut the catalog does not offer yet is
+ * drawn dimmed with "Soon": it starts nothing, and where the catalog says what to expect of it,
+ * choosing it shows that (`ComingDialog.tsx`).
  *
  * Each project row has a menu to pin, rename, or delete it; a rename is edited in the row itself,
  * and a delete asks first. The search is a quiet icon at the end of the Recent heading's row (the
@@ -56,7 +57,6 @@ import { Menu } from './Menu';
 import { ErrorNotice } from './Notice';
 import { DisciplineIcon, ShortcutIcon } from '../components/DisciplineIcon';
 import { ComingDialog } from './ComingDialog';
-import type { ProjectDraft } from './NewProjectDialog';
 import { ago, disciplineName, limitText } from './present';
 import type { Projects } from './useAccount';
 
@@ -68,8 +68,10 @@ interface SidebarProps {
   selectedId: string | null;
   /** Opens a project. */
   onSelect: (id: string) => void;
-  /** Opens the new-project dialog, on what a shortcut starts where one was chosen. */
-  onNewProject: (preset?: ProjectDraft) => void;
+  /** Opens the new-project dialog. */
+  onNewProject: () => void;
+  /** Starts a project from a shortcut of the Create list. Rejects with an `ApiError`. */
+  onShortcut: (shortcut: Shortcut) => Promise<void>;
   /** Whether the sidebar is folded to a rail. */
   collapsed: boolean;
   /** Folds or unfolds it. */
@@ -99,11 +101,13 @@ interface SidebarProps {
  * @returns The sidebar.
  */
 export function Sidebar(props: SidebarProps) {
-  const { projects, collapsed, onCollapse, onNewProject, mobileHidden, demo } = props;
+  const { projects, collapsed, onCollapse, onNewProject, onShortcut, mobileHidden, demo } = props;
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [coming, setComing] = useState<Shortcut | null>(null);
+  const [startError, setStartError] = useState<unknown>(null);
+  const starting = useRef(false);
   const ready = projects.status === 'ready';
   const search: ProjectSearch = {
     open: searching,
@@ -119,17 +123,27 @@ export function Sidebar(props: SidebarProps) {
   };
 
   /**
-   * Opens the new-project dialog on what a shortcut starts, or, for one that starts nothing yet,
-   * what to expect of it.
+   * Starts a project from a shortcut, or, for one that starts nothing yet, shows what to expect of
+   * it. A second press while the first is still starting is left out, so one project is made.
    *
    * @param shortcut The shortcut chosen.
    */
-  const choose = (shortcut: Shortcut): void => {
-    const discipline = shortcutDiscipline(shortcut);
-    if (discipline === undefined) {
+  const choose = async (shortcut: Shortcut): Promise<void> => {
+    if (shortcutDiscipline(shortcut) === undefined) {
       setComing(shortcut);
-    } else {
-      onNewProject({ discipline: discipline.id, format: shortcut.format });
+      return;
+    }
+    if (starting.current) {
+      return;
+    }
+    starting.current = true;
+    setStartError(null);
+    try {
+      await onShortcut(shortcut);
+    } catch (failure) {
+      setStartError(failure);
+    } finally {
+      starting.current = false;
     }
   };
   const comingDialog = (
@@ -256,6 +270,7 @@ export function Sidebar(props: SidebarProps) {
 
       <div className="thin-scroll mt-3 grid min-h-0 flex-1 grid-cols-1 content-start gap-4 overflow-y-auto px-3 pb-3">
         <CreateList ready={ready} compact={false} onChoose={choose} />
+        {startError === null ? null : <ErrorNotice error={startError} />}
         <ProjectLists {...props} pinned={pinned} recent={recent} search={search} onDelete={setDeleting} />
       </div>
 
@@ -282,7 +297,7 @@ interface CreateListProps {
   /** Whether the sidebar is a rail, where a shortcut is its icon alone. */
   compact: boolean;
   /** Takes the shortcut the person chose. */
-  onChoose: (shortcut: Shortcut) => void;
+  onChoose: (shortcut: Shortcut) => Promise<void>;
 }
 
 /**
@@ -300,7 +315,7 @@ function CreateList({ ready, compact, onChoose }: CreateListProps) {
     const soon = shortcutDiscipline(shortcut) === undefined;
     const icon = <ShortcutIcon shortcut={shortcut} className="size-3" />;
     const choose = (): void => {
-      onChoose(shortcut);
+      void onChoose(shortcut);
     };
     if (soon && (shortcut.preview ?? []).length === 0) {
       return (
@@ -683,7 +698,9 @@ function ProjectRow({ project, active, hidden, now, onSelect, onDelete, onRename
             type="button"
             className="min-w-0 flex-1 truncate text-left after:absolute after:inset-0 after:content-['']"
             aria-current={active ? 'page' : undefined}
-            title={`${project.name} · ${disciplineName(project.discipline)} · ${project.format}`}
+            title={[project.name, disciplineName(project.discipline), project.format]
+              .filter((part) => part !== '')
+              .join(' · ')}
             onClick={() => {
               onSelect(project.id);
             }}

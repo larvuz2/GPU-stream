@@ -63,7 +63,7 @@ export interface CatalogApp {
 /** What a discipline's opening card says of one of its formats, the project's kind. */
 export interface Kind {
   /** What the kind is, in a line. */
-  line: string;
+  note: string;
   /** Its icon, by name in the catalog's {@link Catalog.icons}. */
   icon: string;
 }

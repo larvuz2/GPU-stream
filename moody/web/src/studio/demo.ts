@@ -104,6 +104,7 @@ import {
   type Script,
   type Simulation,
 } from './demoKit';
+import { chosenKind, kindCard } from './demoOpenings';
 import {
   FILM_DISCIPLINES,
   MOVIE_AGENTS,
@@ -1457,9 +1458,12 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
       soon(() => {
         counter += 1;
         const now = new Date().toISOString();
+        const discipline = findDiscipline(fields.discipline);
         const project: Project = {
           id: `demo-project-${counter}`,
-          ...fields,
+          name: fields.name ?? 'Untitled project',
+          discipline: fields.discipline,
+          format: fields.format ?? '',
           pinned: false,
           created_at: now,
           updated_at: now,
@@ -1468,6 +1472,12 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
           plan: [],
         };
         projects = [project, ...projects];
+        // A project without a format opens on the card that asks its kind, written with no turn.
+        const card =
+          fields.format === undefined && discipline !== undefined ? kindCard(discipline, `${project.id}-kind`) : null;
+        if (card !== null) {
+          log(project.id).push({ at: Date.now(), event: { turn_id: null, kind: 'ui', data: card } });
+        }
         return project;
       }, 500),
     getProject: (id) => (legacy ? missing() : soon(() => find(id))),
@@ -1546,7 +1556,7 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
     },
     sendMessage: (projectId, text, ui) =>
       soon(() => {
-        const project = find(projectId);
+        find(projectId);
         const entries = log(projectId);
         const now = Date.now();
         if (pauses.has(projectId) || entries.some((scheduled) => scheduled.at > now)) {
@@ -1558,6 +1568,10 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
           at: now,
           event: { turn_id: turn, kind: 'user_message', data: ui === undefined ? { text } : { text, ui } },
         };
+        // The message that locks the card asking the project's kind gives the project its format first.
+        const locked = entries.find(({ event }) => event.kind === 'ui' && event.data.ui_id === ui?.ui_id)?.event;
+        const kind = locked?.kind === 'ui' ? chosenKind(locked.data, ui?.value) : null;
+        const project = kind === null ? find(projectId) : change(projectId, { format: kind });
         const answer = reply(project, text, turn, now, epicLinked, entries, limits());
         play(projectId, { ...answer, events: [message, ...answer.events] });
         change(projectId, { updated_at: new Date(now).toISOString() });
