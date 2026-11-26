@@ -510,6 +510,58 @@ usage            {input_tokens, output_tokens, cost_usd, seconds, agents}   once
                                             the cache too, `agents` the subagents the turn started
 ```
 
+## Contract: starting a project by its kind
+
+A project of a discipline is of one of that discipline's formats, its kind:
+for Media, in this order, Film & TV, Social Media, Vertical Shows,
+Commercials, Music Videos, Education, and Other. The kind decides how the
+agent opens and which default workflow it follows, so it is asked first, by
+the conversation itself.
+
+- **A project may start without a format.** `POST /v1/projects` takes
+  `format` as optional. Where it is left out and the discipline has formats,
+  the control plane writes the project's first event itself, with no turn and
+  no model: a `ui` card that asks the kind (`catalog.json`: the discipline's
+  `opening` title, its `formats`, and for each its `kinds` entry, a line and
+  an icon's name in the catalog's `icons`). The card is `instant`: choosing
+  locks it. Its data carries `sets: "format"`, and the message that locks it
+  sets the project's format to the chosen one before the turn begins, so the
+  agent's first turn already knows the kind.
+- **The agent opens each kind with a card of its own**, written by the
+  `video` skill for that kind: where the story comes from for Film & TV, the
+  track for a music video, the platform and the goal for social media. It
+  gathers what the work needs in as few, as easy answers as it can, and keeps
+  the project moving: every turn ends on a next step it has already prepared
+  or on one decision made easy.
+- **Cards for these openings.** A `pick` option may carry `icon` (a pixel
+  icon as rows of `0` and `1`, a square of eight to sixteen cells) in place
+  of an image, or `audio` (the name of one of the card's files), which makes
+  the option a tile that plays, so two or three sounds are compared by ear. A
+  card may be `instant` where its one input is a single choice. An `upload`
+  input takes a file from the person into the project's library and answers
+  with the entry it made (`{tag, name, kind}`).
+- **Sound is generated like pictures.** `generate_audio(prompt, kind:
+  "music" | "sound", lyrics?, instrumental?, seconds?, count?, save_to?)`
+  makes a song, an instrumental, or a sound effect through fal, shows each
+  result with a player, and keeps it in the library where `save_to` says.
+- **The latest version is always at hand.** `preview` takes an optional
+  `version`, a short label ("Rough cut", "v3") that marks what it shows as a
+  version of the piece itself, and the event carries it. The page's right
+  pane has a **Latest** module that plays the newest version (failing one,
+  the newest video or sound the session showed), full screen on request, and
+  lists the versions before it.
+- **Every module of the right pane folds**, and so does each section inside
+  Environment, by a quiet arrow that shows on hover and focus.
+
+Additions to the API and the events:
+
+```text
+POST   /v1/projects                        {name?, discipline, format?, ...}: without a format, the project
+                                           opens on the card that asks its kind
+ui               also {instant?, sets?: "format"}
+preview          also {version?}
+```
+
 ## What is done when
 
 1. FilmCraft engine on Modal, verified streaming and driven through its command
