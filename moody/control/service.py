@@ -34,13 +34,20 @@ links that expire. What the agent does in a project arrives as an append-only
 log of events the page polls (`events`), and a message to the agent claims the
 project's one turn in the database before a job runs it (`send_message`,
 `agent.py`). A message may lock in an interactive card the agent showed
-(`ui`), whose values go to the agent with it. Where the agent waits for the
+(`ui`), whose values go to the agent with it. A project made without a format,
+in a discipline whose kinds the catalog asks for, opens on a card the control
+plane writes itself (`opening_card`), and the message that locks that card
+sets the project's kind before its turn begins (`chosen_kind`, `set_kind`).
+Where the agent waits for the
 person's approval of a step, their answer is recorded once, in the database
 (`answer_approval`), and `always` is kept among the project's permissions,
 which the person can also set and clear (`update_project`). What one turn
 may spend on the model and how many steps it may take are settings of the
-person's account (`limits`, `set_limits`): the deployment's default where
-they set none, and never above the deployment's ceiling. What a project's
+person's account (`limits`, `change_me`): the deployment's default where
+they set none, and never above the deployment's ceiling. The account's other
+settings are the catalog's (`catalog.json`, `settings`): each is a switch or a
+choice with a default, the profile keeps what the person changed, and
+`settings` answers every one with the value that applies. What a project's
 agent can use beyond its tools is listed for the page (`connectors`). The
 user's GitHub account is connected through a GitHub App whose
 user token, and the refresh token that renews it, are kept sealed
@@ -162,6 +169,8 @@ PROJECT_FIELDS = (
 )
 # What of a project the card that asks its kind sets, which is also the id of that card's one input
 KIND_FIELD = "format"
+# The longest name an account gives itself
+NAME_LIMIT = 80
 # The limits of one turn an account sets for itself, as `profiles` and `Config` name them
 LIMITS = ("turn_budget_usd", "turn_limit")
 ASSET_FIELDS = ("id", "section", "name", "tag", "description", "metadata", "created_at", "updated_at")
@@ -361,6 +370,8 @@ class Catalog:
         self.tiers = {tier["id"]: tier for tier in self.data["tiers"]}
         self.regions = {region["id"] for region in self.data["regions"]}
         self.packs = {pack["id"]: pack for pack in self.data["credit_packs"]}
+        # What a person may set for themselves beyond the limits of a turn, by id (`Sessions.settings`)
+        self.settings = {setting["id"]: setting for setting in self.data.get("settings", [])}
         self.signup_credits: int = self.data["signup_credits"]
 
 
@@ -745,9 +756,31 @@ class Sessions:
         return {
             "id": profile["id"],
             "email": profile["email"],
+            "name": profile.get("name") or "",
             "credits": profile["credits"],
             "max_sessions": profile["max_sessions"],
             "limits": self.limits(profile),
+            "settings": self.settings(profile),
+        }
+
+    @staticmethod
+    def offered(setting: dict[str, Any], value: Any) -> bool:
+        """Whether a value is one a setting of the catalog may have: on or off for a toggle, one of a choice's options."""
+        if setting["kind"] == "toggle":
+            return isinstance(value, bool)
+        return any(value == option["value"] for option in setting.get("options", []))
+
+    def settings(self, profile: dict[str, Any]) -> dict[str, Any]:
+        """Every setting of the catalog with the value that applies to this person: their own, or its default.
+
+        A value kept from before the catalog stopped offering it does not
+        apply, so a choice whose option was removed is back on its default
+        without anyone's row being rewritten.
+        """
+        own = profile.get("settings") or {}
+        return {
+            name: own[name] if name in own and self.offered(setting, own[name]) else setting["default"]
+            for name, setting in self.catalog.settings.items()
         }
 
     def limits(self, profile: dict[str, Any]) -> dict[str, Any]:
@@ -766,18 +799,38 @@ class Sessions:
         applies = {name: min(default[name] if own[name] is None else own[name], ceiling[name]) for name in LIMITS}
         return {**applies, "own": own, "default": default, "max": ceiling}
 
-    def set_limits(self, user: User, changes: dict[str, Any]) -> dict[str, Any]:
-        """Set what one turn of the user's may spend or how many steps it may take, and return their profile.
+    def change_me(self, user: User, changes: dict[str, Any]) -> dict[str, Any]:
+        """Change what is the user's to set of their account, and return their profile.
 
-        `changes` holds the limits to change, by name; `None` puts one back on
-        the deployment's default.
+        `changes` holds what to change: a limit of a turn by its name, `name`,
+        and `settings`, the catalog's settings to change by id. `None` puts a
+        limit or a setting back on its default, and clears the name. Nothing
+        is written where anything is refused.
 
         Raises:
             Refused: 400 for a limit that is not a positive number, a number of steps that is not whole, or
-                one over the deployment's ceiling.
+                one over the deployment's ceiling; for a name that is not text; for settings that are
+                not an object, an id the catalog does not have, or a value it does not offer.
         """
         config = self.config
         kept: dict[str, Any] = {}
+        if "name" in changes:
+            name = changes["name"]
+            if name is not None and not isinstance(name, str):
+                raise Refused(400, "A name is text.")
+            kept["name"] = " ".join((name or "").split())[:NAME_LIMIT]
+        chosen: dict[str, Any] | None = None
+        if "settings" in changes:
+            chosen = changes["settings"]
+            if not isinstance(chosen, dict):
+                raise Refused(400, "settings is the settings to change, each by its id.")
+            for name, value in chosen.items():
+                setting = self.catalog.settings.get(name)
+                if setting is None:
+                    raise Refused(400, f"There is no setting {name}.")
+                if value is not None and not self.offered(setting, value):
+                    wanted = "true or false" if setting["kind"] == "toggle" else ", ".join(str(option["value"]) for option in setting["options"])
+                    raise Refused(400, f"{name} is {wanted}, or null for its default.")
         for name, value in changes.items():
             if name not in LIMITS:
                 continue
@@ -793,6 +846,9 @@ class Sessions:
                 value = int(value)
             kept[name] = value
         profile = self.me(user)
+        if chosen:
+            own = self.store.rows("profiles", id=f"eq.{user.id}")[0].get("settings") or {}
+            kept["settings"] = {name: value for name, value in {**own, **chosen}.items() if value is not None}
         if kept:
             self.store.update("profiles", kept, id=f"eq.{user.id}")
             profile = self.me(user)

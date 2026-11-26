@@ -175,7 +175,8 @@ class FakeStore:
     def moody_ensure_profile(self, p_user: str, p_email: str, p_signup_credits: int) -> dict[str, Any]:
         return self.profiles.setdefault(
             p_user,
-            {"id": p_user, "email": p_email, "credits": p_signup_credits, "max_sessions": 1, "turn_budget_usd": None, "turn_limit": None},
+            {"id": p_user, "email": p_email, "credits": p_signup_credits, "max_sessions": 1, "turn_budget_usd": None, "turn_limit": None,
+             "name": "", "settings": {}},
         )
 
     def moody_request_session(
@@ -1012,7 +1013,76 @@ def test_a_first_visit_makes_a_profile_with_the_sign_up_credits(world):
         "default": {"turn_budget_usd": 15.0, "turn_limit": 200},
         "max": {"turn_budget_usd": 100.0, "turn_limit": 1000},
     }
-    assert me == {"id": ALICE.id, "email": ALICE.email, "credits": CATALOG.signup_credits, "max_sessions": 1, "limits": limits}
+    assert me == {"id": ALICE.id, "email": ALICE.email, "name": "", "credits": CATALOG.signup_credits, "max_sessions": 1, "limits": limits,
+                  "settings": {"video_hyperframes": False}}
+
+
+def test_settings_are_the_persons_each_one_of_the_catalogs_and_on_its_default_until_changed(studio, monkeypatch):
+    client, model, store = studio.client, studio.model, studio.store
+    mine = lambda token="alice-token": client.get("/v1/me", headers=auth(token)).json()
+    change = lambda **body: client.patch("/v1/me", headers=auth("alice-token"), json=body)
+    (entry,) = CATALOG.data["settings"]
+    assert entry == {
+        "id": "video_hyperframes", "tab": "Video editing", "label": "Use HyperFrames for videos edited by code", "help": entry["help"],
+        "kind": "toggle", "default": False,
+    } and "Cut Room" in entry["help"] and len(entry["help"]) < 140
+    assert (mine()["name"], mine()["settings"]) == ("", {"video_hyperframes": False}), "everyone sees it, and it is off"
+
+    changed = change(name="  Mara   Films ", settings={"video_hyperframes": True})
+    assert changed.status_code == 200 and changed.json() == mine(), "the answer is the profile"
+    assert (mine()["name"], mine()["settings"]) == ("Mara Films", {"video_hyperframes": True})
+    assert mine("bob-token")["settings"] == {"video_hyperframes": False} and mine("bob-token")["name"] == ""
+    assert change(turn_limit=300).status_code == 200
+    assert (mine()["name"], mine()["settings"], mine()["limits"]["turn_limit"]) == ("Mara Films", {"video_hyperframes": True}, 300), (
+        "what a change leaves out is left as it is"
+    )
+    assert change(settings={}).status_code == 200 and mine()["settings"] == {"video_hyperframes": True}
+    for refused in ({"settings": {"video_hyperframe": True}}, {"settings": {"video_hyperframes": "yes"}}, {"settings": {"video_hyperframes": 1}},
+                    {"settings": [True]}, {"name": 7}, {"settings": {"video_hyperframes": False, "nope": True}, "name": "Other"},
+                    {"settings": {"video_hyperframes": False}, "turn_limit": 0}):
+        answer = change(**refused)
+        assert answer.status_code == 400 and answer.json()["detail"], refused
+    assert (mine()["name"], store.profiles[ALICE.id]["settings"]) == ("Mara Films", {"video_hyperframes": True}), "a refused change changes nothing"
+    assert change(settings={"video_hyperframe": True}).json()["detail"] == "There is no setting video_hyperframe."
+    assert change(settings={"video_hyperframes": "on"}).json()["detail"] == "video_hyperframes is true or false, or null for its default."
+    assert change(settings={"video_hyperframes": None}, name=None).status_code == 200
+    assert (mine()["name"], mine()["settings"], store.profiles[ALICE.id]["settings"]) == ("", {"video_hyperframes": False}, {}), (
+        "null puts a setting back on its default, and the profile keeps only what the person changed"
+    )
+    assert len(change(name="x" * 200).json()["name"]) == 80
+
+    # A choice is one of its options, and a value the catalog no longer offers is back on the default
+    captions = {"id": "captions", "tab": "Video editing", "label": "Captions", "help": "How a video carries its words.", "kind": "choice",
+                "options": [{"value": "burned", "label": "Burned in"}, {"value": "file", "label": "A file beside it"}], "default": "burned"}
+    monkeypatch.setitem(CATALOG.settings, "captions", captions)
+    assert mine()["settings"] == {"video_hyperframes": False, "captions": "burned"}
+    assert change(settings={"captions": "file"}).status_code == 200 and mine()["settings"]["captions"] == "file"
+    assert change(settings={"captions": "sung"}).json()["detail"] == "captions is burned, file, or null for its default."
+    monkeypatch.setitem(CATALOG.settings, "captions", {**captions, "options": captions["options"][:1]})
+    assert mine()["settings"]["captions"] == "burned" and store.profiles[ALICE.id]["settings"] == {"captions": "file"}
+    monkeypatch.delitem(CATALOG.settings, "captions")
+    assert mine()["settings"] == {"video_hyperframes": False}
+
+    # A turn's state names the engine a video is edited by code in, of the engines the catalog has
+    film = new_project(client)
+    model.script(*[reply(say("Hello."))] * 6)
+
+    def editor() -> str | None:
+        message(client, film["id"], "Hi")
+        line = next((line for line in said(model.requests[-1])[1].splitlines() if line.startswith("A video edited by code")), None)
+        return line and line.removeprefix("A video edited by code is made in: ")
+
+    assert editor() is None, "nothing is said of an engine the catalog does not have"
+    monkeypatch.setitem(CATALOG.apps, "cutroom", {"id": "cutroom", "name": "Cut Room", "status": "available"})
+    assert editor() == "Cut Room (app `cutroom`)"
+    change(settings={"video_hyperframes": True})
+    assert editor() == "Cut Room (app `cutroom`)", "switched on, but the catalog has no such engine"
+    monkeypatch.setitem(CATALOG.apps, "hyperframes", {"id": "hyperframes", "name": "HyperFrames", "status": "soon"})
+    assert editor() == "Cut Room (app `cutroom`)", "nor one that cannot be started yet"
+    monkeypatch.setitem(CATALOG.apps, "hyperframes", {"id": "hyperframes", "name": "HyperFrames", "status": "available"})
+    assert editor() == "HyperFrames (app `hyperframes`)"
+    change(settings={"video_hyperframes": None})
+    assert editor() == "Cut Room (app `cutroom`)", "off is the default"
 
 
 def test_what_a_turn_may_spend_and_how_many_steps_it_may_take_are_the_persons_own_settings(studio):

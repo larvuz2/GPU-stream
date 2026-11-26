@@ -27,8 +27,12 @@ A project's conversation is one session of the loop
 as it writes it (`transcript.py`), so the next turn resumes it on whichever
 machine runs it. Nothing of the conversation is kept here. What a turn adds to
 it is the person's message followed by the project's state (`Agent.prompt`):
-its name, plan, library, engines, and GitHub link, which change between turns
-and so are no part of the system prompt. Each open engine is listed with its
+its name, kind, plan, library, engines, and GitHub link, which change between
+turns and so are no part of the system prompt. The kind is among them because
+a project may be made without one and asked it by a card (`Sessions.opening_card`);
+the turn whose message locked that card reads the choice as a line after the
+person's words. The state also names the engine a video is edited by code in,
+which is the person's setting (`Agent.code_editor`). Each open engine is listed with its
 app and whether it has a command channel, under the project folder the
 engines share, so the agent knows what it can drive and where files meet.
 Where an Unreal engine runs, the state also lists the Unreal projects in that
@@ -230,6 +234,10 @@ READ_LIMIT = 100000
 IMAGE_SECONDS = 300
 VIDEO_SECONDS = 1200
 AUDIO_WAIT_SECONDS = 600
+# The setting by which a person chooses the engine their videos are edited by code in, and the two engines: the one
+# it switches on, then the one used otherwise
+CODE_EDITOR_SETTING = "video_hyperframes"
+CODE_EDITORS = ("hyperframes", "cutroom")
 # The longest label a preview's version carries
 VERSION_CHARACTERS = 40
 # What a generated sound is called, by its kind, where the page and the model are told how many were made
@@ -1494,7 +1502,9 @@ class Agent:
             + (f", streaming {' and '.join(STREAMS[engine['app']])}" if engine["app"] in STREAMS else "")
             for engine in open_engines
         ]
-        credits = self.sessions.me(turn.user)["credits"]
+        account = self.sessions.me(turn.user)
+        credits = account["credits"]
+        editor = self.code_editor(account["settings"])
         always = sorted(name for name, value in project["permissions"].items() if value == ALWAYS)
         return "\n".join(
             [
@@ -1503,6 +1513,7 @@ class Agent:
                 f"Kind: {project['format'] or 'not chosen yet'}",
                 f"GitHub: {linked}",
                 f"Generation: {'available' if self.generator else 'not configured on this deployment'}",
+                *([f"A video edited by code is made in: {self.app_name(editor)} (app `{editor}`)"] if editor else []),
                 f"Credits the person has: {credits}",
                 f"The person no longer wants to be asked before: {', '.join(always) or '(nothing; they are asked each time)'}",
                 "Plan:",
@@ -1516,6 +1527,21 @@ class Agent:
                 *self.unreal_state(turn, open_engines, history),
             ]
         )
+
+    def code_editor(self, settings: dict[str, Any]) -> str | None:
+        """The engine a video is edited by code in for this person, as an app's id, or nothing where the catalog has none.
+
+        The one their setting switches on (`CODE_EDITOR_SETTING`) where they
+        switched it on and that app can be started, and the other otherwise.
+        Either is an app of the catalog or it is not named: a turn is told of
+        no engine it could not start.
+        """
+        apps = self.sessions.catalog.apps
+        startable = [app for app in CODE_EDITORS if apps.get(app, {}).get("status") in STARTABLE]
+        chosen, default = CODE_EDITORS
+        if settings.get(CODE_EDITOR_SETTING) and chosen in startable:
+            return chosen
+        return default if default in startable else None
 
     def unreal_state(
         self, turn: Turn, engines: list[dict[str, Any]], history: Callable[[], list[dict[str, Any]]]
