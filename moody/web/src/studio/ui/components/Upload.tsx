@@ -52,6 +52,10 @@ const WANTS: Readonly<Record<string, string>> = {
 /**
  * Whether a file is of the kind an input takes.
  *
+ * A vendor's own format is of no kind, whatever family its type is registered under: a browser
+ * reports a DXF drawing as `image/vnd.dxf`, and it is not a picture. The library tells an upload
+ * the same way (`media_kind` in the control plane's `service.py`).
+ *
  * @param accept The kind: `audio`, `image`, `video`, or `any`.
  * @param file The file.
  * @returns `true` by the file's type, or by its name's ending where the browser tells no type.
@@ -61,7 +65,7 @@ function takes(accept: string, file: File): boolean {
     return true;
   }
   if (file.type !== '') {
-    return file.type.startsWith(`${accept}/`);
+    return file.type.startsWith(`${accept}/`) && !file.type.startsWith(`${accept}/vnd.`);
   }
   return (CATALOG.media_kinds[accept] ?? []).some((ending) => file.name.toLowerCase().endsWith(ending));
 }

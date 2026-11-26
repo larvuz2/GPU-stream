@@ -53,6 +53,25 @@ an Interior.
    their drawing, their photos, or their dimensions has opened the project themselves: act on
    what they brought.
 
+## When they already have a drawing
+
+Many people arrive with something: a floor plan from an architect, a layout they drew
+themselves, a part from another program, a sketch on paper. They start from it, and each
+kind's opening offers that way in.
+
+| What they have | What happens to it |
+|---|---|
+| A DXF or a DWG | Opened in CADCraft as it was drawn, with its layers and dimensions, and worked on from there |
+| An SVG | Opened as outlines, then brought to real size from one known dimension |
+| A PDF, a scan, a photo of a sketch | Placed under a new drawing as a picture, and the plan is drawn over it from the sizes they state |
+| A 3D model (GLB, OBJ, FBX, STL) | Opened in Blender; the `blender` skill has the formats and what each keeps |
+
+The file goes into the project's library from the card or the Library panel, and the
+`cadcraft` skill ("Starting from a drawing the person brought") has every step from there:
+copying it to the engine, reading it back, checking one size with the person before anything
+is built on it. Their file is never changed: the work is done on a copy. What a picture cannot
+give is size, so a plan traced from a photo is a sketch until one dimension is confirmed.
+
 ## The order of the work
 
 Every kind goes through the same stages. Each has one owner, and none starts an engine before
@@ -74,7 +93,8 @@ the stage that cannot be done without it.
   pictures alone. Say in a line what you left out and why. Their own rules for their work
   outrank this table.
 - **Needed work does not wait.** Someone who brings a DXF or a DWG, a model, or a measured
-  sketch starts at that stage: open the engine that reads it, as the `studio` skill says.
+  sketch starts at that stage ("When they already have a drawing"): open the engine that reads
+  it, as the `studio` skill says.
 - **The drawing is the source of every size.** Once a drawing exists, a dimension changes there
   first and the model follows it, by the hand-off the `cadcraft` skill describes. A model edited
   on its own stops agreeing with the sheets someone will build from.

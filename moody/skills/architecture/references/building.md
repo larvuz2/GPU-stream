@@ -17,22 +17,24 @@ Say one line ("Let's design it. First, where does it start?") and show:
 ```json
 {
   "title": "Where does it start?",
-  "components": {"type": "pick", "id": "start", "columns": 3, "options": [
+  "components": {"type": "pick", "id": "start", "columns": 2, "options": [
     {"value": "site", "label": "I have a site", "note": "A plot, photos, or a survey", "icon": ["000111111000", "001111111100", "011100001110", "011000000110", "011000000110", "011100001110", "001111111100", "000111111000", "000011110000", "000011110000", "000001100000", "000001100000"]},
     {"value": "existing", "label": "An existing building", "note": "To extend, convert, or rework", "icon": ["000011000000", "000111100000", "001100110000", "011000011000", "111111110000", "010000100110", "010000100110", "010000111111", "010000111111", "010000100110", "011111100110", "000000000000"]},
+    {"value": "plan", "label": "I have a plan", "note": "A layout I drew: a file or a sketch", "icon": ["001111110000", "001000011000", "001000010100", "001000011110", "001000000010", "001011110010", "001000000010", "001011110010", "001000000010", "001011100010", "001000000010", "001111111110"]},
     {"value": "idea", "label": "Just an idea", "note": "No site yet. We choose a setting", "icon": ["000011110000", "000100001000", "001000000100", "001000000100", "001000000100", "000100001000", "000010010000", "000011110000", "000010010000", "000011110000", "000001100000", "000000000000"]}]},
   "instant": true,
   "waits": true
 }
 ```
 
-It answers `{"start": "site"}`, `"existing"`, or `"idea"`. Their own words in place of a click
-are the brief: go on from them.
+It answers `{"start": "site"}`, `"existing"`, `"plan"`, or `"idea"`. Their own words in place
+of a click are the brief: go on from them.
 
 | The answer | Your next turn |
 |---|---|
 | `site` | The card below, as written. |
 | `existing` | The card below with its title "The building as it is", its upload labeled "A plan or photos of it", and its last field asking "What should change, and why?". |
+| `plan` | The second card below: their plan, how far it is, and what should happen to it. Then start from it, as "When they bring a plan" says. |
 | `idea` | No upload. Ask on one card what it is and for whom (the same field), and where it would stand, as a `select` of settings that differ (in a city street, in a suburb, in open country, on a coast, in mountains, in a forest), opened on the one their words suggest. |
 
 ```json
@@ -48,10 +50,49 @@ are the brief: go on from them.
 }
 ```
 
+```json
+{
+  "title": "Your plan",
+  "components": {"type": "stack", "children": [
+    {"type": "upload", "id": "plan", "label": "The plan: a DXF or a DWG, a PDF, or a photo of a sketch", "accept": "any", "section": "Drawings", "required": true},
+    {"type": "segmented", "id": "state", "label": "How far is it?", "options": [
+      {"value": "rough", "label": "A first layout"}, {"value": "settled", "label": "Mostly settled"},
+      {"value": "final", "label": "Final, to draw up"}], "value": "rough"},
+    {"type": "field", "id": "wish", "label": "What should happen to it?",
+     "placeholder": "Check the room sizes, add a bedroom, draw it up properly, show me what it looks like", "lines": 2}]},
+  "submit": "Start from my plan",
+  "waits": true
+}
+```
+
 The upload answers with the library entry the file became (`{"tag": "@...", "name": "...",
 "kind": "image"}`), or null. One file fits on the card; tell the person that more photos go on
 that entry in the Library panel. `library_look(tags=[<its tag>])` shows you a picture they
 brought; a survey or a plan in a format you are not shown is asked about in words.
+
+## When they bring a plan
+
+A person who already has a layout starts from it. Their plan replaces the directions and the
+sizes as the first thing to settle, because it already answers both; it does not replace
+checking them.
+
+1. **Open it at once.** This is needed work, so the engine starts now: say the tier, the price
+   a minute, and that you are opening their plan, then follow the `cadcraft` skill's
+   "Starting from a drawing the person brought". A DXF or a DWG opens as drawn. A PDF, a scan,
+   or a photo of a sketch goes under a new drawing as a picture, and you draw the plan over it
+   from the sizes they give.
+2. **Read it back.** Its overall size, each room with its area, how many floors, what did not
+   come through. Ask for one size they know and compare it: that settles the units before
+   anything is built on them.
+3. **Show it** as a drawing (`preview`), and say what you would look at first: a room below a
+   usable size, a door that swings into a passage, a wall with no thickness.
+4. **Then what they asked for.** "A first layout" is developed with them, a change at a time.
+   "Final, to draw up" is dimensioned and put on sheets without redesigning it. Pictures of
+   how it could look come after, described from the plan's own footprint, floors, and
+   openings, so the pictures show their building and not another.
+
+Ask the site and the program only as far as their wish needs them: a plan to draw up needs
+neither, a plan to develop needs both.
 
 ## What to learn, in order
 

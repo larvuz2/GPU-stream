@@ -120,9 +120,11 @@ has the full intake and the defaults to propose):
    material, a printer's bed, a code to meet. These are constraints: write them down first.
 3. **The deliverable and its scale.** The sheet size and plot scale (a room at 1:25 or 1:50 on
    A3; a part at 1:1 or 2:1 on A4), or the fabrication file and the process that reads it.
-4. **Existing material.** A DXF or DWG to open, or a sketch, scan, or photo with dimensions
-   (attach it as an underlay with `imageattach` and draw over it; never scale from a picture
-   without one known dimension).
+4. **Existing material.** A DXF or DWG to open, or a PDF, a scan, or a photo of a sketch to
+   draw over. A person who already has a layout starts from it, not from a blank sheet:
+   [starting.md](references/starting.md), "Starting from a drawing the person brought", has how
+   their file reaches the engine, what each kind of file gives you, and what to check before you
+   touch it. Never scale from a picture without one known dimension.
 
 Record the answers in `README.md` (`github_save`) before drawing, and put the constraints in
 the plan's Brief item.
@@ -192,11 +194,13 @@ above, and before each checkpoint, render the drawing without the interface and 
 (the studio skill has the tool's rules):
 
 ```text
-engine_call(engine_id, "engine.execute", {"command": "ui.render", "params":
-  {"path": "previews/plan-geometry-v2.png", "width": 2400, "height": 1600, "background": "white", "plot_style": "monochrome.ctb"}})
+engine_call(engine_id, "ui.render",
+  {"path": "previews/plan-geometry-v2.png", "width": 2400, "height": 1600, "background": "white", "plot_style": "monochrome.ctb"})
 preview(engine_id, path="previews/plan-geometry-v2.png", caption="The plan with the bathroom moved to the north wall, as it prints")
 ```
 
+- `ui.render` is a method of its own, like `drawing.inspect`: inside `engine.execute` it is
+  refused as an unknown command.
 - `background: "white"` with `plot_style: "monochrome.ctb"` is the drawing as it prints, which is
   how line weights are judged; leave them out for the dark canvas as it looks on screen. Always
   give `path`. `width` and `height` are yours to choose for what has to be legible.

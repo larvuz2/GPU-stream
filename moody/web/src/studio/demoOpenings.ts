@@ -23,8 +23,9 @@
  * - **Music Videos** asks whether there is a track: one to upload, or one to make together, for
  *   which it asks the feel and then plays three takes as tiles to compare by ear.
  * - **Social Media** asks in one card for the footage, where the clip goes, and what it is for.
- * - **Building** asks where the design starts (a site, an existing building, or an idea), takes
- *   the site and the program on one card and the size on the next, then shows three directions as
+ * - **Building** asks where the design starts (a site, an existing building, a plan the person
+ *   already has, or an idea). A plan is taken as a file and started from. Otherwise it takes the
+ *   site and the program on one card and the size on the next, then shows three directions as
  *   pictures and, for the one chosen, the sizes it would draw.
  * - **Interior** asks what there is of the room, with a file where there is one, then its
  *   measurements; **Product** asks how the thing is made, then what it is. Each ends on the
@@ -318,10 +319,11 @@ const FIRST: Readonly<Record<string, Step>> = {
       spec: {
         type: 'pick',
         id: 'start',
-        columns: 3,
+        columns: 2,
         options: [
           { value: 'site', label: 'I have a site', note: 'A plot, photos, or a survey', icon: PIN },
           { value: 'existing', label: 'An existing building', note: 'To extend, convert, or rework', icon: EXTEND },
+          { value: 'plan', label: 'I have a plan', note: 'A layout I drew: a file or a sketch', icon: PAGE },
           { value: 'idea', label: 'Just an idea', note: 'No site yet. We choose a setting', icon: BULB },
         ],
       },
@@ -633,6 +635,47 @@ const AFTER: Readonly<Record<string, (value: unknown) => Step>> = {
       lines: 2,
       required: true,
     };
+    if (start === 'plan') {
+      return {
+        says: 'Then we start from your plan. Give it to me as it is.',
+        card: {
+          step: 'plan',
+          title: 'Your plan',
+          spec: {
+            type: 'stack',
+            children: [
+              {
+                type: 'upload',
+                id: 'plan',
+                label: 'The plan: a DXF or a DWG, a PDF, or a photo of a sketch',
+                accept: 'any',
+                section: 'Drawings',
+                required: true,
+              },
+              {
+                type: 'segmented',
+                id: 'state',
+                label: 'How far is it?',
+                options: [
+                  { value: 'rough', label: 'A first layout' },
+                  { value: 'settled', label: 'Mostly settled' },
+                  { value: 'final', label: 'Final, to draw up' },
+                ],
+                value: 'rough',
+              },
+              {
+                type: 'field',
+                id: 'wish',
+                label: 'What should happen to it?',
+                placeholder: 'Check the room sizes, add a bedroom, draw it up properly, show me what it looks like',
+                lines: 2,
+              },
+            ],
+          },
+          submit: 'Start from my plan',
+        },
+      };
+    }
     if (start === 'idea') {
       return {
         says: 'Then we choose where it stands. A setting gives the design something to answer.',
@@ -682,6 +725,10 @@ const AFTER: Readonly<Record<string, (value: unknown) => Step>> = {
       },
     };
   },
+  plan: () => ({
+    says: 'I have it. Next I open it in CADCraft, read its sizes back to you, and ask for one you know, so we agree on its scale before anything is built on it: about 1 credit a minute.',
+    card: designNext('Open my plan', 'First, show me how it could look'),
+  }),
   site: () => ({
     says: 'A house for two there needs about 90 m²: a room to live and cook in, a bedroom, a study, a bath. Set the size, and what I may spend on pictures.',
     card: {
@@ -808,6 +855,13 @@ const AFTER: Readonly<Record<string, (value: unknown) => Step>> = {
             placeholder: 'A stool that stacks, a wall hook for a bicycle, a lamp for a desk',
             lines: 2,
             required: true,
+          },
+          {
+            type: 'upload',
+            id: 'drawing',
+            label: 'A drawing or a sketch of it, if you have one',
+            accept: 'any',
+            section: 'Drawings',
           },
           { type: 'number', id: 'size', label: 'Its largest dimension', min: 1, max: 300, step: 1, value: 45, unit: 'cm' },
           {

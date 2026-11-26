@@ -61,7 +61,8 @@ import pytest
 from claude_agent_sdk.testing import run_session_store_conformance
 from fastapi.testclient import TestClient
 
-from agent import SPECS, TOOL_NAMES, TOOLS, Agent, Result, check_activities, recap, replace_tags, reported_unreal, system_prompt
+from agent import SPECS, TOOL_NAMES, TOOLS, Agent, Result, check_activities, recap, replace_tags, reported_unreal, system_prompt, without_encoded_files
+from agent import media_kind as preview_kind
 from api import create_app
 from definitions import (
     AgentSpec,
@@ -1548,6 +1549,22 @@ def test_every_kind_names_an_icon_the_catalog_has_and_the_card_that_asks_the_kin
     genui.card(genui.catalog(), "icons", "Every icon of the catalog", spec, None, None, True, None, {}, instant=True)
 
 
+def test_a_drawing_a_person_brings_is_a_file_of_the_library_and_never_a_picture(studio):
+    client = studio.client
+    house = new_project(client, name="House", discipline="architecture", format="Building")
+    base = f"/v1/projects/{house['id']}/library"
+    # Browsers send a DXF as image/vnd.dxf: a vendor's format is a file whatever family its type is registered under
+    plan = client.post(base, headers=auth("alice-token"), json={"section": "Drawings", "name": "Plan", "tag": "plan"}).json()["asset"]
+    for name, content_type in (("house.dxf", "image/vnd.dxf"), ("house.dwg", "image/vnd.dwg"), ("board.psd", "image/vnd.adobe.photoshop"),
+                               ("sheet.pdf", "application/pdf"), ("sketch.jpg", "image/jpeg")):
+        plan = client.post(f"{base}/{plan['id']}/media", headers=auth("alice-token"), files={"file": (name, b"data", content_type)}).json()["asset"]
+    assert [(m["name"], m["kind"]) for m in plan["media"]] == [
+        ("sketch.jpg", "image"), ("sheet.pdf", "file"), ("board.psd", "file"), ("house.dwg", "file"), ("house.dxf", "file")]
+    assert plan["thumbnail_url"] == plan["media"][0]["url"], "the entry's picture is its photograph, not its drawing"
+    assert [preview_kind(name) for name in ("house.dxf", "house.dwg", "frame.exr", "board.psd", "clip.mov", "notes.txt")] == [
+        "file", "file", "image", "image", "video", "file"], "a preview tells a drawing the same way; what an engine can turn into a picture stays one"
+
+
 def test_the_library_keeps_entries_and_hands_out_their_files_as_signed_links(studio):
     client, store = studio.client, studio.store
     film = new_project(client)
@@ -2051,6 +2068,26 @@ def test_engine_call_reaches_the_command_channel_of_whichever_app_an_engine_runs
         ("Engine: timeline.place", results[4]["content"], False),
         ("FilmCraft: timeline.place", "That engine is not FilmCraft.", False),
     ]
+
+
+def test_a_command_channels_answer_reaches_the_model_without_the_picture_it_carries(studio):
+    client, model, launcher = studio.client, studio.model, studio.launcher
+    launcher.channels = {"cadcraft"}
+    plan = new_project(client, name="Room", discipline="architecture", format="Interior")
+    engine = start_engine(studio, plan["id"], app="cadcraft")
+    picture = base64.b64encode(os.urandom(30_000)).decode()
+    prose = "The wall on grid line A is 4600 long. " * 60
+    rendered = {"bytes": 30_000, "path": "previews/plan.png", "pngBase64": picture, "note": prose, "pages": [{"thumb": picture}], "width": 1500}
+    launcher.engine_call = lambda sandbox, app, method, params: rendered
+    model.script(reply(use("engine_call", engine_id=engine["id"], method="ui.render", params={"path": "previews/plan.png"})), reply(say("Shown.")))
+    message(client, plan["id"], "Show the plan")
+
+    (result,) = tool_results(model.requests[1]).values()
+    told = json.loads(result["content"])
+    left_out = f"[{len(picture)} characters of base64 left out]"
+    assert told == {**rendered, "pngBase64": left_out, "pages": [{"thumb": left_out}]}, "the facts around the picture arrive whole, words included"
+    assert len(result["content"]) < 4000 and "[cut]" not in result["content"]
+    assert without_encoded_files("QUJD" * 100) == "QUJD" * 100, "a short string is not a file"
 
 
 def test_engine_files_lists_the_project_folder_as_an_engine_sees_it(studio):
@@ -4275,6 +4312,13 @@ def test_the_real_definitions_offer_a_film_its_skills_its_subagents_and_an_agent
     film = {agent.name: agent for agent in agents_for(agents, derived, offered["media"], CATALOG, "media")}
     assert {"research", "story", "art-direction", "character-design", "production-design", "librarian", "animation", "review"} <= set(film)
     assert film["filmcraft"].title == "FilmCraft agent" and film["filmcraft"].skills == ("filmcraft",)
+    # Someone who already has a drawing starts from it: each opening offers that, and the drafting skill has the steps
+    design_references = {path.stem: path.read_text() for path in (skills_directory() / "architecture" / "references").glob("*.md")}
+    assert '"value": "plan"' in design_references["building"] and '"value": "plan"' in design_references["interior"]
+    assert all('"type": "upload"' in text for text in design_references.values()), "every kind's opening takes a file"
+    brought = (skills_directory() / "cadcraft" / "references" / "starting.md").read_text()
+    assert "Starting from a drawing the person brought" in brought and "engine_import" in brought
+    assert all("Starting from a drawing the person brought" in text for text in design_references.values())
     # A subagent is offered where its work exists: a design is offered no story and no sound
     design_agents = {agent.name for agent in agents_for(agents, derived, skills_for(skills, CATALOG, "architecture"), CATALOG, "architecture")}
     assert {"research", "art-direction", "production-design", "librarian", "review", "blender", "cadcraft"} <= design_agents

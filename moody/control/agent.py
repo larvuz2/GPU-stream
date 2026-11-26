@@ -218,6 +218,7 @@ from service import (
     Sessions,
     User,
     clean_sections,
+    media_kind as typed_kind,
     normal_tag,
     safe_name,
     setting_app,
@@ -231,6 +232,9 @@ ENGINE_START_SECONDS = 300
 ENGINE_POLL_SECONDS = 3
 EXEC_SECONDS = 300
 OUTPUT_LIMIT = 20000
+# A string of a command channel's answer at least this long, made of base64's characters alone, is a file
+ENCODED_FILE_CHARACTERS = 1024
+ENCODED_FILE = re.compile(r"[A-Za-z0-9+/=\r\n]+")
 READ_LIMIT = 100000
 IMAGE_SECONDS = 300
 VIDEO_SECONDS = 1200
@@ -314,6 +318,26 @@ class TurnStopped(Exception):
 
 
 # Prompts
+
+
+def without_encoded_files(answer: Any) -> Any:
+    """A command channel's answer without the files it carries as base64.
+
+    An engine answers a render or a screenshot with the picture itself beside
+    its facts (CADCraft's `ui.render` carries `pngBase64` whether or not it was
+    given a path). The model cannot read such a string, and it fills the
+    answer's limit before the facts that follow it. Each is replaced by a note
+    of its size: the file is the one the call wrote to its `path`, which
+    `preview` shows. Words are left alone, since base64 has no spaces between
+    them and prose does.
+    """
+    if isinstance(answer, dict):
+        return {key: without_encoded_files(value) for key, value in answer.items()}
+    if isinstance(answer, list):
+        return [without_encoded_files(value) for value in answer]
+    if isinstance(answer, str) and len(answer) >= ENCODED_FILE_CHARACTERS and ENCODED_FILE.fullmatch(answer):
+        return f"[{len(answer)} characters of base64 left out]"
+    return answer
 
 
 def project_folder(project_id: str) -> str:
@@ -1056,10 +1080,12 @@ def media_kind(name: str) -> str:
 
     The ending decides, not ffprobe: ffprobe finds a "video stream" in a text
     file and a "picture" in a PDF, so a file whose ending names no media is a
-    plain file unless the agent says what it is.
+    plain file unless the agent says what it is. An ending this module does not
+    list is told by the content type it usually has, as the library tells an
+    upload's (`service.media_kind`), so a drawing such as a DXF is a file.
     """
     ending = PurePosixPath(name).suffix.lower()
-    guessed = MEDIA_ENDINGS.get(ending) or (mimetypes.guess_type(name)[0] or "").split("/")[0]
+    guessed = MEDIA_ENDINGS.get(ending) or typed_kind(mimetypes.guess_type(name)[0] or "")
     return guessed if guessed in MEDIA_KINDS else "file"
 
 
@@ -2596,6 +2622,8 @@ class Agent:
     ) -> Result:
         """Call the command channel of the engine's app, or of `only` that app where a tool is one app's own.
 
+        The model is sent the answer's facts, not the files it carries (`without_encoded_files`).
+
         Raises:
             Refused: as `engine_sandbox` does, and 409 for an engine of another app than `only`, or
                 one whose app has no command channel, saying how such an engine is driven.
@@ -2611,7 +2639,7 @@ class Agent:
                 "screen (engine_show).",
             )
         answer = self.sessions.launcher.engine_call(sandbox, row["app"], method, params)
-        text = json.dumps(answer)
+        text = json.dumps(without_encoded_files(answer))
         return Result(text if len(text) <= OUTPUT_LIMIT else text[:OUTPUT_LIMIT] + " [cut]", f"{name}: {method} done")
 
     def tool_engine_call(self, turn: Turn, engine_id: str, method: str, params: dict[str, Any] | None = None) -> Result:

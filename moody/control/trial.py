@@ -25,8 +25,16 @@ It then runs the suites of `test_loop.py` and `test_api.py` in the same image.
 model: the worker's Anthropic key comes from the Modal Secret `moody`
 (`ANTHROPIC_API_KEY`), nothing is scripted, and each turn asks the model in
 words for what the check needs to see. It spends a few model calls and starts
-no engine. Whatever else the Secret holds is in those workers' environment
+no engine, and says what each turn cost. `--model` names the model the agent
+runs on for the trial, the deployment's default where left out. Whatever else the Secret holds is in those workers' environment
 and, as in the deployment, does not reach the loop's program (`loop.py`).
+
+`modal run moody/control/trial.py::opening_turn --discipline architecture
+--kind Building` asks what no script can: whether the agent follows a skill.
+It runs the first turn of a project opened by its kind with a real model and
+the repository's own skills and subagents, and reads it: the opening skill and
+the kind's reference opened, one card that waits at the end, and nothing spent
+but the model's tokens, of which it says the price.
 
 The checks read the conversation the page would be shown, the project's
 events, which is the same in both modes; what the model was sent is read only
@@ -35,6 +43,7 @@ where it is scripted. This file is not part of the deployed image.
 
 from __future__ import annotations
 
+import json
 import os
 import pickle
 import resource
@@ -64,9 +73,13 @@ PYTEST = "pytest==9.1.1"
 # Where a turn's working directory is made, on both machines: the loop keys a session by that path
 LOOP_ROOT = "/tmp/moody-trial-loop"
 SECRET, KEY = "moody", "ANTHROPIC_API_KEY"
+# The variable a worker reads the model of a real trial from, where one was named
+MODEL = "MOODY_TRIAL_MODEL"
 # The program's own tools the agent keeps, as the program names them when it starts (`Task` is its subagent tool)
 KEPT = {"Task", "Agent", "Read", "Skill", "WebFetch", "WebSearch"}
 WORD = "HELIOTROPE"
+# What the first turn of `opening_turn` may spend on the model, and how many steps it may take
+OPENING_BUDGET_USD, OPENING_STEPS = 1.0, 15
 # What each turn asks of the model. A scripted model answers as a model that does what it is asked would
 PROMPTS = {
     "tools": "Write the plan with update_plan: two tasks, 'Storyboard' active and 'Cut' pending. Then tell me in one "
@@ -125,15 +138,18 @@ class Trial:
     """The Studio's backend on the real loop for one half of the trial, and the checks made of it.
 
     The backend is `test_loop.backend`: everything but the SDK is the stand-in
-    of `test_api.py`, and the database is the one handed in, or a new one.
+    of `test_api.py`, and the database is the one handed in, or a new one. With
+    `own_definitions` the agent has the repository's skills and subagents, as a
+    deployment's has, in place of the few the suite writes for itself.
     """
 
-    def __init__(self, real: bool, state: bytes | None) -> None:
+    def __init__(self, real: bool, state: bytes | None, own_definitions: bool = False) -> None:
         folder = SUITE / "control" if SUITE.is_dir() else HERE
         if str(folder) not in sys.path:
             sys.path.insert(0, str(folder))
         began = time.monotonic()
         import test_loop
+        from definitions import agents_directory, skills_directory
         from loop import sdk_loop
         from scripted_api import ScriptedAPI
 
@@ -147,10 +163,14 @@ class Trial:
             pickle.loads(state) if state else None,
             Path(LOOP_ROOT),
             key=os.environ[KEY] if real else "sk-ant-scripted",
+            model=os.environ.get(MODEL, "") if real else "",
+            definitions=(skills_directory(), agents_directory()) if own_definitions else None,
         )
         self.made.agent.loop = lambda options: Heard(sdk_loop(options), self.heard)
         self.checks: list[dict[str, Any]] = []
         self.turns: dict[str, float] = {}
+        # What each turn's `usage` event said it took: tokens in and out, and the model's price for them
+        self.spent: dict[str, dict[str, Any]] = {}
 
     def script(self, marker: str, *steps: Any) -> None:
         """What the scripted model answers next to requests under a system prompt; nothing where the model is real."""
@@ -169,7 +189,10 @@ class Trial:
             raise RuntimeError(
                 f"the message was refused: {sent.status_code} {sent.text}"
             )
-        return events(client, project_id)["events"][before:]
+        wrote = events(client, project_id)["events"][before:]
+        used = next((e["data"] for e in wrote if e["kind"] == "usage"), {})
+        self.spent[name] = {key: used.get(key, 0) for key in ("input_tokens", "output_tokens", "cost_usd")}
+        return wrote
 
     def check(self, name: str, ok: bool, saw: Any) -> None:
         """Record one check with what was seen, which is what a failure is read from."""
@@ -191,6 +214,7 @@ class Trial:
             "start_seconds": round(arrived - sent, 2),
             "import_seconds": self.import_seconds,
             "turn_seconds": self.turns,
+            "turn_usage": self.spent,
             "worker_peak_mib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
             // 1024,
             "program_peak_mib": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
@@ -407,6 +431,12 @@ def second(real: bool, sent: float, before: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.function(**worker)
+def first_turn(sent: float, discipline: str, kind: str) -> dict[str, Any]:
+    """`started`, in a worker."""
+    return started(sent, discipline, kind)
+
+
+@app.function(**worker)
 def suites() -> dict[str, Any]:
     """Run the control plane's suites in the image, each on its own: how it ended, and the end of what it printed."""
     found = {}
@@ -435,6 +465,61 @@ def suites() -> dict[str, Any]:
     return found
 
 
+def started(sent: float, discipline: str, kind: str) -> dict[str, Any]:
+    """A project opened by its kind, on the repository's own skills and a real model: what the first turn did.
+
+    This is the check a skill's guide asks for and nothing scripted can make:
+    whether the agent follows the skill. The project is made without a kind,
+    as a Create shortcut makes it, the card the control plane wrote is locked
+    on `kind`, and the turn that follows is read: did the agent open the
+    discipline's opening skill and that kind's reference, end on a card that
+    waits, and spend nothing but the model's tokens. Engines and generation
+    are stand-ins, and the turn may spend at most `OPENING_BUDGET_USD`.
+    """
+    arrived = time.time()
+    trial = Trial(True, None, own_definitions=True)
+    from fastapi.testclient import TestClient
+    from test_api import CATALOG, auth, events
+
+    with TestClient(trial.made.app) as client:
+        headers = auth("alice-token")
+        client.patch("/v1/me", headers=headers, json={"turn_budget_usd": OPENING_BUDGET_USD, "turn_limit": OPENING_STEPS})
+        project_id = client.post("/v1/projects", headers=headers, json={"name": "Untitled", "discipline": discipline}).json()["project"]["id"]
+        asked = next(e["data"] for e in events(client, project_id)["events"] if e["kind"] == "ui")
+        began = time.monotonic()
+        answer = {"text": f"{kind}.", "ui": {"ui_id": asked["ui_id"], "value": {asked["sets"]: kind}}}
+        locked = client.post(f"/v1/projects/{project_id}/messages", headers=headers, json=answer)
+        trial.turns["opening"] = round(time.monotonic() - began, 2)
+        if locked.status_code != 202:
+            raise RuntimeError(f"the kind was refused: {locked.status_code} {locked.text}")
+        log = [e for e in events(client, project_id)["events"] if e["turn_id"] is not None]
+    used = next((e["data"] for e in log if e["kind"] == "usage"), {})
+    trial.spent["opening"] = {key: used.get(key, 0) for key in ("input_tokens", "output_tokens", "cost_usd")}
+    steps = [e["data"] for e in log if e["kind"] == "tool_start"]
+    titles = [step.get("title", "") for step in steps]
+    cards = [e["data"] for e in log if e["kind"] == "ui"]
+    skill = CATALOG.disciplines[discipline].get("opening_skill", "")
+    reference = "-".join(word for word in "".join(c if c.isalnum() else " " for c in kind.lower()).split())
+    trial.check(f"the agent opened the {skill} skill", f"Opening the {skill} skill" in titles, titles)
+    trial.check(f"and read {reference}.md", f"Reading {reference}.md" in titles, titles)
+    trial.check(
+        "the turn ended on one card that waits for its answer",
+        len(cards) == 1 and cards[0]["waits"] and log[-1]["kind"] == "turn_end",
+        [(card["title"], card["waits"]) for card in cards],
+    )
+    spending = [step["tool"] for step in steps if step["tool"].startswith(("generate_", "engine_"))]
+    trial.check("nothing was generated and no engine was touched", not spending, spending)
+    errors = [e["data"] for e in log if e["kind"] == "error"]
+    trial.check("the turn wrote no error", not errors, errors)
+    return trial.report(
+        sent,
+        arrived,
+        steps=titles,
+        said=" ".join(e["data"]["text"] for e in log if e["kind"] == "text" and not e["data"].get("partial")),
+        cards=[{key: card.get(key) for key in ("title", "instant", "submit", "spec")} for card in cards],
+    )
+
+
 def show(title: str, report: dict[str, Any]) -> int:
     """Print one half's report, and return how many of its checks failed."""
     print(
@@ -447,12 +532,27 @@ def show(title: str, report: dict[str, Any]) -> int:
     print(
         f"  peak memory: worker {report['worker_peak_mib']} MiB, the loop's program {report['program_peak_mib']} MiB"
     )
+    for name, used in report["turn_usage"].items():
+        print(
+            f"  turn {name}: {used['input_tokens']} tokens in, {used['output_tokens']} out, ${used['cost_usd']}"
+        )
     for check in report["checks"]:
         print(
             f"  {'ok  ' if check['ok'] else 'FAIL'} {check['name']}"
             + ("" if check["ok"] else f" -> {check['saw']}")
         )
     return sum(not check["ok"] for check in report["checks"])
+
+
+def show_opening(title: str, report: dict[str, Any]) -> int:
+    """Print a first turn's report with what the agent did, said, and showed, and return how many checks failed."""
+    failed = show(title, report)
+    print(f"  steps: {report['steps']}")
+    print(f"  said: {report['said']}")
+    for card in report["cards"]:
+        print(f"  card: {card['title']!r}, instant {card['instant']}, button {card['submit']!r}")
+        print(f"    {json.dumps(card['spec'])[:1500]}")
+    return failed
 
 
 def run(one: Any, two: Any, real: bool) -> int:
@@ -477,14 +577,40 @@ def scripted() -> None:
 
 
 @app.local_entrypoint()
-def real() -> None:
-    """The four checks with a real model, the key from the Modal Secret `moody`."""
+def real(model: str = "") -> None:
+    """The four checks with a real model, the key from the Modal Secret `moody`.
+
+    `--model` names the agent's model for the trial (`claude-haiku-5-5` to see
+    that the key, the worker, and the loop meet for a few cents); left out, it
+    is the deployment's default.
+    """
     secrets = [modal.Secret.from_name(SECRET, required_keys=[KEY])]
+    if model:
+        secrets.append(modal.Secret.from_dict({MODEL: model}))
     failed = run(
         first.with_options(secrets=secrets), second.with_options(secrets=secrets), True
     )
     if failed:
         raise SystemExit(f"{failed} failed")
+
+
+@app.local_entrypoint()
+def opening_turn(discipline: str = "architecture", kind: str = "", model: str = "") -> None:
+    """A project of `discipline` opened as `kind` with a real model and the repository's skills: its first turn.
+
+    `kind` is the discipline's first where left out. `--model` names the
+    agent's model, the deployment's default where left out. The turn starts
+    no engine and generates nothing, and may spend `OPENING_BUDGET_USD` at most.
+    """
+    catalog = json.loads((HERE.parent / "catalog.json").read_text())
+    formats = next(entry["formats"] for entry in catalog["disciplines"] if entry["id"] == discipline)
+    secrets = [modal.Secret.from_name(SECRET, required_keys=[KEY])]
+    if model:
+        secrets.append(modal.Secret.from_dict({MODEL: model}))
+    chosen = kind or formats[0]
+    report = first_turn.with_options(secrets=secrets).remote(time.time(), discipline, chosen)
+    if show_opening(f"{discipline}, opened as {chosen}", report):
+        raise SystemExit("the opening did not go as its skill says")
 
 
 if __name__ == "__main__":

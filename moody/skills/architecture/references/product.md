@@ -50,6 +50,7 @@ Each is one turn. Skip what they already said.
      "components": {"type": "stack", "children": [
        {"type": "field", "id": "what", "label": "What is it, and what does it have to do?",
         "placeholder": "A stool that stacks, a wall hook for a bicycle, a lamp for a desk", "lines": 2, "required": true},
+       {"type": "upload", "id": "drawing", "label": "A drawing or a sketch of it, if you have one", "accept": "any", "section": "Drawings"},
        {"type": "number", "id": "size", "label": "Its largest dimension", "min": 1, "max": 300, "step": 1, "value": 45, "unit": "cm"},
        {"type": "select", "id": "material", "label": "Material", "options": [
          "Plywood", "Solid wood", "Steel", "Aluminum", "Acrylic", "PLA", "PETG", "You propose"], "value": "You propose"},
@@ -59,6 +60,11 @@ Each is one turn. Skip what they already said.
    }
    ```
 
+   Where they gave a drawing, start from it: a DXF or a DWG is opened in CADCraft as drawn,
+   and a PDF or a photo of a sketch goes under a new drawing to draw over (the `cadcraft`
+   skill, "Starting from a drawing the person brought"). Read its sizes back, and go to the
+   concepts only if they want other ways the thing could be; a drawing they are settled on
+   goes straight to its dimensions.
 2. **What it must fit**, in one question where it applies: the thing it holds or mounts to, with
    its measured size (a 28 mm tube, a 13-inch laptop, a wall stud). A part that has to fit
    another is designed from that dimension, so ask for it before any picture.
