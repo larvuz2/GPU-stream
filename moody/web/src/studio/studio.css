@@ -623,6 +623,68 @@
     transform: rotate(-90deg);
   }
 
+  /* The player of the Latest module, which is what goes full screen. */
+  .latest-frame {
+    overflow: hidden;
+    border: 1px solid var(--color-line);
+    border-radius: 0.85rem;
+    background: #050505;
+  }
+
+  .latest-frame:fullscreen {
+    display: grid;
+    place-content: center;
+    gap: 1.75rem;
+    border: 0;
+    border-radius: 0;
+    background: #000;
+  }
+
+  .latest-frame:fullscreen > :is(video, img) {
+    width: 100vw;
+    height: 100vh;
+    aspect-ratio: auto;
+    object-fit: contain;
+  }
+
+  .latest-frame:fullscreen > div {
+    width: min(40rem, 90vw);
+  }
+
+  /* The version's name over a sound, which has no picture to fill the screen with. */
+  .latest-name {
+    display: none;
+    text-align: center;
+  }
+
+  .latest-frame[data-kind='audio']:fullscreen > .latest-name {
+    display: block;
+  }
+
+  /* A version in the list under the player: a row that plays it. */
+  .version-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 1.9rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 0.55rem;
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+    text-align: left;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .version-row:hover,
+  .version-row:focus-visible,
+  .version-row[aria-current='true'] {
+    background: rgb(255 255 255 / 0.05);
+    color: var(--color-fg);
+  }
+
   /* The heading of a section that folds inside a panel: the whole of it is the control. */
   .fold-head {
     display: flex;

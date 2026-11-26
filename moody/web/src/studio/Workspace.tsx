@@ -6,8 +6,8 @@
 
 /**
  * The open project: its header, conversation, and composer in the center, and in the right column
- * the Screen over the Environment (engines, repositories, and what the agent works with), Plan,
- * and Library panels.
+ * the Screen over the Latest (the newest version of the piece, once the session has shown one),
+ * Environment (engines, repositories, and what the agent works with), Plan, and Library panels.
  *
  * It renders three regions of the studio's grid (`studio.css`) and is keyed by the project, so
  * opening another project starts its data afresh. Each region knows how to lead to the others: a
@@ -30,7 +30,7 @@
  * @module
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { Layers, ListChecks, PanelRightClose, PanelRightOpen, Plus, Server } from 'lucide-react';
+import { Layers, ListChecks, PanelRightClose, PanelRightOpen, Play, Plus, Server } from 'lucide-react';
 import { ALWAYS, isActive, type ControlPlane, type Project, type Session, type TurnLimit } from '../lib/api';
 import { AUTO_REGION } from '../lib/catalog';
 import { Composer } from './Composer';
@@ -39,6 +39,7 @@ import { AgentEnvironment } from './EnvironmentAgent';
 import { EngineSection, GitHubSection, type EpicReturn, type GitHubReturn } from './EnvironmentPanel';
 import { GitHubMark } from './Menu';
 import { FoldsContext, useFolds } from './folds';
+import { LatestBody } from './LatestPanel';
 import { LibraryBody } from './LibraryPanel';
 import { Panel } from './Panel';
 import { PlanBody } from './PlanPanel';
@@ -46,7 +47,7 @@ import { DisciplineIcon } from '../components/DisciplineIcon';
 import { disciplineName, normalizeTag, planProgress } from './present';
 import { describeAnswer } from './ui/answer';
 import { Stage, type StreamStandIn } from './Stage';
-import { buildTranscript, openQuestion, processMedia, type ProcessEntry, type Reveal } from './transcript';
+import { buildTranscript, openQuestion, processMedia, versions, type Reveal } from './transcript';
 import { connected, type Account, type Epic, type GitHub, type Projects } from './useAccount';
 import { useProject } from './useProject';
 
@@ -54,7 +55,7 @@ import { useProject } from './useProject';
 export type MobileTab = 'projects' | 'chat' | 'screen' | 'workspace';
 
 /** A module of the right column, by the id it folds under. */
-type Module = 'screen' | 'environment' | 'plan' | 'library';
+type Module = 'screen' | 'latest' | 'environment' | 'plan' | 'library';
 
 /** A picture of an engine, as the person or the agent put it on screen. */
 interface Picked {
@@ -141,6 +142,7 @@ export function Workspace(props: WorkspaceProps) {
   const [ledTo, setLedTo] = useState<Reveal | null>(null);
   const items = useMemo(() => buildTranscript(data.events), [data.events]);
   const process = useMemo(() => processMedia(items), [items]);
+  const shown = useMemo(() => versions(items), [items]);
   const environmentRef = useRef<HTMLDivElement>(null);
   const planRef = useRef<HTMLDivElement>(null);
   const libraryRef = useRef<HTMLDivElement>(null);
@@ -229,10 +231,11 @@ export function Workspace(props: WorkspaceProps) {
   /**
    * Leads to where a file the session showed appeared in the conversation.
    *
-   * @param entry The file.
+   * @param entry The file: the conversation's entry it appeared in, and the subagent whose card
+   *   holds it, where one does.
    */
-  function showInConversation(entry: ProcessEntry): void {
-    setLedTo({ key: entry.itemKey, agentId: entry.agentId, seq: (ledTo?.seq ?? 0) + 1 });
+  function showInConversation(entry: { itemKey: string; agentId?: string | null }): void {
+    setLedTo({ key: entry.itemKey, agentId: entry.agentId ?? null, seq: (ledTo?.seq ?? 0) + 1 });
     if (narrow) {
       onTab('chat');
     }
@@ -426,7 +429,18 @@ export function Workspace(props: WorkspaceProps) {
         aria-label="Project panels"
         data-mobile-hidden={narrow && tab !== 'workspace'}
       >
-        <div ref={environmentRef}>
+        {shown.length === 0 ? null : (
+          <Panel
+            title="Latest"
+            icon={Play}
+            open={unfolded('latest')}
+            onToggle={toggle('latest')}
+            badge={shown[0]?.label ?? undefined}
+          >
+            <LatestBody versions={shown} onShow={showInConversation} />
+          </Panel>
+        )}
+        <div ref={environmentRef} className={shown.length === 0 ? undefined : 'border-t border-[var(--studio-line)]'}>
           <Panel
             title="Environment"
             icon={Server}

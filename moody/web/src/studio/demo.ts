@@ -22,12 +22,14 @@
  * Every question the demo's agents ask names the answer they would give (`recommended`), as the
  * agent on Anthropic's loop does.
  *
- * The film's agent shows its work before it asks: four previews of every kind a card takes (a
- * file, a frame, a before and after pair of a grade, and a six-second animatic), one more than a
- * turn keeps in view, so the earliest is folded. A third project, Lighthouse theme, is a score in
- * SoundCraft whose agent plays the person the first eight bars as a preview. The clip, the graded
- * frame, and the eight bars are made for the demo: the clip and the frame from the site's own
- * artwork with ffmpeg, the bars synthesized with it (`public/media/preview-*`).
+ * The film's agent shows its work before it asks: five previews of every kind a card takes (the
+ * boards cut together, a file, a frame, a before and after pair of a grade, and a six-second
+ * animatic), two more than a turn keeps in view, so the earliest are folded. The boards cut and
+ * the animatic are versions of the piece (`version`), so the Latest module plays the animatic and
+ * lists the boards cut before it. A third project, Lighthouse theme, is a score in SoundCraft
+ * whose agent plays the person the first eight bars as a preview, a version too. The clips, the
+ * graded frame, and the eight bars are made for the demo: the clips and the frame from the site's
+ * own artwork with ffmpeg, the bars synthesized with it (`public/media/preview-*`).
  *
  * Beside the film is a game, Ember Ridge, part way through a studio's onboarding (`moody/UNREAL.md`):
  * the agent started an Unreal engine and put its Desktop on the screen, the developer cloned the
@@ -463,11 +465,31 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
     },
   });
   /** Shows work in progress the way the agent's `preview` tool does: its call, the card, its outcome. */
-  const show = (call: string, summary: string, caption: string, items: PreviewItem[], compare = false): void => {
+  const show = (
+    call: string,
+    summary: string,
+    caption: string,
+    items: PreviewItem[],
+    { compare = false, version }: { compare?: boolean; version?: string } = {},
+  ): void => {
     add({ turn_id: t2, kind: 'tool_start', data: { call_id: call, tool: 'preview', title: 'Preparing a preview' } });
-    add({ turn_id: t2, kind: 'preview', data: { engine_id: engine.id, caption, items, compare } }, 3 * SECOND);
+    add(
+      {
+        turn_id: t2,
+        kind: 'preview',
+        data: { engine_id: engine.id, caption, items, compare, ...(version === undefined ? {} : { version }) },
+      },
+      3 * SECOND,
+    );
     add({ turn_id: t2, kind: 'tool_end', data: { call_id: call, ok: true, summary } }, SECOND);
   };
+  show(
+    'c7b',
+    'Showed 1 video: the boards cut together',
+    'The boards cut together in black and white, three seconds each: no motion yet, only the order.',
+    [{ kind: 'video', url: '/media/preview-boards.mp4', name: 'opening-boards.mp4', seconds: 6, width: 640, height: 360 }],
+    { version: 'Boards cut' },
+  );
   show('c8', 'Showed 1 file: the opening’s shot list', 'The opening as a shot list: six shots, 24 seconds.', [
     { kind: 'file', url: '/media/preview-shot-list.txt', name: 'opening-shot-list.txt' },
   ]);
@@ -491,7 +513,7 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
       { kind: 'image', url: SPIRE.url, name: 'shot01-reference.png', width: 1200, height: 800 },
       { kind: 'image', url: '/media/preview-shot-graded.webp', name: 'shot01-graded.png', width: 1200, height: 800 },
     ],
-    true,
+    { compare: true },
   );
   add({
     turn_id: t2,
@@ -520,6 +542,7 @@ function filmEvents(now: number, library: Asset[], engine: Session): Scheduled[]
         height: 360,
       },
     ],
+    { version: 'Animatic v1' },
   );
   add({
     turn_id: t2,
@@ -779,6 +802,7 @@ function scoreEvents(start: number, engine: Session): Scheduled[] {
         caption: 'The theme’s first eight bars, piano alone: A minor, 72 BPM, nothing mixed yet.',
         items: [{ kind: 'audio', url: '/media/preview-theme.m4a', name: 'theme-bars-1-8.wav', seconds: 10.2 }],
         compare: false,
+        version: 'First eight bars',
       },
     }),
     step(80, {

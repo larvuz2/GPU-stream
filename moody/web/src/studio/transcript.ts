@@ -43,9 +43,10 @@
  * a tool call still running and a subagent still working were stopped, a block still being written
  * is as long as it got, and an approval nobody answered has expired.
  *
- * {@link agentActivity} reads from the fold what the agent is doing right now, and
+ * {@link agentActivity} reads from the fold what the agent is doing right now,
  * {@link processMedia} every picture, video, and sound the session showed, which the library
- * gathers under Process.
+ * gathers under Process, and {@link versions} the versions of the piece itself, which the Latest
+ * module plays.
  * @module
  */
 import type {
@@ -143,6 +144,8 @@ export type TranscriptItem =
       caption: string;
       files: PreviewItem[];
       compare: boolean;
+      /** What the agent called it, for a preview that shows a version of the piece itself; else `null`. */
+      version: string | null;
       /** How many previews the same turn showed after this one. */
       later: number;
       first: boolean;
@@ -517,6 +520,7 @@ function fold(events: readonly StudioEvent[], entriesOf: (agentId: string) => Su
           caption: event.data.caption,
           files: event.data.items,
           compare: event.data.compare,
+          version: event.data.version ?? null,
           later: 0,
           first: false,
         });
@@ -793,4 +797,54 @@ export function processMedia(items: readonly TranscriptItem[]): ProcessEntry[] {
     }
   }
   return entries.reverse();
+}
+
+/** A version of the piece the session showed, to play or to look at again. */
+export interface Version {
+  /** A key of its own among the versions. */
+  key: string;
+  /** The file to play: a video or a sound, or a picture for a version that holds nothing that plays. */
+  media: Media;
+  /** What the agent called the version, or `null` for a file that stands in where none was named. */
+  label: string | null;
+  /** What showed it, in the agent's words. */
+  caption: string;
+  /** The key of the conversation's entry it appeared in. */
+  itemKey: string;
+}
+
+/** The kinds of file a version is played by, the first a preview holds winning. */
+const PLAYED_BY: readonly Media['kind'][] = ['video', 'audio', 'image'];
+
+/**
+ * The versions of the piece the session has shown, the newest first.
+ *
+ * A version is a preview the agent called one (`version`), played by its first video, failing
+ * that its first sound, failing that its first picture. Where no preview names a version, the
+ * newest video or sound the session showed stands in as the only one, so there is something to
+ * play as soon as anything that plays has been shown.
+ *
+ * @param items The conversation.
+ * @returns The versions, or none while the session has shown nothing that plays.
+ */
+export function versions(items: readonly TranscriptItem[]): Version[] {
+  const named: Version[] = [];
+  for (const item of items) {
+    if (item.type !== 'preview' || item.version === null) {
+      continue;
+    }
+    const media = PLAYED_BY.map((kind) => item.files.find((file) => file.kind === kind)).find(
+      (file) => file !== undefined,
+    );
+    if (media !== undefined) {
+      named.push({ key: item.key, media, label: item.version, caption: item.caption, itemKey: item.key });
+    }
+  }
+  if (named.length > 0) {
+    return named.reverse();
+  }
+  const newest = processMedia(items).find((entry) => entry.media.kind === 'video' || entry.media.kind === 'audio');
+  return newest === undefined
+    ? []
+    : [{ key: newest.key, media: newest.media, label: null, caption: newest.caption, itemKey: newest.itemKey }];
 }
