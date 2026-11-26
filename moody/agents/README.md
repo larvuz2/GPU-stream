@@ -60,11 +60,13 @@ tools, model tier, and disciplines it has.
 | `production-design` | One environment, prop, product, vehicle, or logo: candidates, then its reference set | One per entry, beside the characters |
 | `librarian` | The library's sections, metadata, and consistency | Bookkeeping over every entry, which a light model does |
 | `animation` | Animation tests, and the takes of one scene's shots | Slow generations, one job per test set or scene, several at once |
+| `sound` | Versions of a song, takes of a sound effect, one line in several voices, the lines of a narration | Several generations whose result is a choice the person makes by ear, made while the pictures are designed |
 | `review` | Work checked against its brief and a standard, findings by severity | A reader that did not make the work finds what its maker missed |
 
 What is deliberately absent: a subagent that plans the project or talks to the person (that is
-the agent itself), one for sound or voice (the agent has no tool that generates them), and one
-per engine written by hand (the template below makes those).
+the agent itself), one that writes hooks, captions, or the words of a post (a few lines the
+agent writes itself, with the person), and one per engine written by hand (the template below
+makes those: mapping footage and cutting it by code is the job of that engine's operator).
 
 ## Engine operators: `_operator.md`
 

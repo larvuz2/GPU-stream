@@ -192,7 +192,7 @@ close-cropped black hair in a red raincoat, does not look up; her fingers close 
 camera. Cinematic, muted amber and blue, soft film grain. Rain on glass.
 ```
 
-**Vertical drama hook** (`["@ava", "@ballroom"]`, 5 s, 9:16, 720p):
+**Vertical show hook** (`["@ava", "@ballroom"]`, 5 s, 9:16, 720p):
 
 ```text
 Close-up, eye level, 50mm, vertical frame, face in the upper middle. @ava, a young woman in a

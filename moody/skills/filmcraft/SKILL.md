@@ -104,12 +104,15 @@ Color, Titles and captions, Delivery.
 
 The recipes for each stage, mapped from Premiere practice, are in editing.md.
 
-| Format | Sequence | Frame rate | Delivery |
+| Kind | Sequence | Frame rate | Delivery |
 |---|---|---|---|
-| Movie (short) | 1920x1080 | 24 | YouTube 1080p, ProRes 422 HQ master |
-| Commercial | one per aspect: 16:9, 9:16, 1:1 | 24 or 30 | per platform, -14 LUFS for social |
-| Episode | 1920x1080 | 24 | YouTube 1080p, ProRes master |
-| Vertical drama | 1080x1920 | 24 or 30 | TikTok, Reels, Shorts presets (-14 LUFS) |
+| Film & TV, a short film | 1920x1080 | 24 | YouTube 1080p, ProRes 422 HQ master |
+| Film & TV, an episode | 1920x1080 | 24 | YouTube 1080p, ProRes master |
+| Vertical Shows | 1080x1920 | 24 or 30 | TikTok, Reels, Shorts presets (-14 LUFS) |
+| Commercials | one per aspect: 16:9, 9:16, 1:1 | 24 or 30 | per platform, -14 LUFS for social |
+
+A music video takes the row of the frame it was shot in, with its track as the sound the cut is
+made to.
 
 A self-contained stage (an assembly of selected takes, a set of exports) can be handed to the
 editor's operator subagent once the engine runs: give it the engine's id, the tags in order, the

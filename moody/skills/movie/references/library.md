@@ -146,7 +146,8 @@ views above.
    `waits: true`; the `cards` skill has the components), or ask with `ask_user` and the tags as
    options. None of them: change the description with the person and make new candidates.
 4. **The sheet.** With the pick as the only reference, generate the turnaround sheet into the
-   character's own entry. It is now what `@mara` sends to every prompt:
+   character's own entry, with `look: true` so you can check that every view is there. It is
+   now what `@mara` sends to every prompt:
 
    ```text
    generate_image(prompt="Character turnaround sheet of @mara-look-b, the same woman as the reference, ...",
@@ -207,9 +208,11 @@ in its world (the name on a van, a shop sign). An image model draws letters unre
 ## The person's own pictures
 
 A photograph of a real actor, product, or place, or a brand's logo file, becomes a reference the
-same way as a generated one: make the entry with `library_upsert`, and ask the person to add the
-file to it in the Library panel. Their file is then the entry's newest image. Before using a
-real person's likeness or a brand's mark, ask whose it is and whether they may use it.
+same way as a generated one. Ask for it with a card that has an upload (the `cards` skill): it
+answers with the library entry the file became, whose newest image it is. Or make the entry
+with `library_upsert` and ask the person to add the file to it in the Library panel. Look at
+what they brought with `library_look` before you describe it. Before using a real person's
+likeness or a brand's mark, ask whose it is and whether they may use it.
 
 ## Metadata by kind
 

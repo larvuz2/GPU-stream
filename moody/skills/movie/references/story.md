@@ -77,7 +77,7 @@ the person approves. Cutdowns (30 to 15 s, 16:9 to 9:16) are planned now, not di
 on a turn, a tag or stinger at the end. An A plot carries the episode; a B plot echoes its theme.
 Every episode ends with a question the next one answers.
 
-**Vertical drama.** A season of 50-100 episodes of 60-120 seconds, each one to two pages, built
+**Vertical show.** A season of 50-100 episodes of 60-120 seconds, each one to two pages, built
 backward from its last beat:
 
 | Beat | Where | What happens |
@@ -117,7 +117,7 @@ Rules that matter for generation:
   word. A character the script adds gets a description here that becomes their entry.
 - Keep dialogue short: lip-sync is best on one or two sentences per shot.
 - Write sound cues into the action.
-- Keep a vertical-drama episode to one or two pages, with a hook in its first seconds and a
+- Keep a vertical show's episode to one or two pages, with a hook in its first seconds and a
   cliffhanger at its end.
 
 ## Breakdown
