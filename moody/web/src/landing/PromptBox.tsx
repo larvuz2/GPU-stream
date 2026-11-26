@@ -26,6 +26,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type SubmitEven
 import { ArrowRight } from 'lucide-react';
 import { catalog, findDiscipline, isAvailable, type Discipline } from '../lib/catalog';
 import { DisciplineIcon } from '../components/DisciplineIcon';
+import { midSentence } from '../lib/format';
 import { replaceHash, useHash } from '../lib/hash';
 import { express } from '../lib/mood';
 import { ANIMATION } from '../lib/moody';
@@ -101,7 +102,7 @@ export function PromptBox() {
           name="prompt"
           rows={3}
           value={prompt}
-          placeholder={format === '' ? 'Describe it in a sentence or two…' : `Describe your ${format.toLowerCase()}…`}
+          placeholder={format === '' ? 'Describe it in a sentence or two…' : `Describe your ${midSentence(format)}…`}
           aria-describedby={hintId}
           className="prompt-field"
           onChange={(event) => {
