@@ -837,13 +837,12 @@
     padding: 0.5rem 0.6rem;
   }
 
+  /* A label wraps rather than being cut, so a long one is read whole on a narrow card. */
   .ui-pick-label {
-    overflow: hidden;
     color: var(--color-fg);
     font-size: 0.8125rem;
     font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
 
   .ui-pick-note {

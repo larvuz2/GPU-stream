@@ -91,15 +91,40 @@ export function wordsOf(node: UiNode, value: unknown): string {
 }
 
 /**
+ * The inputs in view: those whose own condition holds, and that of everything they are inside.
+ *
+ * @param root The card's tree.
+ * @param state The card's values.
+ * @returns The ids of the inputs the person can see.
+ */
+function inView(root: UiNode, state: UiState): Set<string> {
+  const seen = new Set<string>();
+  const visit = (node: UiNode): void => {
+    if (!holds(node, state)) {
+      return;
+    }
+    const id = idOf(node);
+    if (id !== null) {
+      seen.add(id);
+    }
+    node.children.forEach(visit);
+  };
+  visit(root);
+  return seen;
+}
+
+/**
  * The first thing that still has to be chosen before a card can be locked in.
  *
+ * @param root The card's tree.
  * @param inputs The card's inputs.
  * @param state The card's values.
  * @returns The name of the first required input in view that holds nothing, or `null`.
  */
-export function missing(inputs: ReadonlyMap<string, UiNode>, state: UiState): string | null {
+export function missing(root: UiNode, inputs: ReadonlyMap<string, UiNode>, state: UiState): string | null {
+  const seen = inView(root, state);
   for (const [id, node] of inputs) {
-    if (flag(node, 'required') && holds(node, state) && isEmpty(state[id])) {
+    if (flag(node, 'required') && seen.has(id) && isEmpty(state[id])) {
       return nameOf(id, node);
     }
   }

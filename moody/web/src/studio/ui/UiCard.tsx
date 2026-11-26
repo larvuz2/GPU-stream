@@ -124,7 +124,7 @@ function ComponentsCard({ ui, locked, live, onSubmit }: UiCardProps) {
   if (root === null) {
     return <p className="ui-text-muted">This card cannot be shown here.</p>;
   }
-  const unchosen = missing(inputs, state);
+  const unchosen = missing(root, inputs, state);
   return (
     <CardContext value={card}>
       <div className="ui-body">
