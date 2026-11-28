@@ -8,39 +8,50 @@
  * Subagents at work: the block the conversation shows for one group of them (`agent` events in
  * `moody/STUDIO.md`).
  *
- * The block says how many tasks the agent handed out, holds a card per subagent, and counts under
+ * The block says that the project is being worked on, holds a card per subagent, and counts under
  * them how many are still working and how each of the others ended. A card is the subagent's
- * title, the pixel eyes playing what it is doing beside that activity's label from the catalog,
- * what it is doing now in a line, and where it stands at the right. While it works the label ends
- * in an ellipsis; done, it reads as the catalog labels it. A subagent that failed or was stopped
- * is not doing anything, so its eyes rest.
+ * title over one line of status. While the subagent works, that line is a pixel loader
+ * (`components/PixelLoader.tsx`) beside what it is doing now, in the control plane's words, or
+ * the catalog's label for its activity where it has none. Each subagent of a group plays a
+ * different one of the six loaders, picked when it starts and kept, and starts it at a point of
+ * its own, so cards side by side neither look alike nor move in step (`lib/pixelLoader.ts`). The
+ * agent's own eyes stay the agent's: a row of them would say six times that someone is thinking,
+ * where six loaders say that six things are going on.
+ *
+ * Once a subagent has ended, the loader is gone and the line says how, by a mark, a word, and a
+ * color: completed, failed, or stopped, with what it was last doing after it. The word is there
+ * so that neither the mark nor the color is the only thing that says it.
  *
  * A card unfolds to what the subagent did: its task, and its own tool calls, reasoning, and notes
  * in order, with the media its tools returned. The conversation never shows those itself, since
- * only a subagent's final report is the agent's to use.
+ * only a subagent's final report is the agent's to use. The whole head of the card is the control,
+ * and its arrow is quiet until the pointer or the keyboard is on it.
+ *
+ * Only the count is announced as it changes. Each card's line changes with every step its
+ * subagent takes, and six of them read aloud at once would say nothing.
  *
  * `reveal` names a subagent whose card another part of the page leads to (a file under the
  * library's Process tab): that card unfolds, each time it is asked for.
  * @module
  */
 import { useId, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
-import { MoodyEyes, type EyesTone } from '../components/MoodyEyes';
+import { Check, ChevronRight, GripVertical, Square } from 'lucide-react';
+import { PixelLoader } from '../components/PixelLoader';
 import type { AgentState } from '../lib/api';
-import { cx } from '../lib/cx';
 import { spanText, tokenCount } from '../lib/format';
+import { loaderOffset, loaderStyle, type LoaderStyle } from '../lib/pixelLoader';
 import { showActivity } from './activity';
 import { Prose } from './Prose';
 import { ThinkingEyes, ThinkingNote } from './ThinkingNote';
 import { ToolCard } from './ToolCard';
 import type { Reveal, Subagent } from './transcript';
 
-/** How each state of a subagent is said and drawn. */
-const STATES: Readonly<Record<AgentState, { label: string; className: string; tone: EyesTone }>> = {
-  working: { label: 'Working', className: 'text-faint', tone: 'default' },
-  completed: { label: 'Completed', className: 'text-ok', tone: 'ok' },
-  failed: { label: 'Failed', className: 'text-bad', tone: 'bad' },
-  stopped: { label: 'Stopped', className: 'text-faint', tone: 'faint' },
+/** How each state of a subagent is said. */
+const STATES: Readonly<Record<AgentState, { label: string }>> = {
+  working: { label: 'Working' },
+  completed: { label: 'Completed' },
+  failed: { label: 'Failed' },
+  stopped: { label: 'Stopped' },
 };
 
 /** The states a subagent ends in, in the order the count names them. */
@@ -60,11 +71,12 @@ function agentsText(count: number): string {
  * Says how many subagents are still working and how the others ended.
  *
  * @param agents The subagents.
- * @returns Text such as `4 agents working · 1 completed`.
+ * @returns Text such as `4 agents working in parallel · 1 completed`.
  */
 function countText(agents: readonly Subagent[]): string {
+  const working = agents.filter((agent) => agent.state === 'working').length;
   const counts = [
-    { label: STATES.working.label.toLowerCase(), count: agents.filter((agent) => agent.state === 'working').length },
+    { label: `${STATES.working.label.toLowerCase()}${working > 1 ? ' in parallel' : ''}`, count: working },
     ...ENDED.map((state) => ({
       label: STATES[state].label.toLowerCase(),
       count: agents.filter((agent) => agent.state === state).length,
@@ -103,29 +115,17 @@ export function AgentsBlock({ agents, tags, onTag, reveal }: AgentsBlockProps) {
       setOpened(new Set(opened).add(reveal.agentId));
     }
   }
-  const working = agents.filter((agent) => agent.state === 'working').length;
-  // The count's light: lavender while any works, then red where one failed, green where all
-  // completed, and unlit where some were stopped.
-  const light =
-    working > 0
-      ? 'dot-busy dot-live'
-      : agents.some((agent) => agent.state === 'failed')
-        ? 'dot-bad'
-        : agents.every((agent) => agent.state === 'completed')
-          ? 'dot-done'
-          : 'dot-idle';
-  const tasks = agents.length === 1 ? 'a task' : 'tasks';
-  const specialists = `${agents.length} specialized ${agents.length === 1 ? 'agent' : 'agents'}`;
+  const working = agents.some((agent) => agent.state === 'working');
+  const group = agents[0]?.id ?? '';
   return (
     <section className="agents-block" aria-label="Subagents">
-      <h3 className="agents-heading">
-        {working > 0 ? `Delegating ${tasks} to ${specialists}…` : `Delegated ${tasks} to ${specialists}`}
-      </h3>
-      <ul className="mt-3 grid grid-cols-1 gap-2">
-        {agents.map((agent) => (
+      <h3 className="agents-heading">{working ? 'Working on your project' : 'Worked on your project'}</h3>
+      <ul className="agents-list">
+        {agents.map((agent, place) => (
           <AgentCard
             key={agent.id}
             agent={agent}
+            loader={loaderStyle(group, place)}
             open={opened.has(agent.id)}
             onToggle={() => {
               const next = new Set(opened);
@@ -140,7 +140,6 @@ export function AgentsBlock({ agents, tags, onTag, reveal }: AgentsBlockProps) {
         ))}
       </ul>
       <p className="agents-count" role="status">
-        <span className={cx('dot', light)} aria-hidden="true" />
         {countText(agents)}
       </p>
     </section>
@@ -151,6 +150,8 @@ export function AgentsBlock({ agents, tags, onTag, reveal }: AgentsBlockProps) {
 interface AgentCardProps {
   /** The subagent. */
   agent: Subagent;
+  /** The pixel loader it plays while it works. */
+  loader: LoaderStyle;
   /** Whether the card is unfolded. */
   open: boolean;
   /** Folds or unfolds it. */
@@ -167,12 +168,10 @@ interface AgentCardProps {
  * @param props The component's props.
  * @returns The list item.
  */
-function AgentCard({ agent, open, onToggle, tags, onTag }: AgentCardProps) {
+function AgentCard({ agent, loader, open, onToggle, tags, onTag }: AgentCardProps) {
   const bodyId = useId();
   const state = STATES[agent.state];
-  const shown = showActivity(agent.activity);
   const working = agent.state === 'working';
-  const resting = agent.state === 'failed' || agent.state === 'stopped';
   const facts = [
     agent.seconds === null ? null : spanText(agent.seconds * 1000),
     agent.tokens === null ? null : `${tokenCount(agent.tokens)} tokens`,
@@ -180,17 +179,27 @@ function AgentCard({ agent, open, onToggle, tags, onTag }: AgentCardProps) {
   return (
     <li className="agent-card" data-state={agent.state} data-agent={agent.id}>
       <button type="button" className="agent-card-head" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
-        <ChevronRight className="agent-card-chevron" aria-hidden="true" />
-        <span className="agent-card-title">{agent.title}</span>
-        <span className={cx('agent-card-state', state.className)}>{state.label}</span>
-        <span className={cx('agent-card-activity', working ? 'text-muted' : state.className)}>
-          <MoodyEyes expression={shown.expression} tone={state.tone} still={resting} />
-          <span>
-            {shown.label}
-            {working ? '…' : ''}
+        <span className="agent-card-title">
+          <GripVertical className="agent-card-mark" aria-hidden="true" />
+          <span className="agent-card-name">{agent.title}</span>
+          <ChevronRight className="agent-card-chevron" aria-hidden="true" />
+        </span>
+        <span className="agent-card-status">
+          {working ? <PixelLoader style={loader} offset={loaderOffset(agent.id)} /> : <EndMark state={agent.state} />}
+          <span className="agent-card-status-text">
+            {working ? (
+              <>
+                <span className="sr-only">{state.label}: </span>
+                {agent.detail === '' ? `${showActivity(agent.activity).label}…` : agent.detail}
+              </>
+            ) : (
+              <>
+                {state.label}
+                {agent.detail === '' ? null : <span className="agent-card-status-rest"> · {agent.detail}</span>}
+              </>
+            )}
           </span>
         </span>
-        <span className="agent-card-detail">{agent.detail}</span>
       </button>
       {open ? (
         <div id={bodyId} className="agent-card-body">
@@ -233,4 +242,31 @@ function AgentCard({ agent, open, onToggle, tags, onTag }: AgentCardProps) {
       ) : null}
     </li>
   );
+}
+
+/** Props of {@link EndMark}. */
+interface EndMarkProps {
+  /** How the subagent ended. */
+  state: AgentState;
+}
+
+/**
+ * Renders the mark that stands where a subagent's loader was once it has ended: a check for one
+ * that completed, an exclamation mark for one that failed, a stop square for one that was stopped.
+ *
+ * @param props The component's props.
+ * @returns The mark, in the color of the line it is on.
+ */
+function EndMark({ state }: EndMarkProps) {
+  if (state === 'completed') {
+    return <Check className="agent-card-glyph" strokeWidth={2.5} aria-hidden="true" />;
+  }
+  if (state === 'failed') {
+    return (
+      <span className="agent-card-glyph" aria-hidden="true">
+        !
+      </span>
+    );
+  }
+  return <Square className="agent-card-glyph" fill="currentColor" strokeWidth={0} aria-hidden="true" />;
 }

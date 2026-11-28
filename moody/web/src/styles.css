@@ -42,6 +42,8 @@
   --color-faint: #868686;
   --color-line: #333333;
   --color-line-strong: #444444;
+  /* The lit pixel of a loader (`.pixel-loader`), a step above the text beside it. */
+  --color-pixel: #aaaaaa;
   /* Electric Lime is what the person does: the primary action, a selection, focus, ready. */
   --color-lime: #d6fa72;
   --color-lime-hover: #e2ff99;
@@ -374,6 +376,37 @@
     flex: none;
     vertical-align: middle;
     pointer-events: none;
+  }
+
+  /*
+   * A pixel loader (`components/PixelLoader.tsx`): a tile of 20 CSS pixels holding a 5 by 5 grid
+   * of 2.5px cells half a pixel apart, so a cell and its gap are three device pixels on a 1x
+   * screen and six on a 2x one. A cell rests almost unlit and plays the keyframes its inline style
+   * names (below), for the loop that style gives it.
+   */
+  .pixel-loader {
+    display: grid;
+    width: 20px;
+    height: 20px;
+    flex: none;
+    grid-template-rows: repeat(5, 2.5px);
+    grid-template-columns: repeat(5, 2.5px);
+    gap: 0.5px;
+    place-content: center;
+    overflow: hidden;
+    border-radius: 3px;
+    background: var(--color-ink-800);
+    pointer-events: none;
+  }
+
+  .pixel-loader-cell {
+    display: block;
+    width: 2.5px;
+    height: 2.5px;
+    background: var(--color-pixel);
+    opacity: 0.05;
+    animation-duration: var(--pixel-loop);
+    animation-iteration-count: infinite;
   }
 
   /* A status LED: a lit pixel. A live one breathes. */
@@ -1263,6 +1296,144 @@
   }
 }
 
+/*
+ * The pixel loaders' motion (`lib/pixelLoader.ts`): what one cell does over one loop. Every cell
+ * of a loader plays the same few keyframes from a different point in them, which is the pattern.
+ * Square Bloom and Bit Shuffle give each cell its own opacities to step through (`--pixel-0` on).
+ */
+@keyframes pixel-bit-flip {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  25% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 0.15;
+  }
+
+  75% {
+    opacity: 0.65;
+  }
+}
+
+@keyframes pixel-snake {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  6.25% {
+    opacity: 0.85;
+  }
+
+  12.5% {
+    opacity: 0.7;
+  }
+
+  18.75% {
+    opacity: 0.55;
+  }
+
+  25% {
+    opacity: 0.4;
+  }
+
+  31.25% {
+    opacity: 0.25;
+  }
+
+  37.5%,
+  93.75% {
+    opacity: 0.06;
+  }
+}
+
+@keyframes pixel-bloom {
+  0%,
+  100% {
+    opacity: var(--pixel-0);
+  }
+
+  25%,
+  75% {
+    opacity: var(--pixel-1);
+  }
+
+  50% {
+    opacity: var(--pixel-2);
+  }
+}
+
+@keyframes pixel-shuffle {
+  0%,
+  100% {
+    opacity: var(--pixel-0);
+  }
+
+  12.5% {
+    opacity: var(--pixel-1);
+  }
+
+  25% {
+    opacity: var(--pixel-2);
+  }
+
+  37.5% {
+    opacity: var(--pixel-3);
+  }
+
+  50% {
+    opacity: var(--pixel-4);
+  }
+
+  62.5% {
+    opacity: var(--pixel-5);
+  }
+
+  75% {
+    opacity: var(--pixel-6);
+  }
+
+  87.5% {
+    opacity: var(--pixel-7);
+  }
+}
+
+@keyframes pixel-clock {
+  0%,
+  12.49% {
+    opacity: 1;
+  }
+
+  12.5%,
+  100% {
+    opacity: 0.09;
+  }
+}
+
+@keyframes pixel-rain {
+  0% {
+    opacity: 1;
+  }
+
+  14.28% {
+    opacity: 0.55;
+  }
+
+  28.57% {
+    opacity: 0.18;
+  }
+
+  42.85%,
+  100% {
+    opacity: 0.05;
+  }
+}
+
 /* Motion is decoration here: with it turned down, everything rests in its final state. */
 @media (prefers-reduced-motion: reduce) {
   html {
@@ -1275,5 +1446,12 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  /* A loader has no final state to rest in: ended, its tile would be empty. It holds its frame. */
+  .pixel-loader-cell {
+    animation-duration: var(--pixel-loop) !important;
+    animation-iteration-count: infinite !important;
+    animation-play-state: paused !important;
   }
 }

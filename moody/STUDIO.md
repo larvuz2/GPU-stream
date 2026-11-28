@@ -341,7 +341,16 @@ a process the model steers.
   own with the tools its definition lists, several at once where the jobs are
   independent, and only its final report returns to the agent. A subagent
   cannot ask the person a question or start a subagent of its own. The page
-  shows each one working.
+  shows each one working: the subagents one step started are a block of
+  cards, each a title over one line, which is a pixel loader beside what the
+  subagent is doing now (`detail`, or its activity's label where there is
+  none). The loaders are six patterns on a 5 by 5 grid
+  (`web/src/lib/pixelLoader.ts`). The members of a group each play a
+  different one, picked when they start and kept, at half the patterns' speed
+  and out of step with one another. One that has ended shows how in the
+  loader's place, by a mark, a word, and a color (completed, failed, stopped),
+  and the block counts under its cards how many still work and how the others
+  ended. A card unfolds to what its subagent did.
 
   ```text
   ---
