@@ -38,13 +38,15 @@ import anyio
 from fastapi import Depends, FastAPI, File, Header, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from mcp.server.mcpserver import Context, Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
+import genui
 from definitions import AgentSpec, Skill, agents_directory, agents_for, operators, read_agents, read_skills, skills_directory, skills_for
+from launcher import origin
 from service import Catalog, Config, Refused, Sessions, User
 
 START_WAIT_SECONDS = 150
@@ -362,6 +364,23 @@ def create_app(
             "billing": config.billing,
             "tiers": tiers,
         }
+
+    @app.get("/v1/card-frame", response_class=HTMLResponse)
+    def card_frame() -> HTMLResponse:
+        """The document an `html` card runs in, with the policy that confines it (`genui.CARD_FRAME`).
+
+        It is the same for everyone and holds nothing, so it takes no
+        credential and is served whether or not the service is configured.
+        """
+        return HTMLResponse(
+            genui.CARD_FRAME,
+            headers={
+                "Content-Security-Policy": genui.card_frame_policy(origin(config.site_url)),
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+                "Cache-Control": "public, max-age=300",
+            },
+        )
 
     @app.get("/v1/me")
     def me(who: Who) -> dict[str, Any]:

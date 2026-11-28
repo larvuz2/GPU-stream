@@ -9,8 +9,10 @@
  * sound made in the browser, a canvas of its own), run where it can reach nothing.
  *
  * The document runs in a sandboxed frame inside a sandboxed shell, with no origin, no network,
- * and no way to navigate out (`sandbox.ts` says how and why). This component is the page's end of
- * the bridge (`bridge.ts`):
+ * and no way to navigate out (`sandbox.ts` says how and why, and where the shell comes from).
+ * Where the shell is the control plane's document, this component hands it the card's document
+ * when the shell's own window says it is ready, and at no other window's word. This component is
+ * also the page's end of the bridge (`bridge.ts`):
  *
  * - It takes messages only from the card's own window, the shell's one child frame, and only
  *   those that carry this card's id.
@@ -36,6 +38,7 @@
  * @module
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { cardFrameUrl } from '../../lib/env';
 import { isNumber, isRecord, isString } from '../../lib/narrow';
 import { summarizeValue } from './answer';
 import { limit } from './catalog';
@@ -113,7 +116,8 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
     };
   }, []);
 
-  const srcdoc = useMemo(() => {
+  // The card's document, and the shell the page writes around it where no control plane serves one.
+  const built = useMemo(() => {
     if (font === undefined) {
       return null;
     }
@@ -124,14 +128,17 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
       locked: first.locked !== null,
       media: mediaAddresses(first.media),
     };
-    return shellDocument(cardDocument(html, init, csp, themeDeclarations(), font), csp, ui.title);
+    const card = cardDocument(html, init, csp, themeDeclarations(), font);
+    return { card, shell: cardFrameUrl === null ? shellDocument(card, csp, ui.title) : null };
   }, [html, id, first, font, ui.title]);
 
   const files = useRef(ui.media);
   const answerable = useRef({ live: live && ui.submit !== null, open: locked === null, onSubmit });
+  const handed = useRef({ card: built?.card ?? null, title: ui.title });
   useEffect(() => {
     files.current = ui.media;
     answerable.current = { live: live && ui.submit !== null, open: locked === null, onSubmit };
+    handed.current = { card: built?.card ?? null, title: ui.title };
   });
 
   useEffect(() => {
@@ -167,7 +174,20 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
      */
     function onMessage(event: MessageEvent<unknown>): void {
       const message = event.data;
-      if (!isRecord(message) || message.moodyCard !== id || event.source !== cardWindow(frame.current)) {
+      if (!isRecord(message)) {
+        return;
+      }
+      const shell = frame.current?.contentWindow ?? null;
+      if (message.moodyFrame === 'ready' && shell !== null && event.source === shell) {
+        // The shell has no origin to name, so the document goes to whatever stands in this frame,
+        // which only the page and the shell itself could have changed.
+        const { card, title } = handed.current;
+        if (card !== null) {
+          shell.postMessage({ moodyFrame: 'open', document: card, title }, '*');
+        }
+        return;
+      }
+      if (message.moodyCard !== id || event.source !== cardWindow(frame.current)) {
         return;
       }
       if (message.type === 'height' && isNumber(message.height)) {
@@ -218,7 +238,7 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
           <p className="ui-missing" role="status">
             This card stopped: its document tried to leave its frame, which a card may not do. Nothing was sent.
           </p>
-        ) : srcdoc === null ? (
+        ) : built === null ? (
           <div className="ui-html-frame" style={box} role="status" aria-label={`Opening ${ui.title}`} />
         ) : (
           <iframe
@@ -227,7 +247,8 @@ export function HtmlCard({ ui, locked, live, onSubmit }: UiCardProps) {
             title={ui.title}
             className="ui-html-frame"
             sandbox="allow-scripts"
-            srcDoc={srcdoc}
+            src={built.shell === null ? (cardFrameUrl ?? undefined) : undefined}
+            srcDoc={built.shell ?? undefined}
             style={box}
             inert={locked !== null}
           />

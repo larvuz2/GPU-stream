@@ -18,12 +18,23 @@
  *   loads: no fetch, no socket, no beacon, no remote image, script, style, font, or frame.
  * - **No way out by leaving.** A sandboxed frame may still navigate itself, and a navigation
  *   carries whatever its address says. So the card's document is not the frame the page embeds:
- *   it is a frame inside that one. The outer frame is a shell with no script of its own whose
- *   policy allows no frame to load anything (`frame-src 'none'`), and a navigation of the inner
- *   frame is checked against the policy of the document that embeds it. The card's document is
- *   the shell's `srcdoc`, which that policy does not stop, and anywhere it tries to go is refused
- *   before a request is made. Both documents inherit the policy, so the card can embed nothing
- *   either.
+ *   it is a frame inside that one. The outer frame is a shell whose policy allows no frame to
+ *   load anything (`frame-src 'none'`), and a navigation of the inner frame is checked against
+ *   the policy of the document that embeds it. The card's document is the shell's `srcdoc`,
+ *   which that policy does not stop, and anywhere it tries to go is refused before a request is
+ *   made. Both documents inherit the policy, so the card can embed nothing either.
+ *
+ * Where the shell comes from decides whether a card runs at all. A document a page writes into
+ * a frame (`srcdoc`) also runs under the page's own policy, and a site that keeps its pages to
+ * scripts from its own files, as the deployed site does (`netlify.toml`), thereby stops the
+ * card's script; allowing inline script on the page to let cards through would undo that
+ * protection for the page itself. So with a control plane connected, the shell is a document it
+ * serves (`cardFrameUrl`, the control plane's `genui.CARD_FRAME`): it arrives with headers of its
+ * own, answers to those and not to the page, and its policy is the one above. It holds nothing.
+ * The page hands it the card's document by a message once it says it is ready, and it takes one
+ * document, from the window that frames it alone. With no control plane (the demo in
+ * development), the page writes the shell itself ({@link shellDocument}), which runs wherever
+ * the page has no policy to pass down.
  *
  * What the card may do instead goes through the bridge (`bridge.ts`), whose source is written into
  * the document ahead of the agent's own, with the card's value and files. The page reaches the
