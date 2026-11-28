@@ -65,8 +65,8 @@ in the docblocks of [`control/agent.py`](control/agent.py),
 
 **What to configure.** Each part below says how; this is the whole list.
 
-1. A Supabase project with the six migrations run, and its Site URL and
-   redirect URL.
+1. A Supabase project with the seven migrations run, its Site URL and
+   redirect URL, and the ways to sign in turned on.
 2. The Modal Secret `moody`: at least `SUPABASE_URL`, `SUPABASE_SECRET_KEY`,
    `MOODY_SITE_URL`, and `MOODY_SECRET_KEY`, then whichever integrations are
    wanted (the table). The agent needs `ANTHROPIC_API_KEY` and nothing else:
@@ -100,7 +100,10 @@ which lets an account set what one turn of the agent may spend and how many
 steps it may take (`profiles.turn_budget_usd`, `profiles.turn_limit`), then
 [`20261128000000_settings.sql`](supabase/migrations/20261128000000_settings.sql),
 which keeps a person's name and the settings they changed (`profiles.name`,
-`profiles.settings`). A
+`profiles.settings`), then
+[`20261129000000_invites.sql`](supabase/migrations/20261129000000_invites.sql),
+which adds the list of who is invited (`invites`) for a deployment open by
+invitation (below). A
 project that already ran the earlier ones runs
 only those it has not. `github_app` deletes the GitHub connections an OAuth
 App made before, whose users connect again. `agent_loop` drops
@@ -110,8 +113,29 @@ page reads, and the first turn after the migration starts the project's
 session with a recap of it. Run it with no turn running and deploy the control
 plane with it, since each side needs the other. Under Authentication, set the
 Site URL to the site's address and add
-`<site>/app/` to the redirect URLs; turn on the Google and GitHub providers if
-the sign-in buttons for them should work.
+`<site>/app/` to the redirect URLs. Under its sign-in providers, turn on the
+ways people may sign in: Google, GitHub, and email (a password or a magic
+link). The sign-in dialog reads which are on from the project and offers those
+and no other, so a project with Google alone shows one button. Leave "Confirm
+email" on: an account's address is who it is to the team's apps and to the
+invite list, which holds only while a sign-up has to prove its address.
+
+**Opening by invitation.** With `MOODY_INVITE_ONLY` set (below), the control
+plane serves an account only while its address is a row of `invites`, and
+answers everything else with 403; the site shows that person a page that says
+so in place of the studio. Invite someone by adding the address they sign in
+with, in lowercase, in the table editor or in SQL:
+
+```sql
+insert into invites (email, credits, note) values ('mara@example.com', 300, 'first testers');
+```
+
+`credits` is what the account starts with where that is not the catalog's
+`signup_credits`; leave it null for those. It is read once, when the person
+first signs in. Deleting the row keeps the person out from their next sign-in,
+within a minute for a page already open and at once for an API key, and leaves
+their projects as they were. Nothing of the list is in this repository or in
+the Secret, so inviting someone needs no deploy.
 
 **Modal.** Edit the Secret named `moody` (the deploy below needs it to exist)
 and set:
@@ -144,6 +168,7 @@ and set:
 | `GITHUB_APP_SLUG` | That app's name in its address, `https://github.com/apps/<slug>`, where "Don't see your repository?" sends a user to install it |
 | `EPIC_GITHUB_CLIENT_ID`, `EPIC_GITHUB_CLIENT_SECRET` | The client ID and a client secret of the OAuth App that reads packages, through which a user's own copy of Unreal Engine is pulled (below) |
 | `MOODY_SECRET_KEY` | A long random string (`python -c 'import secrets; print(secrets.token_urlsafe(48))'`) that signs GitHub's `state` and encrypts the tokens GitHub grants. Changing it disconnects every GitHub and Epic connection, which their users connect again |
+| `MOODY_INVITE_ONLY` | `true` to serve only the accounts the database's `invites` names (above); unset, anyone who signs in gets an account |
 | `MOODY_TEAM_EMAILS` | The accounts, by email and comma-separated, that may start apps of status `team` (Nuke) |
 | `MOODY_NUKE_SEATS` | Nuke sessions that may be open at once across all users, `2` unless set: the seats its license has |
 | `MOODY_API_URL` | The API's own address, where GitHub's callbacks should not be built from the address a request arrives at |

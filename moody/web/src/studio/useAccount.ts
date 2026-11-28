@@ -11,7 +11,9 @@
  * Each is read once when the studio opens. The balance is re-read when something spends it (an
  * engine changes state, a turn ends), so the sidebar follows the meter without a poll of its own.
  * The account also carries the person's name, the limits of their turns, and their settings,
- * which they change through it.
+ * which they change through it. An account the control plane does not serve, as one outside the
+ * invite list of a deployment open by invitation, is reported with what the control plane said
+ * (`refused`), which the studio shows in place of itself.
  * A control plane from before the studio answers the project and GitHub routes with 404; that is
  * reported as `missing`, which the studio shows as a calm "not here yet" rather than an error,
  * while the account, credits, and keys keep working.
@@ -32,7 +34,7 @@ import {
   type Project,
   type ProjectChanges,
 } from '../lib/api';
-import { NOT_CONFIGURED } from './messages';
+import { NOT_CONFIGURED, NOT_SERVED } from './messages';
 
 /**
  * How far a piece of data has come: still loading, loaded, not served by this control plane,
@@ -58,6 +60,8 @@ export function connected(client: ControlPlane | null): ControlPlane {
 export interface Account {
   /** The signed-in account, or `null` until it has loaded. */
   me: Me | null;
+  /** What the control plane said where it does not serve this account, or `null` where it does. */
+  refused: string | null;
   /** What the control plane reports about itself, or `null` until it answers. */
   health: Health | null;
   /** Re-reads the account, quietly. */
@@ -77,14 +81,22 @@ export interface Account {
  */
 export function useAccount(client: ControlPlane | null): Account {
   const [me, setMe] = useState<Me | null>(null);
+  const [refused, setRefused] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
 
   const refreshMe = useCallback((): void => {
     client
       ?.me()
-      .then(setMe)
-      .catch(() => {
-        // A balance a moment old is still worth showing; the next refresh reads it again.
+      .then((next) => {
+        setMe(next);
+        setRefused(null);
+      })
+      .catch((error: unknown) => {
+        // Any other failure leaves what is shown: a balance a moment old is still worth showing.
+        const said = refusal(error);
+        if (said !== null) {
+          setRefused(said);
+        }
       });
   }, [client]);
 
@@ -100,8 +112,12 @@ export function useAccount(client: ControlPlane | null): Account {
           setMe(next);
         }
       })
-      .catch(() => {
-        // The sidebar shows a dash for the balance until a refresh succeeds.
+      .catch((error: unknown) => {
+        // Any other failure leaves the sidebar a dash for the balance until a refresh succeeds.
+        const said = refusal(error);
+        if (current && said !== null) {
+          setRefused(said);
+        }
       });
     client
       .health()
@@ -125,7 +141,17 @@ export function useAccount(client: ControlPlane | null): Account {
     [client],
   );
 
-  return { me, health, refreshMe, change };
+  return { me, refused, health, refreshMe, change };
+}
+
+/**
+ * Reads whether a failed read of the account was the control plane declining to serve it.
+ *
+ * @param error What the read rejected with.
+ * @returns The control plane's words where it refused the account, `null` for any other failure.
+ */
+function refusal(error: unknown): string | null {
+  return error instanceof ApiError && error.status === NOT_SERVED ? error.message : null;
 }
 
 /** The account's projects and the actions over them. */

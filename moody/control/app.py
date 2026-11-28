@@ -147,7 +147,7 @@ def config() -> Any:
             approval_seconds="MOODY_APPROVAL_SECONDS",
         ),
         **given(int, turn_limit="MOODY_TURN_LIMIT", turn_limit_max="MOODY_TURN_LIMIT_MAX"),
-        **given(switch, agent_thinking="MOODY_AGENT_THINKING"),
+        **given(switch, agent_thinking="MOODY_AGENT_THINKING", invite_only="MOODY_INVITE_ONLY"),
         **given(listed, loop_env="MOODY_LOOP_ENV"),
         supabase_url=os.environ.get("SUPABASE_URL", ""),
         supabase_key=os.environ.get("SUPABASE_SECRET_KEY", ""),

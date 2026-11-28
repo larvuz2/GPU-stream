@@ -149,6 +149,8 @@ class FakeStore:
         self.profiles: dict[str, dict[str, Any]] = {}
         self.sessions: dict[str, dict[str, Any]] = {}
         self.keys: dict[str, dict[str, Any]] = {}
+        # Who is invited, by address in lowercase, each with the credits its account starts on or None
+        self.invites: dict[str, int | None] = {}
         self.ledger: list[tuple[str, int, str | None]] = []
         self.tables: dict[str, dict[Any, dict[str, Any]]] = {
             "sessions": self.sessions, "api_keys": self.keys, "profiles": self.profiles,
@@ -173,11 +175,15 @@ class FakeStore:
 
     # The database's functions
 
+    def moody_invited(self, p_user: str, p_email: str) -> bool:
+        return (p_email or self.profiles.get(p_user, {}).get("email", "")).lower() in self.invites
+
     def moody_ensure_profile(self, p_user: str, p_email: str, p_signup_credits: int) -> dict[str, Any]:
+        granted = self.invites.get(p_email.lower())
         return self.profiles.setdefault(
             p_user,
-            {"id": p_user, "email": p_email, "credits": p_signup_credits, "max_sessions": 1, "turn_budget_usd": None, "turn_limit": None,
-             "name": "", "settings": {}},
+            {"id": p_user, "email": p_email, "credits": p_signup_credits if granted is None else granted, "max_sessions": 1,
+             "turn_budget_usd": None, "turn_limit": None, "name": "", "settings": {}},
         )
 
     def moody_request_session(
@@ -1016,6 +1022,44 @@ def test_a_first_visit_makes_a_profile_with_the_sign_up_credits(world):
     }
     assert me == {"id": ALICE.id, "email": ALICE.email, "name": "", "credits": CATALOG.signup_credits, "max_sessions": 1, "limits": limits,
                   "settings": {"video_hyperframes": False}}
+
+
+def test_a_deployment_open_by_invitation_serves_only_the_addresses_on_its_list(world, monkeypatch):
+    client, sessions, store, launcher = world
+    sessions.config = replace(sessions.config, invite_only=True)
+
+    for method, path, body in (
+        ("GET", "/v1/me", None), ("GET", "/v1/projects", None), ("POST", "/v1/projects", {"name": "Film", "discipline": "media"}),
+        ("POST", "/v1/sessions", {"app": "blender", "tier": "cpu"}), ("POST", "/v1/api-keys", {"name": "laptop"}),
+    ):
+        refused = client.request(method, path, headers=auth("alice-token"), json=body)
+        assert refused.status_code == 403 and ALICE.email in refused.json()["error"], (path, refused.text)
+    assert store.profiles == {} and launcher.started == [], "an account outside the list is given nothing, a profile included"
+
+    store.invites[ALICE.email] = 300
+    me = client.get("/v1/me", headers=auth("alice-token"))
+    assert me.status_code == 200 and me.json()["credits"] == 300, "an invite names what its account starts with"
+    assert client.get("/v1/me", headers=auth("bob-token")).status_code == 403, "and lets in nobody else"
+    store.invites[BOB.email] = None
+    assert client.get("/v1/me", headers=auth("bob-token")).json()["credits"] == CATALOG.signup_credits
+
+    key = client.post("/v1/api-keys", headers=auth("alice-token"), json={"name": "claude"}).json()["secret"]
+    assert not tool(client, "list_sessions", {}, key).get("isError")
+    del store.invites[ALICE.email]
+    out = tool(client, "start_session", {}, key)
+    assert out["isError"] and "not invited" in out["content"][0]["text"] and launcher.started == [], "an agent's key is out with its account"
+    assert client.get("/v1/me", headers=auth(key)).status_code == 403
+    monkeypatch.setitem(TOKENS, "alice-signed-in-again", ALICE)
+    assert client.get("/v1/me", headers=auth("alice-signed-in-again")).status_code == 403
+    assert store.profiles[ALICE.id]["credits"] == 300, "what the account made stays as it was"
+
+
+def test_an_address_is_invited_however_it_is_capitalized(world, monkeypatch):
+    client, sessions, store, _ = world
+    sessions.config = replace(sessions.config, invite_only=True)
+    store.invites["mara@example.test"] = None
+    monkeypatch.setitem(TOKENS, "mara-token", User(id="00000000-0000-0000-0000-00000000000c", email="Mara@Example.test"))
+    assert client.get("/v1/me", headers=auth("mara-token")).status_code == 200
 
 
 def test_settings_are_the_persons_each_one_of_the_catalogs_and_on_its_default_until_changed(studio, monkeypatch):

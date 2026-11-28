@@ -57,8 +57,10 @@
  * Epic connection whose GitHub account is not linked to Epic, where opening the game in Unreal
  * answers with the steps that link it, `movie` for a new film that starts from its first
  * message with no engine, which plays the agent thinking, asking, delegating to subagents, and
- * asking before it starts one (`demoMovie.ts`), and `limit` for that film further on, on an
- * account that set its spend for a turn low, where a long job has stopped at it.
+ * asking before it starts one (`demoMovie.ts`), `limit` for that film further on, on an
+ * account that set its spend for a turn low, where a long job has stopped at it, and `uninvited`
+ * for an account the control plane does not serve, as one outside the invite list of a deployment
+ * open by invitation.
  *
  * The account has the limits of a turn as settings ({@link DEFAULT_LIMITS}, {@link MAX_LIMITS}),
  * which `updateMe` changes and refuses as the control plane does, and which the film's long job
@@ -122,6 +124,7 @@ import {
   movieSoFar,
   movieTurn,
 } from './demoMovie';
+import { NOT_SERVED } from './messages';
 
 /** The address the demo's account is shown under. */
 export const DEMO_EMAIL = 'you@example.com';
@@ -1467,7 +1470,15 @@ export function createDemoControlPlane(scene: string | null): ControlPlane {
 
   return {
     health: () => Promise.resolve(health),
-    me: () => Promise.resolve(me()),
+    me: () =>
+      scene === 'uninvited'
+        ? Promise.reject(
+            new ApiError(
+              NOT_SERVED,
+              `${DEMO_EMAIL} is not invited yet. Sign in with the address your invitation went to, or ask for one.`,
+            ),
+          )
+        : Promise.resolve(me()),
     updateMe: (changes) =>
       legacy
         ? missing()

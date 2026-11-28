@@ -19,8 +19,9 @@
  * server with no integrations configured, `?demo=empty` an account with no projects,
  * `?demo=legacy` a control plane from before the studio, `?demo=movie` a new film played from
  * its first message: the agent thinking, asking, handing work to subagents, and asking before it
- * starts an engine, and `?demo=limit` that film further on, where a long job has stopped at the
- * spend the account allows a turn.
+ * starts an engine, `?demo=limit` that film further on, where a long job has stopped at the
+ * spend the account allows a turn, and `?demo=uninvited` an account outside the invite list of a
+ * deployment open by invitation.
  *
  * GitHub's callback returns here with `?github=` and what happened (`connected`, `installed` for
  * the GitHub App installed on more repositories, `requested` for an installation an organization's

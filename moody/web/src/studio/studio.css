@@ -1560,35 +1560,40 @@
 
   /*
    * Subagents at work: one block per group of them, a card each. The surfaces are the Color
-   * Bible's neutrals, a step apart, so the block reads as one thing on the conversation's ground;
-   * the only colors are what the states mean (success, error) and the lavender of work under way.
+   * Bible's neutrals, a step apart: the block is the ground's own color, so its cards read as one
+   * group set in from the conversation, and the only colors are what the states mean (success,
+   * error). The type is small on purpose, a notch under the conversation's, since the block is
+   * the agent's own work going on beside what it says.
    */
   .agents-block {
-    padding: 0.9rem 1rem 0.85rem;
-    border: 1px solid var(--color-ink-700);
-    border-radius: 1rem;
+    padding: 1rem;
+    border-radius: 0.75rem;
     background: var(--color-ink-950);
   }
 
   .agents-heading {
-    color: var(--color-soft);
-    font-size: 0.9375rem;
-    letter-spacing: 0.005em;
+    margin-bottom: 0.9375rem;
+    color: var(--color-faint);
+    font-size: 0.75rem;
+  }
+
+  .agents-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4375rem;
   }
 
   .agents-count {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    margin-top: 0.8rem;
-    color: var(--color-muted);
-    font-size: 0.8125rem;
+    margin-top: 0.8125rem;
+    color: var(--color-faint);
+    font-size: 0.6875rem;
     font-variant-numeric: tabular-nums;
   }
 
   .agent-card {
+    min-width: 0;
     border: 1px solid var(--color-ink-700);
-    border-radius: 0.5rem;
+    border-radius: 0.375rem;
     background: var(--color-ink-900);
     transition: border-color 0.15s ease;
   }
@@ -1598,64 +1603,116 @@
     border-color: var(--color-line);
   }
 
-  /* The card's head: the chevron's column, then the title over the activity over the detail. */
+  /* The card's head, all of it the control that unfolds the card: the title over the status. */
   .agent-card-head {
-    display: grid;
+    display: block;
     width: 100%;
-    grid-template-columns: 1rem minmax(0, 1fr) auto;
-    column-gap: 0.6rem;
-    row-gap: 0.3rem;
-    align-items: center;
-    padding: 0.7rem 0.9rem 0.75rem 0.75rem;
-    border-radius: 0.5rem;
+    padding: 0.75rem;
+    border-radius: 0.375rem;
     text-align: left;
   }
 
-  .agent-card-chevron {
-    width: 0.9rem;
-    height: 0.9rem;
+  .agent-card-title {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
     color: var(--color-faint);
-    transition: transform 0.15s ease;
+    font-size: 0.6875rem;
+    line-height: 1rem;
+  }
+
+  .agent-card-mark {
+    width: 0.6875rem;
+    height: 0.6875rem;
+    flex: none;
+  }
+
+  .agent-card-name {
+    overflow: hidden;
+    min-width: 0;
+    flex: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The arrow is quiet, as a fold's is: it shows under the pointer or the keyboard, and open. */
+  .agent-card-chevron {
+    width: 0.75rem;
+    height: 0.75rem;
+    flex: none;
+    opacity: 0;
+    transition:
+      opacity 0.15s ease,
+      transform 0.15s ease;
+  }
+
+  .agent-card-head:is(:hover, :focus-visible) .agent-card-chevron,
+  .agent-card-head[aria-expanded='true'] .agent-card-chevron {
+    opacity: 1;
   }
 
   .agent-card-head[aria-expanded='true'] .agent-card-chevron {
     transform: rotate(90deg);
   }
 
-  .agent-card-title {
-    overflow: hidden;
-    color: var(--color-soft);
-    font-size: 0.9375rem;
-    font-weight: 500;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  @media (hover: none) {
+    .agent-card-chevron {
+      opacity: 0.55;
+    }
   }
 
-  .agent-card-state {
-    font-size: 0.75rem;
-    letter-spacing: 0.01em;
-  }
-
-  .agent-card-activity {
+  /* What the subagent is doing, set in under its title: the loader while it works, then how it ended. */
+  .agent-card-status {
     display: flex;
-    grid-column: 2 / -1;
+    min-height: 1.25rem;
     align-items: center;
-    gap: 0.55rem;
-    font-size: 1rem;
+    gap: 0.5rem;
+    margin-top: 0.5625rem;
+    margin-left: 0.9375rem;
+    color: var(--color-muted);
+    font-size: 0.75rem;
   }
 
-  .agent-card-detail {
-    overflow: hidden;
-    grid-column: 2 / -1;
+  .agent-card[data-state='completed'] .agent-card-status {
+    color: var(--color-ok);
+  }
+
+  .agent-card[data-state='failed'] .agent-card-status {
+    color: var(--color-bad);
+  }
+
+  .agent-card[data-state='stopped'] .agent-card-status {
     color: var(--color-faint);
-    font-size: 0.8125rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
-  /* What a subagent did, under its card's head and in line with its title. */
+  .agent-card-glyph {
+    width: 0.75rem;
+    height: 0.75rem;
+    flex: none;
+    font-weight: 700;
+    line-height: 0.75rem;
+    text-align: center;
+  }
+
+  /* The stop square fills its box where the check and the exclamation mark do not, so it is drawn smaller. */
+  .agent-card[data-state='stopped'] .agent-card-glyph {
+    transform: scale(0.7);
+  }
+
+  .agent-card-status-text {
+    min-width: 0;
+    line-height: 1.125rem;
+    overflow-wrap: anywhere;
+  }
+
+  /* What it was doing when it ended, after how it ended and quieter than it. */
+  .agent-card-status-rest {
+    color: var(--color-faint);
+  }
+
+  /* What a subagent did, under its card's head and in line with its status. */
   .agent-card-body {
-    padding: 0.7rem 0.9rem 0.85rem 2.35rem;
+    padding: 0.7rem 0.75rem 0.85rem 1.6875rem;
     border-top: 1px solid var(--color-ink-700);
   }
 
@@ -1663,14 +1720,10 @@
     font-size: 0.875rem;
   }
 
-  /* A phone has no room to indent what a subagent did, nor to keep what it is doing on one line. */
+  /* A phone has no room to indent what a subagent did. */
   @media (max-width: 479.98px) {
     .agent-card-body {
-      padding-left: 0.9rem;
-    }
-
-    .agent-card-detail {
-      white-space: normal;
+      padding-left: 0.75rem;
     }
   }
 

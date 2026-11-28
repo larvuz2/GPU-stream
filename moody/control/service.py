@@ -114,6 +114,8 @@ READY_SECONDS = 120
 # A session still `starting` after this long has lost its job
 START_LIMIT_SECONDS = 300
 OPEN = ("queued", "starting", "running")
+# What an account outside the invite list is told, by the address it signed in with
+NOT_INVITED = "{who} is not invited yet. Sign in with the address your invitation went to, or ask for one."
 # The catalog statuses an app can be started under: anyone's, the team's, or with a part on the user's own license
 STARTABLE = ("available", "team", "byol")
 # What a session's link opens, and the name of each picture an engine streams
@@ -279,6 +281,8 @@ class Config:
     secret_key: str = ""
     # The accounts, by email in lowercase, that may start apps of status `team`
     team_emails: frozenset[str] = field(default_factory=frozenset)
+    # Whether only the accounts the database's `invites` names are served (`Sessions.admitted`)
+    invite_only: bool = False
     # Nuke sessions that may be open at once across all users: the seats its license has
     nuke_seats: int = 2
     # The API's own address, where it differs from the one a request arrives at
@@ -748,27 +752,51 @@ class Sessions:
     def authenticate(self, credential: str) -> User:
         """The user a bearer credential names: an API key of ours, or a Supabase access token.
 
+        Every request comes through here, the site's and an agent's alike, so
+        this is also where a deployment open by invitation keeps everyone else
+        out (`admitted`): an account outside the list reaches nothing, rather
+        than everything but the routes someone remembered to close.
+
         Raises:
-            Refused: 401 where the credential names nobody.
+            Refused: 401 where the credential names nobody, 403 where it names an account the deployment does not serve.
         """
         if credential.startswith(API_KEY_PREFIX):
             user_id = self.store.rpc("moody_use_api_key", p_key_hash=hash_key(credential))
             if not user_id:
                 raise Refused(401, "This API key is not valid. Create a new one in your dashboard.")
-            return User(id=user_id, email="")
+            return self.admitted(User(id=user_id, email=""))
         seen = self._seen.get(credential)
         if seen and seen[0] > time.monotonic():
             return seen[1]
         user = self.store.user_of_token(credential)
         if user is None:
             raise Refused(401, "Your sign-in has expired. Sign in again.")
+        self.admitted(user)
         if len(self._seen) > 1000:
             self._seen.clear()
         self._seen[credential] = (time.monotonic() + 60, user)
         return user
 
+    def admitted(self, user: User) -> User:
+        """The user, where the deployment serves them: anyone, or only whom the invite list names.
+
+        The list is the database's (`invites`), so a person is invited by a
+        row there and not by a deploy. It is asked for each credential not
+        seen in the last minute: an address added gets in on its next request,
+        and one taken off is out within that minute, by an API key at once. An
+        API key names no address, and the database goes by its profile's. The
+        address is the auth server's word for whose the account is, which is
+        why the project has to make a sign-up prove it.
+
+        Raises:
+            Refused: 403 where the deployment is open by invitation and this account is not invited.
+        """
+        if self.config.invite_only and not self.store.rpc("moody_invited", p_user=user.id, p_email=user.email):
+            raise Refused(403, NOT_INVITED.format(who=user.email or "This account"))
+        return user
+
     def me(self, user: User) -> dict[str, Any]:
-        """The user's profile, made with its sign-up credits the first time it is asked for."""
+        """The user's profile, made the first time it is asked for with its invite's credits, or the sign-up credits."""
         profile = self.store.rpc(
             "moody_ensure_profile", p_user=user.id, p_email=user.email, p_signup_credits=self.catalog.signup_credits
         )

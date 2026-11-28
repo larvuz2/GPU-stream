@@ -341,7 +341,16 @@ a process the model steers.
   own with the tools its definition lists, several at once where the jobs are
   independent, and only its final report returns to the agent. A subagent
   cannot ask the person a question or start a subagent of its own. The page
-  shows each one working.
+  shows each one working: the subagents one step started are a block of
+  cards, each a title over one line, which is a pixel loader beside what the
+  subagent is doing now (`detail`, or its activity's label where there is
+  none). The loaders are six patterns on a 5 by 5 grid
+  (`web/src/lib/pixelLoader.ts`). The members of a group each play a
+  different one, picked when they start and kept, at half the patterns' speed
+  and out of step with one another. One that has ended shows how in the
+  loader's place, by a mark, a word, and a color (completed, failed, stopped),
+  and the block counts under its cards how many still work and how the others
+  ended. A card unfolds to what its subagent did.
 
   ```text
   ---
@@ -619,6 +628,15 @@ opens each kind with a card of its own.
   added, which the storage serves as an attachment under the file's name.
 - **Every module of the right pane folds**, and so does each section inside
   Environment, by a quiet arrow that shows on hover and focus.
+
+- **A deployment may be open by invitation.** Where `MOODY_INVITE_ONLY` is
+  set, the control plane authenticates a request only for an account whose
+  address the database's `invites` names, and answers any other with 403 and a
+  sentence that names the address. It does so where it authenticates, so that
+  no route, the agent's endpoint included, serves an account outside the list.
+  The site reads the account first; on that 403 it shows the sentence on a
+  page of its own, with a way to ask again and to sign out, and no studio
+  around it. An invite may name the credits its account starts with.
 
 - **Settings are the person's, and one place holds them.** The account menu
   opens Settings: Profile (name, email), Billing (credits, buying more),
