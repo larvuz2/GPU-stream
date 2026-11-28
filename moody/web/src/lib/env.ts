@@ -43,3 +43,9 @@ export const supabaseConfig: SupabaseConfig | null =
 
 /** The control plane's base URL without a trailing slash, or `null` when it is not connected. */
 export const apiUrl: string | null = setting(import.meta.env.VITE_MOODY_API_URL)?.replace(/\/+$/, '') ?? null;
+
+/**
+ * The address of the document a custom card's frame is opened on, which the control plane serves
+ * with a policy of its own (`studio/ui/sandbox.ts`), or `null` when no control plane is connected.
+ */
+export const cardFrameUrl: string | null = apiUrl === null ? null : `${apiUrl}/v1/card-frame`;

@@ -197,6 +197,8 @@ the status that says why.
 
 ```text
 GET    /v1/health                          {ok, agent, github, epic, generation}: which integrations are configured
+GET    /v1/card-frame                      the document an `html` card's frame is opened on, with the policy that
+                                           confines the card; no credential, the same for everyone
 GET    /v1/projects                        {projects: [Project]}, most recently updated first
 POST   /v1/projects                        {name, discipline, format, github_repo?, github_branch?} -> {project}
 GET    /v1/projects/{pid}                  {project}
@@ -524,7 +526,9 @@ ui               {ui_id, title, kind: "components" | "html", spec?, html?, heigh
                  waits, media: [{name, kind, url}]}
                                             an interactive card. `spec` is a tree of the components
                                             `moody/ui.json` defines; `html` is a document the page
-                                            runs in a sandboxed frame. `submit` is the lock-in
+                                            runs in a sandboxed frame, opened on the control
+                                            plane's `/v1/card-frame` so that it answers to that
+                                            document's policy and not to the site's. `submit` is the lock-in
                                             button's label, null for a card with nothing to send
                                             back. `media` are the files the card shows, signed for
                                             each reading of the log

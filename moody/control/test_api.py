@@ -997,6 +997,22 @@ def test_health_is_open_and_says_what_is_configured(world):
     }
 
 
+def test_the_frame_a_custom_card_runs_in_is_served_to_anyone_with_the_policy_that_confines_it(world):
+    client = world[0]
+    frame = client.get("/v1/card-frame")
+    assert frame.status_code == 200 and frame.headers["content-type"].startswith("text/html")
+    policy = dict(part.split(" ", 1) for part in frame.headers["content-security-policy"].split("; "))
+    assert policy["default-src"] == "'none'" and policy["script-src"] == "'unsafe-inline'", "inline script runs, and nothing loads by default"
+    assert "connect-src" not in policy and policy["frame-src"] == "'none'" and policy["font-src"] == "data:", "no fetch, no frame, no remote font"
+    assert policy["frame-ancestors"] == SITE, "only the site's pages may frame it"
+    assert "http" not in frame.text.replace('lang="en"', ""), "the document itself fetches nothing"
+    assert "event.source!==parent" in frame.text and "sandbox" in frame.text, "it takes a document from the page that frames it alone"
+
+    open_to_all = TestClient(create_app(None, config(site_url=""), CATALOG)).get("/v1/card-frame")
+    assert open_to_all.status_code == 200, "a service that is not configured still serves it"
+    assert open_to_all.headers["content-security-policy"].endswith("frame-ancestors *")
+
+
 def test_an_unconfigured_service_answers_health_and_refuses_the_rest():
     unconfigured = config(supabase_url="", supabase_key="")
     with TestClient(create_app(None, unconfigured, CATALOG)) as client:

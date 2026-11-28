@@ -50,6 +50,18 @@ A card names the files it shows in `media`, each by a library tag or by a
 file an engine wrote in the project's folder (`media_requests`); the
 components refer to them by name, and the check knows each one's kind before
 any file is read, so a card that would be refused costs no upload.
+
+An `html` card's document runs its own script, and a document a page writes
+into a frame runs under that page's content security policy. A site that
+keeps its own pages to scripts from its own files, as it should, would
+therefore stop every card. So the frame a card runs in is a document of this
+service (`CARD_FRAME`, served with `card_frame_policy`), which the site
+frames with no origin and hands the card's document by a message: a document
+that arrives with headers answers to those and not to the page around it.
+The policy lets inline script and style run and nothing load from anywhere but
+pictures and sound, which the card's own document then narrows to its files;
+the frame takes one document, from the page that frames it and no other
+window, and puts it in a frame it can never navigate.
 """
 
 from __future__ import annotations
@@ -75,11 +87,50 @@ PLACEHOLDER = re.compile(r"\{([a-z][a-z0-9_]{0,31})\}")
 COLOR = re.compile(r"#[0-9a-fA-F]{6}")
 # The one comparison a `when` entry may make in place of naming a value
 COMPARISONS = ("not", "gt", "lt", "has")
+# The document an `html` card's frame is: it waits for the card's document from the page that frames it, and
+# runs it in the one frame it will ever hold. It answers no other window and takes no second document, so the
+# card it runs cannot replace itself. Nothing in it is fetched.
+CARD_FRAME = (
+    '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="color-scheme" content="dark">'
+    "<title>Card</title>"
+    "<style>:root{color-scheme:dark}html,body{height:100%;margin:0;background:transparent}"
+    "iframe{display:block;width:100%;height:100%;border:0}</style></head><body><script>"
+    "(()=>{let opened=false;addEventListener('message',(event)=>{const message=event.data;"
+    "if(opened||event.source!==parent||!message||message.moodyFrame!=='open'||typeof message.document!=='string')return;"
+    "opened=true;const frame=document.createElement('iframe');frame.setAttribute('sandbox','allow-scripts');"
+    "frame.title=typeof message.title==='string'?message.title:'';frame.srcdoc=message.document;"
+    "document.body.appendChild(frame);});parent.postMessage({moodyFrame:'ready'},'*');})();"
+    "</script></body></html>"
+)
+# What the frame's document may do, which the card's document inherits and narrows: run inline script and style,
+# show pictures and play sound, and nothing else. No fetch, no font or script from anywhere, and no frame that loads.
+CARD_FRAME_POLICY = (
+    "default-src 'none'",
+    "script-src 'unsafe-inline'",
+    "style-src 'unsafe-inline'",
+    "img-src data: blob: https: http:",
+    "media-src data: blob: https: http:",
+    "font-src data:",
+    "frame-src 'none'",
+    "form-action 'none'",
+    "base-uri 'none'",
+)
 # What an `html` card's document calls to report or lock in its value
 BRIDGE_CALLS = ("moody.setState", "moody.submit")
 # The longest value of an option or a cell
 VALUE_CHARS = 200
 SCALARS = (str, int, float, bool)
+
+
+def card_frame_policy(site: str) -> str:
+    """The content security policy the card frame's document is served with.
+
+    `site` is the origin of the site whose pages show cards. Only it may frame
+    the document where it is known; a deployment that names no site lets any
+    page, which costs nothing, since the document holds nothing and does only
+    what the page that frames it hands it.
+    """
+    return "; ".join((*CARD_FRAME_POLICY, f"frame-ancestors {site or '*'}"))
 
 
 def catalog_path() -> Path:
