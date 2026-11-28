@@ -30,8 +30,12 @@
     # Scripts and styles come from the site itself. Styles also allow inline, for the style
     # attributes that carry each app's accent color. Connections are open to any HTTPS origin
     # because the Supabase project and the control plane are named by the build's environment,
-    # which this file cannot read.
-    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    # which this file cannot read. So are pictures, sound, and video, which are the library's files
+    # at the Supabase project's storage, and frames, which are the engines' screens at addresses the
+    # control plane hands out for each session: with either held to the site itself, a project shows
+    # none of its media and no engine. Pictures and media also come from `blob:`, which is how a
+    # 3D model's own textures are read.
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self'; connect-src 'self' https:; frame-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
     # This host only: a site moved to a domain of its own decides for that domain's other hosts itself
     Strict-Transport-Security = "max-age=31536000"
     X-Content-Type-Options = "nosniff"
