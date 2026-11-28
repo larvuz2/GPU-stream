@@ -49,7 +49,7 @@ import { disciplineName, normalizeTag, planProgress } from './present';
 import { describeAnswer } from './ui/answer';
 import type { Uploaded } from './ui/context';
 import { Stage, type StreamStandIn } from './Stage';
-import { buildTranscript, openQuestion, processMedia, versions, type Reveal } from './transcript';
+import { buildTranscript, openQuestion, processMedia, versions, type Reveal, type Version } from './transcript';
 import { connected, type Account, type Epic, type GitHub, type Projects } from './useAccount';
 import { useProject } from './useProject';
 
@@ -152,6 +152,13 @@ export function Workspace(props: WorkspaceProps) {
 
   const agentShown = data.screenRequest;
   const screen = pickScreen(data.engines, screenId ?? agentShown?.engineId ?? null);
+  // The versions take the screen where an edit of one is known: while no engine is at work on it,
+  // and over the one engine the person chose them over, so another engine put on screen shows itself.
+  const tracked = useMemo(() => shown.some((version) => version.edit !== null), [shown]);
+  const [versionsOver, setVersionsOver] = useState<string | null>(null);
+  const versionsShown = tracked && (screen === null || !isActive(screen) || versionsOver === screen.id);
+  // Where the Screen plays the versions, the Latest module would play the same files under it.
+  const versionsOnScreen = versionsShown && (unfolded('screen') || focus || narrow);
   const screenEngineId = screen?.id ?? null;
   const shownPicture =
     [picked, agentShown].find((choice) => choice !== null && choice.engineId === screenEngineId)?.stream ?? null;
@@ -431,6 +438,12 @@ export function Workspace(props: WorkspaceProps) {
         narrow={narrow}
         mobileHidden={narrow && tab !== 'screen'}
         standIn={props.standIn}
+        versions={tracked ? shown : NO_VERSIONS}
+        versionsShown={versionsShown}
+        onVersions={(over) => {
+          setVersionsOver(over ? (screen?.id ?? null) : null);
+        }}
+        onShowVersion={showInConversation}
       />
 
       <aside
@@ -438,7 +451,7 @@ export function Workspace(props: WorkspaceProps) {
         aria-label="Project panels"
         data-mobile-hidden={narrow && tab !== 'workspace'}
       >
-        {shown.length === 0 ? null : (
+        {shown.length === 0 || versionsOnScreen ? null : (
           <Panel
             title="Latest"
             icon={Play}
@@ -449,7 +462,10 @@ export function Workspace(props: WorkspaceProps) {
             <LatestBody versions={shown} onShow={showInConversation} />
           </Panel>
         )}
-        <div ref={environmentRef} className={shown.length === 0 ? undefined : 'border-t border-[var(--studio-line)]'}>
+        <div
+          ref={environmentRef}
+          className={shown.length === 0 || versionsOnScreen ? undefined : 'border-t border-[var(--studio-line)]'}
+        >
           <Panel
             title="Environment"
             icon={Server}
@@ -559,6 +575,9 @@ export function Workspace(props: WorkspaceProps) {
 
 /** The kept answers of a project that has none. */
 const NO_PERMISSIONS: Readonly<Record<string, string>> = {};
+
+/** The versions the Screen is offered where no edit of one is known. */
+const NO_VERSIONS: readonly Version[] = [];
 
 /**
  * The tools a project's agent may still run without asking once one is taken back.

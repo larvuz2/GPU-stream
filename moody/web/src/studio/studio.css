@@ -879,6 +879,274 @@
     color: var(--color-fg);
   }
 
+  /*
+   * The versions on the Screen: the player, the version's name, its tracks, and the way to the
+   * other versions, in a column that scrolls where the stage is too short for all of it. In the
+   * right column it is no taller than most of the window, so the panels under it stay in reach;
+   * in focus mode and on a narrow screen it has the stage's whole height.
+   */
+  .versions-screen {
+    display: flex;
+    min-height: 0;
+    max-height: 72dvh;
+    flex-direction: column;
+    gap: 0.75rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .studio[data-focus='true'] .versions-screen {
+    flex: 1;
+    max-height: none;
+  }
+
+  @media (max-width: 1023.98px) {
+    .studio-stage .versions-screen {
+      flex: 1;
+      max-height: none;
+    }
+  }
+
+  /*
+   * The frame the versions play in: the shape of the file, between a square and 16:9 so that an
+   * upright video is neither a sliver nor taller than the column, and twice as wide a shape for
+   * two side by side. In focus mode it takes the height the tracks leave.
+   */
+  .versions-view {
+    display: flex;
+    flex: none;
+    overflow: hidden;
+    aspect-ratio: var(--versions-shape, 16 / 9);
+    border: 1px solid var(--color-line);
+    border-radius: 0.85rem;
+    background: #050505;
+  }
+
+  .versions-view[data-kind='audio'] {
+    aspect-ratio: auto;
+  }
+
+  .studio[data-focus='true'] .versions-view:not([data-kind='audio']) {
+    flex: 1 1 12rem;
+    min-height: 12rem;
+    aspect-ratio: auto;
+  }
+
+  .versions-side {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .versions-side + .versions-side {
+    border-left: 1px solid var(--color-line);
+  }
+
+  .versions-side > :is(video, img) {
+    width: 100%;
+    height: 100%;
+    background: #000;
+    object-fit: contain;
+  }
+
+  /* The name of each of two versions side by side, over its corner. */
+  .versions-side > figcaption {
+    position: absolute;
+    top: 0.4rem;
+    left: 0.4rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 0.35rem;
+    background: rgb(0 0 0 / 0.7);
+    color: var(--color-fg);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    pointer-events: none;
+  }
+
+  /*
+   * The timeline of a version: a column of lane names and a column of time, which the ruler, the
+   * lanes, and the sound share, with the playhead over all of them. A block made by the version
+   * on screen is lit in the agent's lavender, and one carried from an earlier version is quiet;
+   * the lanes are told apart by their names, never by color. The playhead is the person's place
+   * in the piece, in lime.
+   */
+  .tracks {
+    --tracks-name: 4.25rem;
+    --tracks-gap: 0.5rem;
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--tracks-name) minmax(0, 1fr);
+    align-items: center;
+    column-gap: var(--tracks-gap);
+    row-gap: 0.2rem;
+    font-size: 0.6875rem;
+  }
+
+  .tracks-name {
+    overflow: hidden;
+    color: var(--color-faint);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tracks-ruler {
+    position: relative;
+    height: 1.3rem;
+    overflow: hidden;
+    border-bottom: 1px solid var(--color-line-strong);
+    border-radius: 0.3rem 0.3rem 0 0;
+    cursor: ew-resize;
+    touch-action: none;
+  }
+
+  .tracks-ruler:hover {
+    background: rgb(255 255 255 / 0.04);
+  }
+
+  .tracks-ruler:focus-visible {
+    outline: 2px solid var(--color-lime);
+    outline-offset: 2px;
+  }
+
+  .tracks-tick {
+    position: absolute;
+    bottom: 0;
+    padding: 0 0 0.15rem 0.25rem;
+    border-left: 1px solid var(--color-line-strong);
+    color: var(--color-faint);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    pointer-events: none;
+  }
+
+  .tracks-lane {
+    position: relative;
+    overflow: hidden;
+    border-radius: 0.3rem;
+    background: rgb(255 255 255 / 0.035);
+  }
+
+  .tracks-block {
+    position: absolute;
+    display: block;
+    height: 1.3rem;
+    min-width: 0.5rem;
+    margin-top: 0.1rem;
+    overflow: hidden;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.3rem;
+    background: var(--color-ink-700);
+    color: var(--color-soft);
+    line-height: 1.2rem;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .tracks-block[data-fresh='true'] {
+    border-color: color-mix(in srgb, var(--color-lavender) 60%, transparent);
+    background: color-mix(in srgb, var(--color-lavender) 22%, var(--color-ink-800));
+    color: var(--color-fg);
+  }
+
+  .tracks-block:hover,
+  .tracks-block:focus-visible {
+    z-index: 1;
+    border-color: var(--color-fg);
+    outline: none;
+  }
+
+  /* Something at a moment has no width of its own: it is a flag from its time, as long as its words up to a limit. */
+  .tracks-block[data-moment='true'] {
+    max-width: 9rem;
+    border-left-width: 2px;
+  }
+
+  .tracks-lane[data-lane='cut'] .tracks-block {
+    border-style: dashed;
+  }
+
+  /* A block's words sit on the block's own color, so the sound drawn behind them never runs through them. */
+  .tracks-text {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 0 0.3rem 0 0.35rem;
+    background: inherit;
+    text-overflow: ellipsis;
+    vertical-align: top;
+  }
+
+  /* The file's sound, behind a block's words or along a lane of its own. */
+  .tracks-wave {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
+  .tracks-wave path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5px;
+  }
+
+  .tracks-lane[data-lane='sound'] {
+    color: var(--color-soft);
+  }
+
+  .tracks-lane[data-lane='sound'] .tracks-wave {
+    opacity: 0.75;
+  }
+
+  .tracks-over {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: calc(var(--tracks-name) + var(--tracks-gap));
+    pointer-events: none;
+  }
+
+  /* Moved by the stylesheet from one reading of the player's clock to the next while the file plays. */
+  .tracks-playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--color-lime);
+  }
+
+  .tracks[data-playing='true'] .tracks-playhead {
+    transition: left 0.25s linear;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tracks[data-playing='true'] .tracks-playhead {
+      transition: none;
+    }
+  }
+
+  /* The legend's swatches: a block lit, and a block quiet. */
+  .tracks-key {
+    width: 0.8rem;
+    height: 0.6rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.15rem;
+    background: var(--color-ink-700);
+  }
+
+  .tracks-key[data-fresh='true'] {
+    border-color: color-mix(in srgb, var(--color-lavender) 60%, transparent);
+    background: color-mix(in srgb, var(--color-lavender) 22%, var(--color-ink-800));
+  }
+
   /* The heading of a section that folds inside a panel: the whole of it is the control. */
   .fold-head {
     display: flex;

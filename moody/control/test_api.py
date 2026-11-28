@@ -2587,6 +2587,62 @@ def test_a_screenshot_is_shown_as_a_preview_card_and_previews_are_signed_at_each
     assert not store.files, "a project's previews go with it"
 
 
+def test_a_preview_of_a_version_kept_with_v2_carries_its_tracks_and_any_other_asks_the_engine_nothing_more(studio):
+    client, model, launcher = studio.client, studio.model, studio.launcher
+    film = new_project(client)
+    eid = start_engine(studio, film["id"])["id"]
+    saved = {
+        "version": "v2", "message": "The slam, with the hook", "prompts": ["make a short of the boss slam"], "model": "a-model",
+        "changes": [
+            {"from": 0, "to": 12.48, "kind": "video", "src": "renders/short.mp4", "text": "the slam, cropped to 9:16"},
+            {"from": 1, "to": 9, "kind": "voice", "src": "narration/voice.wav", "text": "six lines"},
+        ],
+        "render": "renders/short.mp4", "saved_at": "2026-11-28T14:51:05Z",
+    }
+    peaks = "".join(f"lavfi.astats.Overall.Peak_level={level}\n" for level in ("-inf", "-6.0206", "0.0"))
+    launcher.answers += [
+        probe("renders/short.mp4", 3 * MB, H264),
+        probe("sheets/frame.png", 240_000, PNG),
+        ("git show v2:./.v2/commit.json", (0, json.dumps(saved))),
+        ("lavfi.astats.Overall.Peak_level", (0, peaks)),
+    ]
+    model.script(
+        reply(
+            use("preview", engine_id=eid, paths=["sheets/frame.png", "renders/short.mp4"], caption="The slam with the new hook", version=" v2 "),
+            use("preview", engine_id=eid, path="sheets/frame.png", caption="A frame of it", version="v2"),
+            use("preview", engine_id=eid, path="renders/short.mp4", caption="The same file under a name of the agent's", version="Rough cut"),
+            use("preview", engine_id=eid, path="renders/short.mp4", caption="A step on the way"),
+            use("preview", engine_id=eid, path="renders/short.mp4", caption="A version v2 has no record of", version="v3"),
+        ),
+        reply(say("Shown.")),
+    )
+    message(client, film["id"], "Show me the slam")
+
+    results = [json.loads(r["content"]) for r in tool_results(model.requests[1]).values()]
+    assert "with its tracks" in results[0]["screen"] and "(2 changes)" in results[0]["screen"] and "no engine running" in results[0]["screen"]
+    assert not any("screen" in result for result in results[1:]), "the model is told of tracks only where the page has them"
+    version, frame, named, step, unsaved = previews(client, film["id"])
+    picture, video = version["items"]
+    assert version["version"] == "v2" and "edit" not in picture, "the edit is the render's, not every file's the preview shows"
+    assert video["edit"] == {
+        "message": "The slam, with the hook",
+        "prompts": ["make a short of the boss slam"],
+        "changes": [
+            {"text": "the slam, cropped to 9:16", "kind": "video", "from": 0.0, "to": 12.48, "src": "renders/short.mp4"},
+            {"text": "six lines", "kind": "voice", "from": 1.0, "to": 9.0, "src": "narration/voice.wav"},
+        ],
+        "saved_at": "2026-11-28T14:51:05+00:00",
+        "sound": [0, 50, 100],
+    }
+    assert not any("edit" in item for shown in (frame, named, step, unsaved) for item in shown["items"]), (
+        "a record is taken only for the file it names as its render, under the name v2 gave the version"
+    )
+    asked = [command for _, command in launcher.commands if "git show" in command or "Peak_level" in command]
+    assert [("git show v2:" in c, "git show v3:" in c, "Peak_level" in c) for c in asked] == [
+        (True, False, False), (False, False, True), (True, False, False), (False, True, False),
+    ], "only a label that is a v2 version's name asks for a record, and only a record found has its sound measured"
+
+
 def test_engine_send_carries_a_file_between_two_running_engines_of_one_project(studio):
     client, model, launcher, store = studio.client, studio.model, studio.launcher, studio.store
     for user in (ALICE, BOB):

@@ -15,7 +15,7 @@ The app is three panes, the layout of a coding agent's workspace:
 | --- | --- |
 | Left sidebar | New project, **Create** (the short list of things to start, which is `catalog.json`'s `shortcuts`: each starts a project of a discipline, with a format where it means one, and one that is not available yet shows what is coming instead), **Pinned** and **Recent** projects with search opened from the Recent row, the account (**Settings**, the balance, sign out; Settings is a dialog of tabs: Profile, Billing, Agent, Video editing, Connections, API keys) |
 | Center | The project's conversation with the agent: messages, tool activity, the agent's questions as choices, generated images and videos inline, the composer |
-| Right pane | Modular panels the project shows as it needs them, each folded and unfolded by a quiet arrow: **Screen** (the live stream of an engine), **Latest** (the newest version of the piece, to play, to open full screen, and to download, with the versions before it), **Environment** (the engines running, start and stop, **Connect GitHub**, and, for Unreal Engine, **Connect Epic**), **Plan** (the agent's tasks and their state), **Library** (the project's characters, environments, props, products, or whatever sections the project has) |
+| Right pane | Modular panels the project shows as it needs them, each folded and unfolded by a quiet arrow: **Screen** (the live stream of an engine, and with none on it, the versions of a video over their tracks where the project keeps them with their edits), **Latest** (the newest version of the piece, to play, to open full screen, and to download, with the versions before it), **Environment** (the engines running, start and stop, **Connect GitHub**, and, for Unreal Engine, **Connect Epic**), **Plan** (the agent's tasks and their state), **Library** (the project's characters, environments, props, products, or whatever sections the project has) |
 
 Clicking the screen rearranges the panes: the stream becomes the largest area,
 above the conversation, which stays visible below it. The library's sections are
@@ -692,11 +692,37 @@ opens each kind with a card of its own.
   (`video_versions`, a switch on the Video editing tab, off by default); on,
   the turn's state says `The person turned on "Keep versions with v2" in
   Settings: follow the skill `v2``, and the `v2` skill says how: one save a
-  finished change, the same name for the version in `preview` as v2 gave it,
-  and the page on the engine's Screen while the engine is open for the cut.
-  No engine is started or kept running for it, and the Latest panel plays the
-  versions with none. Its commands that send a project to its maker's service
-  are refused in the engine, so nothing leaves the studio through it.
+  finished change, and the same name for the version in `preview` as v2 gave
+  it. No engine is started or kept running for it. Its commands that send a
+  project to its maker's service are refused in the engine, so nothing leaves
+  the studio through it.
+- **The Screen shows the versions with their tracks, with no engine.** v2's
+  own page of versions is served inside the engine and shown in a browser
+  there, which costs a running machine for as long as anyone looks at it
+  (playing one version takes that browser about half a core). So the record
+  is read once instead: when `preview` shows a file under a label that is a
+  v2 version's name (`v3`), the control plane reads v2's record of that
+  version from the engine, which is running for the cut at that moment
+  (`git show v3:./.v2/commit.json`), and, where the record names that very
+  file as the version's render, keeps on the file's item what the page
+  draws: the version's `message`, the `prompts` it answers, its `changes`
+  (each with its kind, its span in the new video, the file that makes it,
+  and for a cut the time removed), and the file's sound as 240 `sound` bars
+  that the engine's ffmpeg measures in one pass (`moody/control/edits.py`).
+  Everything kept is checked and bounded, since the record is a file the
+  agent's commands wrote. From then on the page's **Screen** shows the
+  versions whenever no engine is at work on it: the version playing from
+  storage over a timeline of lanes (Text, Captions, Graphics, Video, Voice,
+  Music, Effects, Cuts), what this version changed lit and what earlier
+  versions made carried forward through its cuts, the sound drawn under the
+  voice and the music, a press on a block or the ruler moving the player,
+  the other versions one press away, and any two side by side
+  (`studio/VersionsScreen.tsx`, `studio/tracks.ts`). An engine put on screen
+  takes the versions' place, and a switch in the Screen's header brings them
+  back over it; while they are shown the stream is not loaded. The Latest
+  module steps aside while the Screen plays the versions. v2's page in the
+  engine (`v2-versions`) is still what a comment on a frame is left on, so
+  the agent opens it only when the person wants to mark one up.
 
 Additions to the API and the events:
 
@@ -709,7 +735,9 @@ PATCH  /v1/me                              also {name?, settings?: {id: value | 
 POST   /v1/projects                        {name?, discipline, format?, ...}: without a format, the project
                                            opens on the card that asks its kind
 ui               also {instant?, sets?: "format"}
-preview          also {version?}
+preview          also {version?}; an item of a v2 version's render also carries
+                 {edit: {message, prompts, changes: [{text, kind?, from?, to?, removed?, src?, type?}],
+                 saved_at?, sound?}}
 ```
 
 ## What is done when
