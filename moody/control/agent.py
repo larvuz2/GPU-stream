@@ -222,6 +222,7 @@ from service import (
     normal_tag,
     safe_name,
     setting_app,
+    setting_skill,
 )
 from transcript import Transcript
 import unreal
@@ -1531,6 +1532,7 @@ class Agent:
         account = self.sessions.me(turn.user)
         credits = account["credits"]
         editor = self.code_editor(account["settings"])
+        asked = self.setting_skills(account["settings"], project["discipline"])
         always = sorted(name for name, value in project["permissions"].items() if value == ALWAYS)
         return "\n".join(
             [
@@ -1540,6 +1542,7 @@ class Agent:
                 f"GitHub: {linked}",
                 f"Generation: {'available' if self.generator else 'not configured on this deployment'}",
                 *([f"A video edited by code is made in: {self.app_name(editor)} (app `{editor}`)"] if editor else []),
+                *(f'The person turned on "{label}" in Settings: follow the skill `{skill}`' for label, skill in asked),
                 f"Credits the person has: {credits}",
                 f"The person no longer wants to be asked before: {', '.join(always) or '(nothing; they are asked each time)'}",
                 "Plan:",
@@ -1571,6 +1574,23 @@ class Agent:
         default = setting_app(setting, setting["default"])
         startable = [app for app in (chosen, default) if app and catalog.apps.get(app, {}).get("status") in STARTABLE]
         return startable[0] if startable else None
+
+    def setting_skills(self, settings: dict[str, Any], discipline: str) -> list[tuple[str, str]]:
+        """The skills the person's settings ask for in a project of this discipline, each with its setting's label.
+
+        The catalog's setting names the skill each of its values stands for
+        (`setting_skill`). One is said only where the project is offered that
+        skill, so a turn is told to follow nothing it cannot open, and a
+        setting about video says nothing to a project that is not one.
+        """
+        catalog = self.sessions.catalog
+        offered = {skill.name for skill in skills_for(self.skills, catalog, discipline)}
+        asked = []
+        for setting in catalog.settings.values():
+            skill = setting_skill(setting, settings.get(setting["id"], setting["default"]))
+            if skill in offered:
+                asked.append((setting["label"], skill))
+        return asked
 
     def unreal_state(
         self, turn: Turn, engines: list[dict[str, Any]], history: Callable[[], list[dict[str, Any]]]

@@ -652,12 +652,15 @@ opens each kind with a card of its own.
   person changed (`profiles.settings`) and refuses an id or a value the
   catalog does not offer, so adding one is a catalog entry and the code that
   reads it. An entry is `{id, tab, label, help, kind: "toggle" | "choice",
-  options?: [{value, label}], default, apps?}`: a toggle is `true` or `false`,
+  options?: [{value, label}], default, apps?, skills?}`: a toggle is `true` or `false`,
   a choice one of its options' `value`. A setting that chooses between
   engines names the app each value stands for in `apps` (a toggle's under
   `on` and `off`, a choice's under its options' values): the agent is told of
   the one that applies, and the form that starts an engine by hand offers
-  only that one, so the choice is made in Settings and nowhere else. A value kept from before the catalog
+  only that one, so the choice is made in Settings and nowhere else. A setting
+  that changes how the agent works names the skill each value asks it to
+  follow in `skills`, listed the same way: a turn's state says so for a
+  project that is offered that skill, and says nothing otherwise. A value kept from before the catalog
   stopped offering it does not apply, and the default does. The name
   (`profiles.name`) is at most eighty characters, and `null` clears it. A
   change that is refused in any part changes nothing.
@@ -678,6 +681,22 @@ opens each kind with a card of its own.
   has it as one that can be started (`hyperframes`, switched on), the app the
   default stands for otherwise (`cutroom`), and no line where the catalog has
   neither to start.
+- **Versions of a video edited by code can be kept with v2.** Both engines a
+  video is edited by code in carry v2, Agent Native's open-source version
+  control for videos an agent makes (MIT), built from its source at a pinned
+  commit. It makes nothing: after a cut exists, it saves the project folder
+  as a version, with what the person asked for and what changed at which
+  times, and its page shows every version to watch, compare with an earlier
+  one side by side, and mark up with comments on a frame, which the agent
+  then reads. Whether the agent uses it is the person's setting
+  (`video_versions`, a switch on the Video editing tab, off by default); on,
+  the turn's state says `The person turned on "Keep versions with v2" in
+  Settings: follow the skill `v2``, and the `v2` skill says how: one save a
+  finished change, the same name for the version in `preview` as v2 gave it,
+  and the page on the engine's Screen while the engine is open for the cut.
+  No engine is started or kept running for it, and the Latest panel plays the
+  versions with none. Its commands that send a project to its maker's service
+  are refused in the engine, so nothing leaves the studio through it.
 
 Additions to the API and the events:
 
