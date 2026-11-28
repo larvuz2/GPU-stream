@@ -167,7 +167,7 @@ input_idle_seconds() {
 
 page_connected() {
   curl -fsS -m 5 -H "Authorization: Bearer ${SELKIES_MASTER_TOKEN}" \
-    "http://127.0.0.1:${SELKIES_PORT:-8080}/api/sessions" 2> /dev/null | grep -q '"connected_at"'
+    "http://127.0.0.1:${SELKIES_PORT:-8080}${SELKIES_SUBFOLDER:+/${SELKIES_SUBFOLDER}}/api/sessions" 2> /dev/null | grep -q '"connected_at"'
 }
 
 # Whether a file is still arriving in the workspace: a download in Firefox or an

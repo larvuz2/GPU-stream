@@ -13,7 +13,7 @@ addons/modal/selkies-modal up
 selkies-modal: image im-... ready after 1 s
 selkies-modal: blender is sb-... on T4; waiting for Selkies
 selkies-modal: Selkies listens after 4 s; the session ends after 10 min unused, or 8 h in all
-https://....w.modal.host/?_modal_connect_token=...#token=...
+https://....w.modal.host/<the session's path>/#token=...
 ```
 
 The first `up` or `build` builds the image, which takes a few minutes; Modal
@@ -56,17 +56,25 @@ status of 1.
 
 The link carries two credentials, and a session takes both:
 
-- `_modal_connect_token`, in the query, is Modal's: its proxy admits no request
-  to the Sandbox without it, and answers the first one with a cookie that
-  carries the page's later requests and its WebSocket.
+- The path, a random one made for the session: its server answers under that
+  path and serves nothing outside it, so the Sandbox's address alone reaches
+  nothing.
 - `#token=`, in the fragment, is the Selkies session token of
   [secure mode](../../docs/secure-mode.md). A browser sends a fragment to no
   server, and the client presents the token on the stream's socket.
 
+The address is a tunnel Modal opens to the session's port. Both credentials
+are in the link itself and neither is a cookie, so a page of another site can
+show the session in a frame, where that site is one the session allows
+(`SELKIES_FRAME_ANCESTORS`). Modal's own gate, a connect token its proxy
+answers with a `SameSite=Lax` cookie, cannot be framed: a browser sends such a
+cookie for no document another site frames, so the page arrives and everything
+it then asks for is refused. A session started without the tunnel, and the
+Unreal view, are still reached that way, in a tab of their own.
+
 Whoever holds the link controls the session, so share it as you would a
-password. Neither token is stored outside the Sandbox: `url` asks Modal for a
-new connect token and reads the session token back out of the Sandbox, which
-takes the Modal credentials that started it.
+password. Neither credential is stored outside the Sandbox: `url` reads both
+back out of it, which takes the Modal credentials that started it.
 
 ## What a session costs
 
