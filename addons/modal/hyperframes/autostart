@@ -13,8 +13,9 @@
 # why (`hyperframes-release update`, release.sh, started here so it is under
 # way before the first command asks), and then each `hyperframes` command as
 # it is run. When the agent starts a live preview (`hyperframes-preview`,
-# preview.sh), the preview's browser window opens over this terminal and the
-# person watches the composition instead.
+# preview.sh) or shows the versions page of v2 (`v2-versions`,
+# v2/versions.sh), the browser window opens over this terminal and the person
+# watches the composition or its versions instead.
 folder="$(selkies-modal-project)" || exit 1
 cd "${folder}" || exit 1
 

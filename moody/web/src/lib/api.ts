@@ -542,6 +542,53 @@ export interface ScreenData {
   stream: string;
 }
 
+/** What a change of a version's edit may be: the lanes of its timeline, and a cut, which removes time. */
+export const EDIT_KINDS = ['text', 'captions', 'graphics', 'video', 'voice', 'music', 'sfx', 'cut'] as const;
+
+/** One kind of change. */
+export type EditKind = (typeof EDIT_KINDS)[number];
+
+/** What a change is where it is not an edit of what was there. */
+const EDIT_TYPES = ['added', 'retimed'] as const;
+
+/** One change a version of a video made, as the tool that keeps the versions recorded it. */
+export interface EditChange {
+  /** What changed, in the person's words. */
+  text: string;
+  /** What kind of thing it is; left out for a change that has none. */
+  kind?: EditKind;
+  /** Where it starts in the version's own video, in seconds; left out, with `to`, for a change to the whole video. */
+  from?: number;
+  /** Where it ends, in seconds. */
+  to?: number;
+  /** How much time a cut removed, in seconds. */
+  removed?: number;
+  /** The file that makes it, from the project's folder. */
+  src?: string;
+  /** Whether it was added or moved in time, where it is neither left out. */
+  type?: (typeof EDIT_TYPES)[number];
+}
+
+/**
+ * The edit a version of a video is, read from the project's history when the agent showed the
+ * version (`moody/control/edits.py`): what the page draws as the version's tracks.
+ */
+export interface VersionEdit {
+  /** What the version is, in a line. */
+  message: string;
+  /** What the person asked for since the version before, word for word. */
+  prompts: string[];
+  /** What changed, in the order recorded. */
+  changes: EditChange[];
+  /** When it was saved, as an ISO 8601 time. */
+  saved_at?: string;
+  /**
+   * Its sound as bars: the loudest moment of each of as many equal stretches of the file, from 0,
+   * silence, to 100, full scale. Left out for a file with no sound.
+   */
+  sound?: number[];
+}
+
 /** One file of a preview: a {@link Media} with what is known of its length and its size on screen. */
 export interface PreviewItem extends Media {
   /** Its file name in the project's folder. */
@@ -552,6 +599,8 @@ export interface PreviewItem extends Media {
   width?: number;
   /** Its height in pixels, for a picture or a video. */
   height?: number;
+  /** The edit it is the render of, for the file of a version whose history holds one. */
+  edit?: VersionEdit;
 }
 
 /** The agent showed work in progress: files an engine wrote, or its screen. */
@@ -1182,6 +1231,26 @@ const isMedia: Guard<Media> = (value): value is Media =>
 
 const isMediaList = arrayOf(isMedia);
 
+/** Checks a value into an {@link EditChange}. */
+const isEditChange: Guard<EditChange> = (value): value is EditChange =>
+  isRecord(value) &&
+  isString(value.text) &&
+  optional(oneOf(EDIT_KINDS))(value.kind) &&
+  optional(isNumber)(value.from) &&
+  optional(isNumber)(value.to) &&
+  optional(isNumber)(value.removed) &&
+  optional(isString)(value.src) &&
+  optional(oneOf(EDIT_TYPES))(value.type);
+
+/** Checks a value into a {@link VersionEdit}. */
+const isVersionEdit: Guard<VersionEdit> = (value): value is VersionEdit =>
+  isRecord(value) &&
+  isString(value.message) &&
+  isStrings(value.prompts) &&
+  arrayOf(isEditChange)(value.changes) &&
+  optional(isString)(value.saved_at) &&
+  optional(arrayOf(isNumber))(value.sound);
+
 /** Checks a value into a {@link PreviewItem}. */
 const isPreviewItem: Guard<PreviewItem> = (value): value is PreviewItem =>
   isRecord(value) &&
@@ -1190,7 +1259,8 @@ const isPreviewItem: Guard<PreviewItem> = (value): value is PreviewItem =>
   isString(value.name) &&
   optional(isNumber)(value.seconds) &&
   optional(isNumber)(value.width) &&
-  optional(isNumber)(value.height);
+  optional(isNumber)(value.height) &&
+  optional(isVersionEdit)(value.edit);
 
 /** Checks a value into a {@link PreviewData}. */
 const isPreview: Guard<PreviewData> = (value): value is PreviewData =>

@@ -1001,6 +1001,17 @@
         "on": "hyperframes",
         "off": "cutroom"
       }
+    },
+    {
+      "id": "video_versions",
+      "tab": "Video editing",
+      "label": "Keep versions with v2",
+      "help": "The agent saves a version of a video edited by code after every change, with what you asked for and what changed. Your Screen then shows each version over its tracks, to play, switch between, and compare, with no engine running.",
+      "kind": "toggle",
+      "default": false,
+      "skills": {
+        "on": "v2"
+      }
     }
   ],
   "regions": [

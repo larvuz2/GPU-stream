@@ -155,8 +155,8 @@ interface Shown {
 interface Step {
   /** The tools it calls first. */
   work?: Work[];
-  /** The version of the piece it shows. */
-  shown?: Shown;
+  /** The version of the piece it shows, or several, the oldest first. */
+  shown?: Shown | readonly Shown[];
   /** What it says, in a line or two. */
   says: string;
   /** The card the turn ends on. */
@@ -213,6 +213,74 @@ const FIRST_CUT: PreviewItem = {
   seconds: 6,
   width: 640,
   height: 360,
+};
+
+/** How many bars a demo version's sound is drawn as. */
+const SOUND_BARS = 240;
+
+/**
+ * Draws the bars of a demo version's sound: phrases of speech with breaths between them, over a
+ * bed where the version has music, the same each time it is asked.
+ *
+ * @param bed The level of the music under the voice, from 0 to 100.
+ * @returns The bars.
+ */
+function soundBars(bed: number): number[] {
+  return Array.from({ length: SOUND_BARS }, (_, bar) => {
+    const phrase = Math.max(0, Math.sin(bar * 0.105));
+    const syllable = 0.55 + 0.45 * Math.abs(Math.sin(bar * 0.9));
+    return Math.round(Math.min(100, bed + 62 * phrase * syllable));
+  });
+}
+
+/** The first clip of the demo's long video as first cut: the first of two versions kept with their edits. */
+const CLIP_V1: PreviewItem = {
+  kind: 'video',
+  url: '/media/preview-boards.mp4',
+  name: 'clip-1.mp4',
+  seconds: 6,
+  width: 640,
+  height: 360,
+  edit: {
+    message: 'The strongest moment, as it was said',
+    prompts: ['Cut the three best moments of the stream into clips'],
+    saved_at: '2026-11-21T14:02:00Z',
+    changes: [
+      { from: 0, to: 6, kind: 'video', src: 'jobs/stream/edits/clip-1.mp4', text: 'the strongest moment, six seconds' },
+      { from: 0.4, to: 5.6, kind: 'captions', text: 'captions from the transcript' },
+      { from: 0.2, to: 5.8, kind: 'voice', src: 'footage/stream.mp4', text: 'the voice as recorded' },
+    ],
+    sound: soundBars(2),
+  },
+};
+
+/** The same clip with what the person asked for next: the second version. */
+const CLIP_V2: PreviewItem = {
+  kind: 'video',
+  url: '/media/preview-cut.mp4',
+  name: 'clip-1.mp4',
+  seconds: 6,
+  width: 640,
+  height: 360,
+  edit: {
+    message: 'Opens on its hook, with music under the voice',
+    prompts: ['Open on a hook', 'Put some music under it, quiet'],
+    saved_at: '2026-11-21T14:09:00Z',
+    changes: [
+      {
+        from: 0,
+        to: 1.5,
+        kind: 'graphics',
+        type: 'added',
+        src: 'jobs/stream/edits/clip-1.json',
+        text: 'hook “Wait for the second hit”',
+      },
+      { from: 0, to: 6, kind: 'music', type: 'added', src: 'library/bed.mp3', text: 'a low bed, 18 dB under the voice' },
+      { from: 2.4, to: 2.4, kind: 'sfx', type: 'added', src: 'library/hit.wav', text: 'a hit on the cut' },
+      { kind: 'captions', text: 'two words at a time, larger' },
+    ],
+    sound: soundBars(14),
+  },
 };
 
 /** The boards the demo shows cut together, before anything moves. */
@@ -882,12 +950,11 @@ const AFTER: Readonly<Record<string, (value: unknown) => Step>> = {
     card: designNext('Show me three concepts', 'First, what it must fit'),
   }),
   brief: () => ({
-    shown: {
-      label: 'Clip 1, first cut',
-      caption: 'The strongest moment, opening on its hook, six seconds.',
-      item: FIRST_CUT,
-    },
-    says: 'First cut of the first clip. The others are cut the same way once you like this one.',
+    shown: [
+      { label: 'v1', caption: 'The strongest moment as a first cut, six seconds.', item: CLIP_V1 },
+      { label: 'v2', caption: 'The same clip opening on its hook, with music under the voice.', item: CLIP_V2 },
+    ],
+    says: 'Two versions of the first clip are on the Screen with their tracks: play either, or put them side by side. The others are cut the same way once you like this one.',
     card: NEXT,
   }),
 };
@@ -916,8 +983,8 @@ function play(project: Project, step: Step, turn: TurnId, start: number): Script
     add({ turn_id: turn, kind: 'tool_start', data: { call_id: call, tool: work.tool, title: work.title } });
     add({ turn_id: turn, kind: 'tool_end', data: { call_id: call, ok: true, summary: work.summary } }, work.seconds);
   });
-  if (step.shown !== undefined) {
-    const call = `${turn}-shown`;
+  [step.shown ?? []].flat().forEach((shown, index) => {
+    const call = `${turn}-shown-${index}`;
     add({ turn_id: turn, kind: 'tool_start', data: { call_id: call, tool: 'preview', title: 'Preparing a preview' } });
     add(
       {
@@ -925,16 +992,16 @@ function play(project: Project, step: Step, turn: TurnId, start: number): Script
         kind: 'preview',
         data: {
           engine_id: NO_ENGINE,
-          caption: step.shown.caption,
-          items: [step.shown.item],
+          caption: shown.caption,
+          items: [shown.item],
           compare: false,
-          version: step.shown.label,
+          version: shown.label,
         },
       },
       2,
     );
-    add({ turn_id: turn, kind: 'tool_end', data: { call_id: call, ok: true, summary: `Showed ${step.shown.label}` } });
-  }
+    add({ turn_id: turn, kind: 'tool_end', data: { call_id: call, ok: true, summary: `Showed ${shown.label}` } });
+  });
   add({ turn_id: turn, kind: 'text', data: { text: step.says } }, 0.8);
   if (step.card !== undefined) {
     const { card } = step;

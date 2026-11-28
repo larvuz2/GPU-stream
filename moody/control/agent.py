@@ -107,7 +107,10 @@ signs afresh (`Sessions.shown_events`). The model gets the file's facts as
 text, not the pixels or the sound, which would cost tokens on every later
 request of the conversation; `look` adds one small picture of each file when
 it has to judge the result. `engine_screenshot` shows its picture as the same
-card.
+card. A preview that shows a version kept with v2 also carries what v2
+recorded of it (`edits`, `Agent.version_edit`): the changes with their times
+and kinds and the bars of its sound, read from the engine at that moment, so
+the page draws the version's tracks afterwards with no engine running.
 
 The same holds for what the agent generates and for the library: a
 generation's result is its facts, and `look` on `generate_image` and
@@ -197,6 +200,7 @@ from generation import (
     video_arguments,
 )
 from github_client import GitHubError
+import edits
 import genui
 from looking import LOOK_BYTES, NoPicture, look_arguments, picture_of
 from loop import BUILT_INS, PREFIX, Brief, Loop, Settings, Subagent, ToolSpec, TurnLoop, Workspace, sdk_loop
@@ -222,6 +226,7 @@ from service import (
     normal_tag,
     safe_name,
     setting_app,
+    setting_skill,
 )
 from transcript import Transcript
 import unreal
@@ -1180,6 +1185,11 @@ class Shown:
     picture: bytes | None = None
 
 
+def version_label(version: str | None) -> str:
+    """The label a preview's version carries: on one line and kept short, or empty for a preview that is no version."""
+    return " ".join((version or "").split())[:VERSION_CHARACTERS]
+
+
 def agent_branch(project: dict[str, Any]) -> str:
     """The branch a project's agent makes in its repository: `moody/<name as a slug>-<the id's first eight characters>`."""
     letters = unicodedata.normalize("NFKD", project["name"]).encode("ascii", "ignore").decode().lower()
@@ -1531,6 +1541,7 @@ class Agent:
         account = self.sessions.me(turn.user)
         credits = account["credits"]
         editor = self.code_editor(account["settings"])
+        asked = self.setting_skills(account["settings"], project["discipline"])
         always = sorted(name for name, value in project["permissions"].items() if value == ALWAYS)
         return "\n".join(
             [
@@ -1540,6 +1551,7 @@ class Agent:
                 f"GitHub: {linked}",
                 f"Generation: {'available' if self.generator else 'not configured on this deployment'}",
                 *([f"A video edited by code is made in: {self.app_name(editor)} (app `{editor}`)"] if editor else []),
+                *(f'The person turned on "{label}" in Settings: follow the skill `{skill}`' for label, skill in asked),
                 f"Credits the person has: {credits}",
                 f"The person no longer wants to be asked before: {', '.join(always) or '(nothing; they are asked each time)'}",
                 "Plan:",
@@ -1571,6 +1583,23 @@ class Agent:
         default = setting_app(setting, setting["default"])
         startable = [app for app in (chosen, default) if app and catalog.apps.get(app, {}).get("status") in STARTABLE]
         return startable[0] if startable else None
+
+    def setting_skills(self, settings: dict[str, Any], discipline: str) -> list[tuple[str, str]]:
+        """The skills the person's settings ask for in a project of this discipline, each with its setting's label.
+
+        The catalog's setting names the skill each of its values stands for
+        (`setting_skill`). One is said only where the project is offered that
+        skill, so a turn is told to follow nothing it cannot open, and a
+        setting about video says nothing to a project that is not one.
+        """
+        catalog = self.sessions.catalog
+        offered = {skill.name for skill in skills_for(self.skills, catalog, discipline)}
+        asked = []
+        for setting in catalog.settings.values():
+            skill = setting_skill(setting, settings.get(setting["id"], setting["default"]))
+            if skill in offered:
+                asked.append((setting["label"], skill))
+        return asked
 
     def unreal_state(
         self, turn: Turn, engines: list[dict[str, Any]], history: Callable[[], list[dict[str, Any]]]
@@ -2299,8 +2328,39 @@ class Agent:
             self.store.upload(LIBRARY_BUCKET, path, shown.data, shown.content_type)
             items.append({**shown.item, "path": path})
         data = {"engine_id": engine_id, "caption": caption, "items": items, "compare": compare}
-        label = " ".join((version or "").split())[:VERSION_CHARACTERS]
+        label = version_label(version)
         turn.event("preview", {**data, "version": label} if label else data)
+
+    def version_edit(self, sandbox: str, folder: str, version: str | None, chosen: list[str], files: list[Shown]) -> int | None:
+        """Put on the file a v2 version's record names as its render what that record says of it (`edits`).
+
+        The page draws it as the version's tracks on the person's Screen, with
+        no engine running. The engine is asked only for a label that is a v2
+        version's name, so every other preview costs it nothing more, and the
+        file's sound is measured only where there is a record and it has sound.
+
+        Returns:
+            How many changes the edit holds, or nothing where the preview shows no v2 version.
+        """
+        label = version_label(version)
+        if not edits.is_version(label):
+            return None
+        launcher = self.sessions.launcher
+        status, record = launcher.exec(sandbox, edits.record_command(folder, label), EXEC_SECONDS)
+        found = edits.edit_of(record, chosen) if status == 0 else None
+        if found is None:
+            return None
+        render, edit = found
+        shown = files[chosen.index(render)]
+        if shown.item["kind"] not in ("audio", "video"):
+            return None
+        if shown.facts.get("seconds") and shown.facts.get("sample_rate"):
+            _, heard = launcher.exec(sandbox, edits.bars_command(folder, render, shown.facts["seconds"]), EXEC_SECONDS)
+            bars = edits.sound_bars(heard)
+            if bars:
+                edit["sound"] = bars
+        shown.item["edit"] = edit
+        return len(edit["changes"])
 
     def tool_preview(
         self,
@@ -2342,6 +2402,7 @@ class Agent:
         if compare and files[0].item["kind"] != files[1].item["kind"]:
             raise Refused(400, "A before and after pair is two files of one kind.")
         words = caption.strip()[:300]
+        tracks = self.version_edit(sandbox, folder, version, chosen, files)
         self.show_preview(turn, engine_id, words, files, compare, version)
         answer = {
             "shown": words,
@@ -2353,6 +2414,11 @@ class Agent:
                 else "You were given the facts, not the media; call again with look: true only if you must judge it yourself."
             ),
         }
+        if tracks is not None:
+            answer["screen"] = (
+                f"The person's Screen in the app now plays this version with its tracks, drawn from v2's record of it "
+                f"({tracks} change{'s' if tracks != 1 else ''}), and keeps showing it with no engine running."
+            )
         pictures = [self.picture_block(shown.picture) for shown in files if shown.picture is not None]
         kinds = [shown.item["kind"] for shown in files]
         counted = ", ".join(f"{kinds.count(one)} {one}{'s' if kinds.count(one) != 1 else ''}" for one in dict.fromkeys(kinds))

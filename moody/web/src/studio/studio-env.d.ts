@@ -14,5 +14,7 @@ declare module 'react' {
   interface CSSProperties {
     /** The width of the right column, which the person drags (`studio.css`). */
     '--pane-w'?: string;
+    /** The shape of the frame the versions on the Screen play in, as width over height (`studio.css`). */
+    '--versions-shape'?: number;
   }
 }

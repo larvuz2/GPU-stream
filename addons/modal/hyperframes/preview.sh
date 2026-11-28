@@ -11,44 +11,24 @@
 #
 # The preview is the CLI's own studio (`hyperframes preview`), a local web
 # server that reloads the composition as its files change, kept running in the
-# background after this command returns. What shows it is Chrome for Testing,
-# opened as one window with no browser chrome on the session's display, which
-# the window manager makes fill the screen: the person watching the engine sees
-# the composition and its timeline while the agent edits the files.
-#
-# Chrome keeps its own sandbox: a Modal Sandbox lets the session's user make
-# the user namespaces it is built on, so no flag turns it off here. `--kiosk`
-# shows the page with no window frame or address bar. The line a Chrome for
-# Testing puts over every window to say what it is stays: no flag removes it.
+# background after this command returns. What shows it is the session's one
+# browser window (`selkies-modal-kiosk`, kiosk.sh), which fills the screen:
+# the person watching the engine sees the composition and its timeline while
+# the agent edits the files.
 #
 # One preview is shown at a time: starting one stops the preview that was
 # running, since the CLI refuses a port another preview holds rather than
-# moving it, and replaces the browser window. The browser's profile is a
-# folder of the session's own and goes with it.
+# moving it, and takes the browser window from whatever page had it, another
+# preview or the versions page of v2 (v2/versions.sh). A preview whose window
+# another page took keeps serving until the next one starts or `--stop`, and
+# `--stop` closes the window only while it still shows a preview.
 
 set -u
 
-CHROME="/opt/hyperframes/chrome/chrome"
-STATE="/tmp/selkies-modal"
-PID_FILE="${STATE}/hyperframes-preview.pid"
-PROFILE="${STATE}/hyperframes-preview-profile"
-
-close_browser() {
-  [ -f "${PID_FILE}" ] || return 0
-  kill "$(cat "${PID_FILE}")" 2> /dev/null
-  rm -f "${PID_FILE}"
-}
-
 if [ "${1-}" = "--stop" ]; then
-  close_browser
+  selkies-modal-kiosk hyperframes-preview --close
   hyperframes preview --kill-all
   exit $?
-fi
-
-# The browser itself, as this script starts it detached below: its process ID is kept for close_browser
-if [ "${1-}" = "--browser" ]; then
-  echo "$$" > "${PID_FILE}"
-  exec "${CHROME}" --no-first-run --no-default-browser-check --user-data-dir="${PROFILE}" --kiosk --app="$2"
 fi
 
 dir="${1:?usage: hyperframes-preview DIR [PORT] | --stop}"
@@ -73,7 +53,5 @@ curl -fsS -o /dev/null -m 2 "${url}/" || {
   exit 1
 }
 
-close_browser
-mkdir -p "${STATE}"
-setsid -f "$0" --browser "${url}" > "${STATE}/hyperframes-preview.log" 2>&1
+selkies-modal-kiosk hyperframes-preview "${url}" || exit 1
 echo "preview of ${dir} at ${url}, shown on the session's screen"

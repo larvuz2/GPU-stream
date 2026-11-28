@@ -31,6 +31,13 @@
  * picture opens first at the link its listing reported, and a retry mints a fresh one; a later
  * listing's links never reload a frame that is up. Which picture is shown is the workspace's,
  * since the agent switches it too (a `screen` event).
+ *
+ * Where the project keeps the versions of a video with their edits, the Screen shows them while
+ * no engine is on it (`VersionsScreen.tsx`): the newest version playing over its tracks, drawn by
+ * the page from the log, which costs no engine at all. An engine put on screen takes their place,
+ * and a switch in the header brings the versions back over it. While they are shown over a
+ * running engine the stream is not loaded, so the engine encodes no picture nobody watches; going
+ * back to it connects again. The engine itself runs on, which the stage says.
  * @module
  */
 import { useCallback, useEffect, useState, type ComponentType } from 'react';
@@ -38,6 +45,7 @@ import {
   Box,
   ChevronDown,
   ExternalLink,
+  Layers,
   Maximize2,
   Minimize2,
   Monitor,
@@ -52,6 +60,8 @@ import { clock, timestamp } from '../lib/format';
 import { useNow } from './hooks';
 import { describeEndReason, describeError } from './messages';
 import { openStreamTab } from './present';
+import type { Version } from './transcript';
+import { VersionsScreen } from './VersionsScreen';
 
 /** How long a frame may take to load before the stage calls it stalled. */
 const STALL_MS = 20_000;
@@ -95,6 +105,14 @@ interface StageProps {
   mobileHidden: boolean;
   /** Drawn instead of the stream, where there is none to show. */
   standIn?: StreamStandIn;
+  /** The versions of the piece that can take the screen, the newest first: none where no edit of one is known. */
+  versions: readonly Version[];
+  /** Whether the versions are on screen, in the stream's place. */
+  versionsShown: boolean;
+  /** Puts the versions on screen over the engine, or gives the screen back to it. */
+  onVersions: (shown: boolean) => void;
+  /** Leads to where a version was shown in the conversation. */
+  onShowVersion: (version: Version) => void;
 }
 
 /**
@@ -128,6 +146,10 @@ export function Stage({
   narrow,
   mobileHidden,
   standIn,
+  versions,
+  versionsShown,
+  onVersions,
+  onShowVersion,
 }: StageProps) {
   const [opening, setOpening] = useState(false);
   const [tabError, setTabError] = useState<string | null>(null);
@@ -199,7 +221,37 @@ export function Stage({
             <ChevronDown className={cx('panel-chevron', !open && '-rotate-90')} aria-hidden="true" />
           )}
         </button>
-        {engine === null ? null : choices.length > 1 ? (
+        {engine === null || !isActive(engine) ? (
+          versionsShown ? (
+            <span className="min-w-0 truncate text-xs text-muted">Versions</span>
+          ) : null
+        ) : versions.length > 0 ? (
+          <div className="segmented min-w-0 flex-none" role="group" aria-label="On screen">
+            <button
+              type="button"
+              className="segment"
+              aria-pressed={versionsShown}
+              onClick={() => {
+                onVersions(true);
+              }}
+            >
+              <Layers aria-hidden="true" />
+              Versions
+            </button>
+            <button
+              type="button"
+              className="segment"
+              aria-pressed={!versionsShown}
+              onClick={() => {
+                onVersions(false);
+              }}
+            >
+              <span className={cx('dot', engineDot(engine))} aria-hidden="true" />
+              <span className="truncate">{appName}</span>
+            </button>
+          </div>
+        ) : null}
+        {engine === null || versionsShown ? null : choices.length > 1 ? (
           <select
             className="field field-sm h-7 w-auto min-w-0 truncate py-0 pr-7 pl-2 text-xs"
             aria-label="Engine on screen"
@@ -214,17 +266,17 @@ export function Stage({
               </option>
             ))}
           </select>
-        ) : pictures.length > 0 && !focus ? null : (
+        ) : versions.length > 0 || (pictures.length > 0 && !focus) ? null : (
           <span className="flex min-w-0 items-center gap-1.5 truncate text-xs text-muted">
             <span className={cx('dot', engineDot(engine))} aria-hidden="true" />
             <span className="truncate">{appName}</span>
           </span>
         )}
-        {pictures.length > 0 && shown !== null ? (
+        {pictures.length > 0 && shown !== null && !versionsShown ? (
           <PictureToggle pictures={pictures} shown={shown.name} onStream={onStream} />
         ) : null}
         <div className="ml-auto flex flex-none items-center gap-0.5">
-          {running ? (
+          {running && !versionsShown ? (
             <button
               type="button"
               className="icon-btn"
@@ -238,7 +290,7 @@ export function Stage({
               {opening ? <span className="spinner size-3.5" aria-hidden="true" /> : <ExternalLink aria-hidden="true" />}
             </button>
           ) : null}
-          {narrow || engine === null ? null : focus ? (
+          {narrow || (engine === null && !versionsShown) ? null : focus ? (
             <button
               type="button"
               className="btn btn-ghost btn-sm h-8 px-3 text-[0.8125rem]"
@@ -265,7 +317,29 @@ export function Stage({
         </div>
       </div>
 
-      {unfolded ? (
+      {!unfolded ? null : versionsShown ? (
+        <div className={cx('flex min-h-0 flex-1 flex-col pb-3', focus ? 'px-4 sm:px-6' : 'px-3')}>
+          <VersionsScreen versions={versions} onShow={onShowVersion} />
+          <p className="mt-2 text-[0.6875rem] text-faint">
+            {engine !== null && isActive(engine) ? (
+              <>
+                Drawn from the project’s saved versions. {appName} is {running ? 'still running' : 'starting'}.{' '}
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => {
+                    onVersions(false);
+                  }}
+                >
+                  Show {appName}
+                </button>
+              </>
+            ) : (
+              'Drawn from the project’s saved versions. No engine is running for this.'
+            )}
+          </p>
+        </div>
+      ) : (
         <div className={cx('flex min-h-0 flex-1 flex-col pb-3', focus ? 'px-4 sm:px-6' : 'px-3')}>
           <div className="stream-box">
             {engine === null ? (
@@ -336,7 +410,7 @@ export function Stage({
             </p>
           )}
         </div>
-      ) : null}
+      )}
     </section>
   );
 }

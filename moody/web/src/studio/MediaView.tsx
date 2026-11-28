@@ -27,6 +27,8 @@ interface MediaViewProps {
   className?: string;
   /** Whether the view fills its frame, cropping, rather than showing the whole file. */
   cover?: boolean;
+  /** Is handed the element that plays a video or a sound, and `null` when it goes, for a caller that follows its clock. */
+  onPlayer?: (player: HTMLMediaElement | null) => void;
 }
 
 /**
@@ -35,7 +37,7 @@ interface MediaViewProps {
  * @param props The component's props.
  * @returns The file's view.
  */
-export function MediaView({ media, label, className, cover = false }: MediaViewProps) {
+export function MediaView({ media, label, className, cover = false, onPlayer }: MediaViewProps) {
   const [failed, setFailed] = useState(false);
   const name = media.name ?? label ?? media.kind;
   const fail = (): void => {
@@ -65,6 +67,7 @@ export function MediaView({ media, label, className, cover = false }: MediaViewP
     case 'video':
       return (
         <video
+          ref={onPlayer}
           src={media.url}
           controls
           playsInline
@@ -81,7 +84,7 @@ export function MediaView({ media, label, className, cover = false }: MediaViewP
             <Music className="size-4" aria-hidden="true" />
             <span className="truncate">{name}</span>
           </span>
-          <audio src={media.url} controls preload="metadata" className="w-full" onError={fail} />
+          <audio ref={onPlayer} src={media.url} controls preload="metadata" className="w-full" onError={fail} />
         </div>
       );
     case 'file':

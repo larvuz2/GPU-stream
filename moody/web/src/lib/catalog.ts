@@ -243,6 +243,12 @@ export interface Setting {
    * `on` and `off` and a choice's under its options' values ({@link settingApp}).
    */
   apps?: Record<string, string>;
+  /**
+   * The skill each of its values asks the agent to follow, where the setting changes how the
+   * agent works, listed as `apps` is. The control plane tells the agent; the page only shows the
+   * setting.
+   */
+  skills?: Record<string, string>;
 }
 
 /** The shape of `catalog.json`. */

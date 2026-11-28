@@ -691,16 +691,34 @@ def with_query(url: str, **params: str) -> str:
     return urlunsplit(parts._replace(query=urlencode(query)))
 
 
+def setting_key(setting: dict[str, Any], value: Any) -> Any:
+    """What a value of a catalog setting is listed under where the setting says what its values stand for.
+
+    A toggle's values are listed under `on` and `off`, a choice's under its
+    options' own values.
+    """
+    return ("on" if value else "off") if setting["kind"] == "toggle" else value
+
+
 def setting_app(setting: dict[str, Any], value: Any) -> str | None:
     """The app a value of a catalog setting stands for, or nothing where the setting chooses between no apps.
 
-    A setting that chooses between engines names them in `apps`: a toggle's
-    under `on` and `off`, a choice's under its options' values. The agent is
-    told of the one that applies, and the page offers a person only that one
-    to start, so the choice is made in Settings and nowhere else.
+    A setting that chooses between engines names them in `apps`
+    (`setting_key`). The agent is told of the one that applies, and the page
+    offers a person only that one to start, so the choice is made in Settings
+    and nowhere else.
     """
-    key = ("on" if value else "off") if setting["kind"] == "toggle" else value
-    return setting.get("apps", {}).get(key)
+    return setting.get("apps", {}).get(setting_key(setting, value))
+
+
+def setting_skill(setting: dict[str, Any], value: Any) -> str | None:
+    """The skill a value of a catalog setting asks the agent to follow, or nothing where it asks for none.
+
+    A setting that changes how the agent works names the skill that says how
+    in `skills` (`setting_key`), so that a way of working is an entry of the
+    catalog and a skill, and the agent's own text names neither.
+    """
+    return setting.get("skills", {}).get(setting_key(setting, value))
 
 
 def default_sections(discipline: dict[str, Any], project_format: str) -> list[str]:

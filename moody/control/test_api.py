@@ -31,6 +31,7 @@ switches the person's screen to it. Run with `pytest moody/control`.
 
 from __future__ import annotations
 
+import ast
 import base64
 import copy
 from contextlib import nullcontext
@@ -65,13 +66,14 @@ from agent import SPECS, TOOL_NAMES, TOOLS, Agent, Result, check_activities, rec
 from agent import media_kind as preview_kind
 from api import create_app
 from definitions import (
-    AgentSpec,
     agents_directory,
     agents_for,
+    AgentSpec,
     matching,
     operators,
     read_agents,
     read_skills,
+    Skill,
     skills_directory,
     skills_for,
 )
@@ -1037,7 +1039,7 @@ def test_a_first_visit_makes_a_profile_with_the_sign_up_credits(world):
         "max": {"turn_budget_usd": 100.0, "turn_limit": 1000},
     }
     assert me == {"id": ALICE.id, "email": ALICE.email, "name": "", "credits": CATALOG.signup_credits, "max_sessions": 1, "limits": limits,
-                  "settings": {"video_hyperframes": False}}
+                  "settings": {"video_hyperframes": False, "video_versions": False}}
 
 
 def test_a_deployment_open_by_invitation_serves_only_the_addresses_on_its_list(world, monkeypatch):
@@ -1082,33 +1084,37 @@ def test_settings_are_the_persons_each_one_of_the_catalogs_and_on_its_default_un
     client, model, store = studio.client, studio.model, studio.store
     mine = lambda token="alice-token": client.get("/v1/me", headers=auth(token)).json()
     change = lambda **body: client.patch("/v1/me", headers=auth("alice-token"), json=body)
-    (entry,) = CATALOG.data["settings"]
+    entry, versions = CATALOG.data["settings"]
+    assert versions == {
+        "id": "video_versions", "tab": "Video editing", "label": "Keep versions with v2", "help": versions["help"],
+        "kind": "toggle", "default": False, "skills": {"on": "v2"},
+    } and "version" in versions["help"]
     assert entry == {
         "id": "video_hyperframes", "tab": "Video editing", "label": "Use HyperFrames for videos edited by code", "help": entry["help"],
         "kind": "toggle", "default": False, "apps": {"on": "hyperframes", "off": "cutroom"},
     } and "Cut Room" in entry["help"] and len(entry["help"]) < 140
     assert set(entry["apps"].values()) <= set(CATALOG.apps), "the setting names the engine each of its values stands for"
-    assert (mine()["name"], mine()["settings"]) == ("", {"video_hyperframes": False}), "everyone sees it, and it is off"
+    assert (mine()["name"], mine()["settings"]) == ("", {"video_hyperframes": False, "video_versions": False}), "everyone sees it, and it is off"
 
     changed = change(name="  Mara   Films ", settings={"video_hyperframes": True})
     assert changed.status_code == 200 and changed.json() == mine(), "the answer is the profile"
-    assert (mine()["name"], mine()["settings"]) == ("Mara Films", {"video_hyperframes": True})
-    assert mine("bob-token")["settings"] == {"video_hyperframes": False} and mine("bob-token")["name"] == ""
+    assert (mine()["name"], mine()["settings"]) == ("Mara Films", {"video_hyperframes": True, "video_versions": False})
+    assert mine("bob-token")["settings"] == {"video_hyperframes": False, "video_versions": False} and mine("bob-token")["name"] == ""
     assert change(turn_limit=300).status_code == 200
-    assert (mine()["name"], mine()["settings"], mine()["limits"]["turn_limit"]) == ("Mara Films", {"video_hyperframes": True}, 300), (
+    assert (mine()["name"], mine()["settings"], mine()["limits"]["turn_limit"]) == ("Mara Films", {"video_hyperframes": True, "video_versions": False}, 300), (
         "what a change leaves out is left as it is"
     )
-    assert change(settings={}).status_code == 200 and mine()["settings"] == {"video_hyperframes": True}
+    assert change(settings={}).status_code == 200 and mine()["settings"] == {"video_hyperframes": True, "video_versions": False}
     for refused in ({"settings": {"video_hyperframe": True}}, {"settings": {"video_hyperframes": "yes"}}, {"settings": {"video_hyperframes": 1}},
                     {"settings": [True]}, {"name": 7}, {"settings": {"video_hyperframes": False, "nope": True}, "name": "Other"},
-                    {"settings": {"video_hyperframes": False}, "turn_limit": 0}):
+                    {"settings": {"video_hyperframes": False, "video_versions": False}, "turn_limit": 0}):
         answer = change(**refused)
         assert answer.status_code == 400 and answer.json()["detail"], refused
     assert (mine()["name"], store.profiles[ALICE.id]["settings"]) == ("Mara Films", {"video_hyperframes": True}), "a refused change changes nothing"
     assert change(settings={"video_hyperframe": True}).json()["detail"] == "There is no setting video_hyperframe."
     assert change(settings={"video_hyperframes": "on"}).json()["detail"] == "video_hyperframes is true or false, or null for its default."
     assert change(settings={"video_hyperframes": None}, name=None).status_code == 200
-    assert (mine()["name"], mine()["settings"], store.profiles[ALICE.id]["settings"]) == ("", {"video_hyperframes": False}, {}), (
+    assert (mine()["name"], mine()["settings"], store.profiles[ALICE.id]["settings"]) == ("", {"video_hyperframes": False, "video_versions": False}, {}), (
         "null puts a setting back on its default, and the profile keeps only what the person changed"
     )
     assert len(change(name="x" * 200).json()["name"]) == 80
@@ -1117,13 +1123,13 @@ def test_settings_are_the_persons_each_one_of_the_catalogs_and_on_its_default_un
     captions = {"id": "captions", "tab": "Video editing", "label": "Captions", "help": "How a video carries its words.", "kind": "choice",
                 "options": [{"value": "burned", "label": "Burned in"}, {"value": "file", "label": "A file beside it"}], "default": "burned"}
     monkeypatch.setitem(CATALOG.settings, "captions", captions)
-    assert mine()["settings"] == {"video_hyperframes": False, "captions": "burned"}
+    assert mine()["settings"] == {"video_hyperframes": False, "video_versions": False, "captions": "burned"}
     assert change(settings={"captions": "file"}).status_code == 200 and mine()["settings"]["captions"] == "file"
     assert change(settings={"captions": "sung"}).json()["detail"] == "captions is burned, file, or null for its default."
     monkeypatch.setitem(CATALOG.settings, "captions", {**captions, "options": captions["options"][:1]})
     assert mine()["settings"]["captions"] == "burned" and store.profiles[ALICE.id]["settings"] == {"captions": "file"}
     monkeypatch.delitem(CATALOG.settings, "captions")
-    assert mine()["settings"] == {"video_hyperframes": False}
+    assert mine()["settings"] == {"video_hyperframes": False, "video_versions": False}
 
     # A turn's state names the engine a video is edited by code in, of the engines the catalog has
     film = new_project(client)
@@ -1152,6 +1158,31 @@ def test_settings_are_the_persons_each_one_of_the_catalogs_and_on_its_default_un
     assert editor() == "HyperFrames (app `hyperframes`)"
     change(settings={"video_hyperframes": None})
     assert editor() == "Cut Room (app `cutroom`)", "off is the default"
+
+
+def test_a_setting_that_changes_how_the_agent_works_names_the_skill_it_follows_while_it_is_on(studio):
+    client, model, agent = studio.client, studio.model, studio.agent
+    change = lambda **settings: client.patch("/v1/me", headers=auth("alice-token"), json={"settings": settings})
+    model.script(*[reply(say("Hello."))] * 6)
+
+    def asked(project: dict[str, Any]) -> list[str]:
+        message(client, project["id"], "Hi")
+        return [line for line in said(model.requests[-1])[1].splitlines() if line.startswith("The person turned on")]
+
+    film = new_project(client)
+    change(video_versions=True)
+    assert asked(film) == [], "the project is offered no such skill, so a turn is told to follow none"
+    folder = studio.tmp / "skills" / "v2"
+    folder.mkdir(parents=True)
+    (folder / "SKILL.md").write_text("---\nname: v2\ndescription: Keeping versions.\ndisciplines: [media]\n---\nV2-SKILL-TEXT\n")
+    agent.skills.append(Skill("v2", "Keeping versions.", frozenset({"media"}), "V2-SKILL-TEXT\n", folder))
+    assert asked(film) == ['The person turned on "Keep versions with v2" in Settings: follow the skill `v2`']
+    house = new_project(client, name="House", discipline="architecture", format="Building")
+    assert asked(house) == [], "a setting about video says nothing to a project that is not one"
+    change(video_versions=None)
+    assert asked(film) == [], "off is the default, and off asks for nothing"
+    change(video_versions=False, video_hyperframes=True)
+    assert asked(film) == [], "nor does a setting that chooses an engine and names no skill"
 
 
 def test_what_a_turn_may_spend_and_how_many_steps_it_may_take_are_the_persons_own_settings(studio):
@@ -1588,6 +1619,22 @@ def test_every_discipline_that_asks_its_kind_has_a_card_the_page_renders_and_a_l
         assert set(discipline["kinds"]) == set(discipline["formats"]), "every kind has its line and its icon's name"
         assert all(kind.get("note") and kind.get("icon") for kind in discipline["kinds"].values())
     assert sessions.opening_card(CATALOG.disciplines["music"]) is None
+
+
+def test_every_skill_a_setting_asks_for_is_one_of_the_repositorys_and_v2_is_for_video_alone():
+    skills = {skill.name: skill for skill in read_skills(skills_directory())}
+    named = {skill for setting in CATALOG.data["settings"] for skill in setting.get("skills", {}).values()}
+    assert named == {"v2"} and named <= set(skills), "a setting names a skill the repository has"
+    offered = lambda discipline: {skill.name for skill in skills_for(list(skills.values()), CATALOG, discipline)}
+    assert [discipline for discipline in CATALOG.disciplines if "v2" in offered(discipline)] == ["media"]
+    v2 = skills["v2"]
+    assert "turned on" in v2.description and "Keep versions with v2" in v2.description, "its description says when it applies"
+    for said in ("v2 init", "v2 save", "--prompt", "--render", "--change", "v2-versions .", "v2-versions --stop", "v2 comments", "v2 restore",
+                 "selkies-modal-project", "preview(", "git rev-parse --git-dir"):
+        assert said in v2.body, said
+    for refused in ("push", "publish", "login", "clone", "update"):
+        assert f"`{refused}`" in v2.body or f"v2 {refused}" in v2.body, f"it says {refused} is not to be run"
+    assert "v2.video" in v2.body and "Do not follow them" in v2.body, "and that the tool's own notes for agents are not Moody's"
 
 
 def test_every_kind_names_an_icon_the_catalog_has_and_the_card_that_asks_the_kind_draws_it():
@@ -2539,6 +2586,78 @@ def test_a_screenshot_is_shown_as_a_preview_card_and_previews_are_signed_at_each
     assert [len(p["items"]) for p in previews(client, film["id"])] == [1, 1, 1, 1], "a file that is gone is left out of its preview"
     client.delete(f"/v1/projects/{film['id']}", headers=auth("alice-token"))
     assert not store.files, "a project's previews go with it"
+
+
+def test_every_module_the_control_plane_imports_from_its_own_folder_is_carried_onto_its_image():
+    here = Path(__file__).resolve().parent
+    app = ast.parse((here / "app.py").read_text())
+    carried = next(
+        set(ast.literal_eval(node.value)) for node in app.body
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "MODULES" for target in node.targets)
+    )
+    own = {path.name for path in here.glob("*.py")}
+    for module in sorted(carried):
+        tree = ast.parse((here / module).read_text())
+        names = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+        names |= {node.module.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module and not node.level}
+        missing = {f"{name}.py" for name in names} & own - carried
+        assert not missing, f"{module} imports {sorted(missing)}, which the deployed image would not have"
+
+
+def test_a_preview_of_a_version_kept_with_v2_carries_its_tracks_and_any_other_asks_the_engine_nothing_more(studio):
+    client, model, launcher = studio.client, studio.model, studio.launcher
+    film = new_project(client)
+    eid = start_engine(studio, film["id"])["id"]
+    saved = {
+        "version": "v2", "message": "The slam, with the hook", "prompts": ["make a short of the boss slam"], "model": "a-model",
+        "changes": [
+            {"from": 0, "to": 12.48, "kind": "video", "src": "renders/short.mp4", "text": "the slam, cropped to 9:16"},
+            {"from": 1, "to": 9, "kind": "voice", "src": "narration/voice.wav", "text": "six lines"},
+        ],
+        "render": "renders/short.mp4", "saved_at": "2026-11-28T14:51:05Z",
+    }
+    peaks = "".join(f"lavfi.astats.Overall.Peak_level={level}\n" for level in ("-inf", "-6.0206", "0.0"))
+    launcher.answers += [
+        probe("renders/short.mp4", 3 * MB, H264),
+        probe("sheets/frame.png", 240_000, PNG),
+        ("git show v2:./.v2/commit.json", (0, json.dumps(saved))),
+        ("lavfi.astats.Overall.Peak_level", (0, peaks)),
+    ]
+    model.script(
+        reply(
+            use("preview", engine_id=eid, paths=["sheets/frame.png", "renders/short.mp4"], caption="The slam with the new hook", version=" v2 "),
+            use("preview", engine_id=eid, path="sheets/frame.png", caption="A frame of it", version="v2"),
+            use("preview", engine_id=eid, path="renders/short.mp4", caption="The same file under a name of the agent's", version="Rough cut"),
+            use("preview", engine_id=eid, path="renders/short.mp4", caption="A step on the way"),
+            use("preview", engine_id=eid, path="renders/short.mp4", caption="A version v2 has no record of", version="v3"),
+        ),
+        reply(say("Shown.")),
+    )
+    message(client, film["id"], "Show me the slam")
+
+    results = [json.loads(r["content"]) for r in tool_results(model.requests[1]).values()]
+    assert "with its tracks" in results[0]["screen"] and "(2 changes)" in results[0]["screen"] and "no engine running" in results[0]["screen"]
+    assert not any("screen" in result for result in results[1:]), "the model is told of tracks only where the page has them"
+    version, frame, named, step, unsaved = previews(client, film["id"])
+    picture, video = version["items"]
+    assert version["version"] == "v2" and "edit" not in picture, "the edit is the render's, not every file's the preview shows"
+    assert video["edit"] == {
+        "message": "The slam, with the hook",
+        "prompts": ["make a short of the boss slam"],
+        "changes": [
+            {"text": "the slam, cropped to 9:16", "kind": "video", "from": 0.0, "to": 12.48, "src": "renders/short.mp4"},
+            {"text": "six lines", "kind": "voice", "from": 1.0, "to": 9.0, "src": "narration/voice.wav"},
+        ],
+        "saved_at": "2026-11-28T14:51:05+00:00",
+        "sound": [0, 50, 100],
+    }
+    assert not any("edit" in item for shown in (frame, named, step, unsaved) for item in shown["items"]), (
+        "a record is taken only for the file it names as its render, under the name v2 gave the version"
+    )
+    asked = [command for _, command in launcher.commands if "git show" in command or "Peak_level" in command]
+    assert [("git show v2:" in c, "git show v3:" in c, "Peak_level" in c) for c in asked] == [
+        (True, False, False), (False, False, True), (True, False, False), (False, True, False),
+    ], "only a label that is a v2 version's name asks for a record, and only a record found has its sound measured"
 
 
 def test_engine_send_carries_a_file_between_two_running_engines_of_one_project(studio):

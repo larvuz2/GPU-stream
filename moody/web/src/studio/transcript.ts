@@ -61,6 +61,7 @@ import type {
   TurnId,
   TurnLimit,
   UiData,
+  VersionEdit,
 } from '../lib/api';
 import { cardMedia } from '../lib/api';
 
@@ -811,6 +812,12 @@ export interface Version {
   caption: string;
   /** The key of the conversation's entry it appeared in. */
   itemKey: string;
+  /** The edit the file is the render of, where the project's history holds one; else `null`. */
+  edit: VersionEdit | null;
+  /** How long the file plays, in seconds, where that is known; else `null`. */
+  seconds: number | null;
+  /** The file's width over its height on screen, where both are known; else `null`. */
+  aspect: number | null;
 }
 
 /** The kinds of file a version is played by, the first a preview holds winning. */
@@ -819,10 +826,11 @@ const PLAYED_BY: readonly Media['kind'][] = ['video', 'audio', 'image'];
 /**
  * The versions of the piece the session has shown, the newest first.
  *
- * A version is a preview the agent called one (`version`), played by its first video, failing
- * that its first sound, failing that its first picture. Where no preview names a version, the
- * newest video or sound the session showed stands in as the only one, so there is something to
- * play as soon as anything that plays has been shown.
+ * A version is a preview the agent called one (`version`), played by the file that carries the
+ * version's edit, failing that its first video, failing that its first sound, failing that its
+ * first picture. Where no preview names a version, the newest video or sound the session showed
+ * stands in as the only one, so there is something to play as soon as anything that plays has
+ * been shown.
  *
  * @param items The conversation.
  * @returns The versions, or none while the session has shown nothing that plays.
@@ -833,11 +841,20 @@ export function versions(items: readonly TranscriptItem[]): Version[] {
     if (item.type !== 'preview' || item.version === null) {
       continue;
     }
-    const media = PLAYED_BY.map((kind) => item.files.find((file) => file.kind === kind)).find(
-      (file) => file !== undefined,
-    );
+    const media =
+      item.files.find((file) => file.edit !== undefined) ??
+      PLAYED_BY.map((kind) => item.files.find((file) => file.kind === kind)).find((file) => file !== undefined);
     if (media !== undefined) {
-      named.push({ key: item.key, media, label: item.version, caption: item.caption, itemKey: item.key });
+      named.push({
+        key: item.key,
+        media,
+        label: item.version,
+        caption: item.caption,
+        itemKey: item.key,
+        edit: media.edit ?? null,
+        seconds: media.seconds ?? null,
+        aspect: media.width !== undefined && media.height !== undefined ? media.width / media.height : null,
+      });
     }
   }
   if (named.length > 0) {
@@ -846,5 +863,16 @@ export function versions(items: readonly TranscriptItem[]): Version[] {
   const newest = processMedia(items).find((entry) => entry.media.kind === 'video' || entry.media.kind === 'audio');
   return newest === undefined
     ? []
-    : [{ key: newest.key, media: newest.media, label: null, caption: newest.caption, itemKey: newest.itemKey }];
+    : [
+        {
+          key: newest.key,
+          media: newest.media,
+          label: null,
+          caption: newest.caption,
+          itemKey: newest.itemKey,
+          edit: null,
+          seconds: null,
+          aspect: null,
+        },
+      ];
 }

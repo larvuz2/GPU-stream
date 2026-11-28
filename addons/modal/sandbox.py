@@ -54,6 +54,12 @@ a GitHub repository, given it and a token for it in a Secret of the start's own
 (`start_session`'s `secrets`), clones it by itself and says how far it is
 (`clone_status`).
 
+The two sessions with no application, the Cut Room and HyperFrames, are driven
+with shell commands alone, and both carry v2 for the versions of the video
+they make (`with_v2`): its command line with the commands that upload to its
+maker's site refused, and its page of versions, served on the Sandbox's
+loopback and shown on the session's screen.
+
 This is Python because Modal's Python SDK is the interface the image
 definition, the Sandbox, and the connect token are reached through.
 """
@@ -148,6 +154,12 @@ HYPERFRAMES_REGISTRY = "https://registry.npmjs.org"
 # control plane, or the shell `selkies-modal` runs in): a version such as 0.9.97, or `built` for the image's own.
 # Unset, which is how a deployment starts, a session follows upstream (hyperframes/release.sh)
 HYPERFRAMES_HELD = os.environ.get("MOODY_HYPERFRAMES_VERSION", "")
+# v2, which the Cut Room and HyperFrames keep a video's versions with (`with_v2`, `v2/install.sh`): the commit of
+# github.com/agentnativeinc/v2 it is built from, its tag v0.11.3 (MIT), and the Go that builds it, with the
+# SHA-256 go.dev lists for go<version>.linux-amd64.tar.gz. Its page is built with HyperFrames' Node.js pin
+V2_COMMIT = "66a323be7a4f3afea20e4d14f3dd99b68d5aea07"
+V2_GO_VERSION = "1.26.11"
+V2_GO_SHA256 = "9849f4e04ee35303714e34fbc3ac8ab44ea3e448a95aa182f91e3b9b79c710ec"
 # The Unreal session's GitHub client: Desktop Plus, a fork of GitHub Desktop kept current with it
 # that publishes Linux packages; its Debian package and the SHA-256 its GitHub release lists for it
 DESKTOP_PLUS_VERSION = "3.6.12.0"
@@ -366,7 +378,8 @@ def session_image(app: str = "blender") -> modal.Image:
     (`unreal_desktop`); `unreal_image` is the same desktop with the editor.
     The Cut Room's has no application at all (`cutroom_image`), and neither
     has HyperFrames', the one image whose main part follows its upstream
-    instead of a pin (`hyperframes_image`).
+    instead of a pin (`hyperframes_image`); both keep versions with v2
+    (`with_v2`).
     """
     if app == "unreal":
         return with_session(unreal_desktop(modal.Image.from_registry(BASE_IMAGE)), app)
@@ -463,18 +476,24 @@ def cutroom_image() -> modal.Image:
       detector, at pinned revisions and checksums, so a session fetches none.
     - **The scripts,** `cutroom/scripts`, at `CUTROOM_ROOT/scripts`, each run
       as `cutroom NAME` from any directory (`cutroom/run.sh`).
+    - **v2,** for the versions of a cut and the page that shows them
+      (`with_v2`), with the browser that page opens in: Chrome for Testing
+      at HyperFrames' pin, shown as HyperFrames shows its preview
+      (`hyperframes/kiosk.sh`).
 
     The session's screen is a terminal on the log of those commands
-    (`cutroom/autostart`). The layers are ordered by how often they change:
-    the tools (`cutroom_tools`), then the small files and the scripts, so a
-    changed script rebuilds a layer of kilobytes.
+    (`cutroom/autostart`), until the versions page is put over it. The layers
+    are ordered by how often they change: the tools (`cutroom_tools`), v2,
+    then the small files and the scripts, so a changed script rebuilds a
+    layer of kilobytes.
     """
     cutroom = HERE / "cutroom"
     return (
-        cutroom_tools()
+        with_v2(cutroom_tools())
         .add_local_file(HERE / "craft" / "project.sh", "/usr/local/bin/selkies-modal-project", copy=True)
         .add_local_file(cutroom / "autostart", "/etc/xdg/openbox/autostart", copy=True)
         .add_local_file(cutroom / "run.sh", "/usr/local/bin/cutroom", copy=True)
+        .add_local_file(HERE / "hyperframes" / "kiosk.sh", "/usr/local/bin/selkies-modal-kiosk", copy=True)
         .add_local_dir(cutroom / "scripts", f"{CUTROOM_ROOT}/scripts", copy=True, ignore=["**/__pycache__"])
     )
 
@@ -488,15 +507,20 @@ def cutroom_fonts() -> str:
 
 
 def cutroom_tools() -> modal.Image:
-    """The base container with the Cut Room's packages, Python environment, fonts, and models: the heavy layers.
+    """The base container with the Cut Room's packages, Python environment, fonts, models, and browser: the heavy layers.
 
     They change only when a pin moves, so they are an image of their own
-    under the scripts, and the last step proves them: it fails the build
-    unless FFmpeg has what the scripts call and every package and model
-    loads.
+    under the scripts, and `verify` proves the Cut Room's own: it fails the
+    build unless FFmpeg has what the scripts call and every package and model
+    loads. Over them is the one part that is another engine's, Chrome for
+    Testing with the libraries it links, installed by HyperFrames' steps at
+    HyperFrames' pin (`hyperframes/install.sh`) so that one browser serves
+    both; it is what the versions page of v2 opens in, and v2's own check
+    proves it (`with_v2`).
     """
     cutroom = HERE / "cutroom"
     install = f"sh {SHARE}/cutroom/install.sh"
+    chrome = f"sh {SHARE}/hyperframes/install.sh"
     return (
         modal.Image.from_registry(BASE_IMAGE)
         .add_local_file(cutroom / "install.sh", f"{SHARE}/cutroom/install.sh", copy=True)
@@ -509,6 +533,54 @@ def cutroom_tools() -> modal.Image:
             f"RUN {install} yunet {CUTROOM_YUNET_REVISION} {CUTROOM_YUNET_SHA256}",
             f"RUN {install} verify",
         )
+        .add_local_file(HERE / "hyperframes" / "install.sh", f"{SHARE}/hyperframes/install.sh", copy=True)
+        .dockerfile_commands(
+            f"RUN selkies-privileged-files run {chrome} packages",
+            f"RUN {chrome} chrome {HYPERFRAMES_CHROME_VERSION} {HYPERFRAMES_CHROME_SHA256}",
+        )
+    )
+
+
+def with_v2(image: modal.Image) -> modal.Image:
+    """`image`, one that has Chrome for Testing, with v2: the versions of the video a session makes, and their page.
+
+    v2 (Agent Native's, MIT) saves a project folder as numbered versions,
+    the text through Git and the media in a store of its own inside the
+    folder, and serves a page on which a person watches a version, compares
+    two, and leaves comments at a moment of the video, which the agent then
+    reads. A session gets three things (`v2/install.sh` documents the build):
+
+    - **The program,** built from its source at `V2_COMMIT` with Go and
+      Node.js at their pins, in one step that keeps neither of them, the
+      source, nor a cache: `/opt/v2/bin/v2`, with the source's license and
+      the commit beside it. Nothing is taken from the maker's site, and the
+      build carries no version, which is what keeps the program from asking
+      that site for newer releases.
+    - **`v2`,** the command a session runs (`v2/run.sh`): the program with
+      the commands that reach the maker's site refused, `push` and `publish`
+      among them, since a project's files stay in its workspace.
+    - **`v2-versions`** (`v2/versions.sh`), which serves a project's versions
+      page on the Sandbox's loopback and shows it on the session's screen in
+      the engine's one browser window (`hyperframes/kiosk.sh`, which each
+      engine's image installs beside its own small files).
+
+    The layers sit over an engine's tools and under its small files: the
+    build, which changes when a pin moves; the command; the check, which
+    fails the build unless the command answers as that build, refuses a
+    command of the site, saves a version and serves its page as the session's
+    user, and finds the browser whole; and last the script that shows the
+    page, so a change to it rebuilds kilobytes.
+    """
+    v2 = HERE / "v2"
+    install = f"sh {SHARE}/v2/install.sh"
+    return (
+        image.add_local_file(v2 / "install.sh", f"{SHARE}/v2/install.sh", copy=True)
+        .dockerfile_commands(
+            f"RUN {install} build {V2_COMMIT} {V2_GO_VERSION} {V2_GO_SHA256} {HYPERFRAMES_NODE_VERSION} {HYPERFRAMES_NODE_SHA256}"
+        )
+        .add_local_file(v2 / "run.sh", "/usr/local/bin/v2", copy=True)
+        .dockerfile_commands(f"RUN {install} verify")
+        .add_local_file(v2 / "versions.sh", "/usr/local/bin/v2-versions", copy=True)
     )
 
 
@@ -542,13 +614,16 @@ def hyperframes_image() -> modal.Image:
     HyperFrames (HeyGen's, Apache 2.0) renders a composition of HTML, CSS,
     and seekable animation by stepping a headless browser through its frames
     and encoding them with FFmpeg. A session is driven with shell commands, as
-    the Cut Room is, and has one thing to watch: the live preview.
+    the Cut Room is, and has two things to watch, one at a time in one
+    browser window (`hyperframes/kiosk.sh`): the live preview, and the
+    versions page of v2 (`with_v2`).
 
     - **Pinned**, as every engine's parts are (`hyperframes/install.sh`):
       Node.js, which the CLI runs on; Chrome for Testing, which the preview
-      opens in on the session's screen (`hyperframes/preview.sh`); the
-      libraries a Chrome links; and the Cut Room's fonts (`cutroom_fonts`).
-      FFmpeg is the base image's.
+      and the versions page open in on the session's screen
+      (`hyperframes/preview.sh`, `v2/versions.sh`); the libraries a Chrome
+      links; the Cut Room's fonts (`cutroom_fonts`); and v2. FFmpeg is the
+      base image's.
     - **Following upstream**, the one place this engine differs: the
       HyperFrames CLI, its skills, and the headless browser each release
       renders with. The image is built with the newest release
@@ -565,16 +640,17 @@ def hyperframes_image() -> modal.Image:
 
     The release's skills are at `HYPERFRAMES_ROOT/skills`, the craft an agent
     reads on the machine before it writes a composition; they are upstream's
-    and are not copied into this repository. The build's last step fails
-    unless the CLI answers with the version it was built with, its skills are
-    there, and both browsers find their libraries.
+    and are not copied into this repository. The last step of these tools
+    fails the build unless the CLI answers with the version it was built
+    with, its skills are there, and both browsers find their libraries; v2's
+    layers and its own check follow (`with_v2`), then the small files.
     """
     hyperframes = HERE / "hyperframes"
     install = f"sh {SHARE}/hyperframes/install.sh"
     as_user = "setpriv --reuid=1000 --regid=1000 --init-groups env HOME=/home/ubuntu"
     # The newest release, then the proven one: the first that installs and renders is the image's (release.sh)
     releases = " ".join(dict.fromkeys((hyperframes_release(), HYPERFRAMES_RELEASE)))
-    return (
+    tools = (
         modal.Image.from_registry(BASE_IMAGE)
         .add_local_file(hyperframes / "install.sh", f"{SHARE}/hyperframes/install.sh", copy=True)
         .dockerfile_commands(
@@ -590,9 +666,13 @@ def hyperframes_image() -> modal.Image:
             f"RUN chown 1000:1000 {HYPERFRAMES_ROOT} && {as_user} hyperframes-release build {releases}",
             f"RUN {install} verify",
         )
+    )
+    return (
+        with_v2(tools)
         .add_local_file(HERE / "craft" / "project.sh", "/usr/local/bin/selkies-modal-project", copy=True)
         .add_local_file(hyperframes / "autostart", "/etc/xdg/openbox/autostart", copy=True)
         .add_local_file(hyperframes / "preview.sh", "/usr/local/bin/hyperframes-preview", copy=True)
+        .add_local_file(hyperframes / "kiosk.sh", "/usr/local/bin/selkies-modal-kiosk", copy=True)
     )
 
 
