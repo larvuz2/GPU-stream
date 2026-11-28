@@ -31,6 +31,7 @@ switches the person's screen to it. Run with `pytest moody/control`.
 
 from __future__ import annotations
 
+import ast
 import base64
 import copy
 from contextlib import nullcontext
@@ -2585,6 +2586,22 @@ def test_a_screenshot_is_shown_as_a_preview_card_and_previews_are_signed_at_each
     assert [len(p["items"]) for p in previews(client, film["id"])] == [1, 1, 1, 1], "a file that is gone is left out of its preview"
     client.delete(f"/v1/projects/{film['id']}", headers=auth("alice-token"))
     assert not store.files, "a project's previews go with it"
+
+
+def test_every_module_the_control_plane_imports_from_its_own_folder_is_carried_onto_its_image():
+    here = Path(__file__).resolve().parent
+    app = ast.parse((here / "app.py").read_text())
+    carried = next(
+        set(ast.literal_eval(node.value)) for node in app.body
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "MODULES" for target in node.targets)
+    )
+    own = {path.name for path in here.glob("*.py")}
+    for module in sorted(carried):
+        tree = ast.parse((here / module).read_text())
+        names = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+        names |= {node.module.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module and not node.level}
+        missing = {f"{name}.py" for name in names} & own - carried
+        assert not missing, f"{module} imports {sorted(missing)}, which the deployed image would not have"
 
 
 def test_a_preview_of_a_version_kept_with_v2_carries_its_tracks_and_any_other_asks_the_engine_nothing_more(studio):

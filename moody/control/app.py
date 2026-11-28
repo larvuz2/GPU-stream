@@ -65,6 +65,7 @@ MODULES = (
     "transcript.py",
     "definitions.py",
     "looking.py",
+    "edits.py",
     "genui.py",
     "launcher.py",
     "generation.py",
