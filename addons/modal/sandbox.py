@@ -9,15 +9,25 @@ own. `up` builds or reuses the image (Blender layered over the base image this
 tree publishes), starts a Sandbox whose main process is `session.sh`, waits
 until Selkies listens, and prints a link carrying two credentials:
 
-- Modal's connect token, in the query (`_modal_connect_token`), which Modal's
-  proxy takes for the right to reach the Sandbox at all and answers with a
-  cookie, so the page's later requests and its socket pass too.
+- The path the session's server answers under, a random one made for this
+  session (`SELKIES_SUBFOLDER`), for the right to reach the server at all:
+  outside it nothing is served, so whoever finds the Sandbox's address without
+  the link meets a server that answers nothing.
 - The Selkies session token, in the fragment (`#token=`), which no request line
   carries. The session is in secure mode, so nothing streams without it.
 
-Neither is kept on this side: a later `url` asks Modal for a new connect token
-and reads the session token back out of the Sandbox, which takes the Modal
-credentials that started it.
+The address is a tunnel Modal opens to the session's port, and both
+credentials travel in the link itself, which is what lets a page show the
+session in a frame. Modal's own gate for a Sandbox, a connect token its proxy
+answers with a cookie, keeps the session out of every frame: the cookie is
+`SameSite=Lax`, which a browser neither stores nor sends for a document framed
+by another site, so the first document arrives and every request after it is
+refused. A session started without the tunnel is still reached that way
+(`session_link`), and the Unreal view, whose server has no credential of its
+own, always is.
+
+Neither credential is kept on this side: a later `url` reads both back out of
+the Sandbox, which takes the Modal credentials that started it.
 
 What a session costs is bounded three ways. It ends itself once it has gone
 unused (`session.sh`), the Sandbox's lifetime ends it regardless, and `up` for
@@ -781,16 +791,25 @@ def find_session(name: str) -> modal.Sandbox | None:
 
 
 def session_link(sandbox: modal.Sandbox) -> str:
-    """A link that opens the session, with a new connect token and the session's own token.
+    """A link that opens the session: its tunnel's address, the path its server answers under, and its own token.
 
-    Reading the token counts as use of the session: a link is asked for by
-    someone about to open it.
+    Both credentials are read from the session, and reading them counts as
+    use of it: a link is asked for by someone about to open it. A session
+    that has no tunnel to its port or no path of its own is reached through
+    Modal's connect token instead, which opens in a tab of its own and in no
+    frame (the module's docstring).
     """
-    process = sandbox.exec("sh", "-c", 'touch "$SELKIES_MODAL_ACTIVITY_FILE" && cat "$SELKIES_TOKENS_FILE"')
-    table = process.stdout.read()
+    process = sandbox.exec(
+        "sh", "-c", 'touch "$SELKIES_MODAL_ACTIVITY_FILE" && printf "%s\\n" "${SELKIES_SUBFOLDER:-}" && cat "$SELKIES_TOKENS_FILE"'
+    )
+    answer = process.stdout.read()
     if process.wait() != 0:
         raise SystemExit(f"selkies-modal: the session's token could not be read: {process.stderr.read().strip()}")
+    path, _, table = answer.partition("\n")
     token = next(iter(json.loads(table)))
+    tunnel = sandbox.tunnels().get(PORT) if path.strip() else None
+    if tunnel is not None:
+        return f"{tunnel.url}/{path.strip()}/#token={token}"
     credentials = sandbox.create_connect_token(port=PORT)
     return f"{credentials.url}/?_modal_connect_token={credentials.token}#token={token}"
 
@@ -853,6 +872,8 @@ def start_session(
         {
             "SELKIES_MASTER_TOKEN": token_urlsafe(32),
             "SELKIES_MODAL_SESSION_TOKEN": token_urlsafe(32),
+            # The path the server answers under, which the link carries and nothing else knows (`session_link`)
+            "SELKIES_SUBFOLDER": token_urlsafe(24),
             "FILMCRAFT_CONTROL_TOKEN": token_hex(32),
             "PHOTOCRAFT_CONTROL_TOKEN": token_hex(32),
             "VECTORCRAFT_CONTROL_TOKEN": token_hex(32),
@@ -874,6 +895,7 @@ def start_session(
         volumes={WORKSPACE: volume},
         tags=tags or {},
         readiness_probe=modal.Probe.with_tcp(PORT),
+        encrypted_ports=[PORT],
         unencrypted_ports=list(tcp_ports),
     )
 
@@ -1308,7 +1330,7 @@ def screenshot(sandbox: modal.Sandbox) -> bytes:
         "sh",
         "-c",
         'curl -fsS -m 20 -H "Authorization: Bearer $SELKIES_MASTER_TOKEN" '
-        '"http://127.0.0.1:${SELKIES_PORT:-8080}/api/screenshot" | '
+        '"http://127.0.0.1:${SELKIES_PORT:-8080}${SELKIES_SUBFOLDER:+/$SELKIES_SUBFOLDER}/api/screenshot" | '
         # The comma is escaped for ffmpeg, which otherwise reads it as the end of the filter
         "ffmpeg -loglevel error -i pipe:0 -vf 'scale=min(1280\\,iw):-2' -q:v 4 -f mjpeg pipe:1 | base64 -w0",
     )

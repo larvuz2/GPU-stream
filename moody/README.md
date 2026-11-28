@@ -33,8 +33,9 @@ kind: `opening`, and each kind's line, icon, and first library sections under
    workspace Volume mounted, and marks the session running when Selkies
    answers. A session beyond the deployment's capacity waits in a queue and
    starts when one ends.
-4. The studio asks for a link and shows it on its Screen panel: the stream, guarded by Modal's
-   connect token and the Selkies session token.
+4. The studio asks for a link and shows it on its Screen panel, in a frame: the stream, guarded by
+   a path of the session's own and the Selkies session token, both in the link, with no cookie a
+   frame would lose.
 5. Once a minute the control plane charges every running session, stops the
    ones whose user ran out of credits, and closes the row of every Sandbox that
    ended itself: unused for ten minutes, stopped, or crashed.
