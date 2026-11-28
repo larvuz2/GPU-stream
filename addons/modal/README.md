@@ -1058,6 +1058,64 @@ neither its update check nor its skills installer runs, since the release and
 its skills are the session's to settle (`moody/skills/hyperframes` has the
 commands as they were run).
 
+## v2
+
+The Cut Room and HyperFrames sessions both carry
+[v2](https://github.com/agentnativeinc/v2) (Agent Native's, MIT), which keeps
+the versions of a video an agent makes and shows them on a page. `v2 save`
+records the project folder as a numbered version, the text through Git and
+the media in a store inside the folder (`.v2/objects`), so the versions are
+on the workspace Volume with the project. The page plays any version, sets
+two side by side, and takes comments at a moment of the video, which
+`v2 comments` then lists for the agent:
+
+```bash
+addons/modal/selkies-modal exec --name cuts -- bash -c 'cd "$(selkies-modal-project)" && v2 init'
+addons/modal/selkies-modal exec --name cuts -- bash -c 'cd "$(selkies-modal-project)" && v2 save -m "first cut" --prompt "cut the talk to a minute" --change "video out/final.mp4: the first cut"'
+addons/modal/selkies-modal exec --name cuts -- bash -c 'cd "$(selkies-modal-project)" && v2 log'
+addons/modal/selkies-modal exec --name cuts -- bash -c 'cd "$(selkies-modal-project)" && v2-versions .'
+addons/modal/selkies-modal exec --name cuts -- bash -c 'cd "$(selkies-modal-project)" && v2 comments'
+addons/modal/selkies-modal exec --name cuts -- v2-versions --stop
+```
+
+`v2-versions DIR` serves the page on the Sandbox's loopback, on port 3010
+unless a second argument names another, and shows it over the terminal in the
+session's one browser window, Chrome for Testing with no browser chrome;
+`v2-versions --stop` ends the server and closes the window. The page lists
+the versions and comments as they were when it loaded, so after a save
+`v2-versions DIR` is run again to show the new one. v2 answers on loopback
+only and refuses a request named for another host, so the page is reached
+from the session's own browser and from nowhere else. A HyperFrames
+session has two pages for that window, the preview and the versions, and it
+shows whichever was started last: both commands show their page through
+`selkies-modal-kiosk` (`hyperframes/kiosk.sh`), which ends the browser that
+was showing before it starts the next, and each command's `--stop` closes the
+window only while its own page is on it.
+
+The program is built into the image from its source at one commit
+(`V2_COMMIT`), with Go and Node.js at pinned versions and checksums and
+nothing of the build left in the layer (`v2/install.sh`); nothing is taken
+from its maker's site, and two builds of the commit are the same file, byte
+for byte. `v2` in a session is that program behind a wrapper (`v2/run.sh`)
+that refuses the commands which work with v2.video (`login`, `logout`,
+`push`, `publish`, `unpublish`, `clone`, and `update`) with status 2 and a
+line saying why: a project's files stay in its workspace. The build carries
+no version, which keeps the program from asking that site for newer
+releases. Two things of upstream's are left as they are: the notes `v2 init`
+writes into a project's `AGENTS.md` still describe the refused commands, and
+the page asks Google Fonts for its typeface.
+
+Measured on sessions without a GPU, with no page connected to the stream.
+Building the program adds 22 to 28 s and 12 MB to an image; the Cut Room's
+also takes Chrome for Testing, 413 MB with 30 MB of libraries, in 37 s. A
+save of a 15 MB render takes 0.2 s on the Volume, and `v2-versions` returns
+in under a second. With the page idle on the screen Chrome uses about 1% of a
+core and v2 none. Playing a 1280x720 version at 30 frames a second takes
+Chrome 46% of a core, decoding and drawing in software, and v2 still none.
+The browser and the server add about 250 MB to the Sandbox's memory when the
+page opens and about 400 MB once a version has played; the server's share is
+27 MB.
+
 ## The session
 
 The image is the base container by digest with three additions: Blender's

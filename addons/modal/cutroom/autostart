@@ -12,7 +12,8 @@
 # printed to the session's log. This shows that log as it grows, opened in the
 # session's project folder (`craft/project.sh`), so a person watching the
 # engine's screen sees what is being cut. The finished pictures and sound reach
-# them in the conversation, as previews, never here.
+# them in the conversation, as previews; what opens over this terminal is the
+# versions page of v2, when the agent shows it (`v2-versions`, v2/versions.sh).
 folder="$(selkies-modal-project)" || exit 1
 cd "${folder}" || exit 1
 

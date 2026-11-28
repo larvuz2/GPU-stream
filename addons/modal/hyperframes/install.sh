@@ -25,9 +25,11 @@
 #   into /usr/local/bin.
 # - `chrome`: Chrome for Testing, Google's build of Chrome for automated use,
 #   checked against the hash given, at /opt/hyperframes/chrome. It is the
-#   browser the live preview opens in on the session's screen. The renderer's
-#   headless browser is not this one: the HyperFrames CLI downloads the build
-#   each of its releases was tested with (release.sh).
+#   browser the live preview opens in on the session's screen, and the versions
+#   page of v2 (kiosk.sh); the Cut Room's image runs this step and `packages`
+#   for that page alone (sandbox.py, `cutroom_tools`). The renderer's headless
+#   browser is not this one: the HyperFrames CLI downloads the build each of
+#   its releases was tested with (release.sh).
 # - `verify`: fails the build unless Node runs, both browsers find every
 #   library they link, and the CLI the image was built with answers with its
 #   version and lists its skills. Run after the release is installed.
@@ -89,6 +91,7 @@ case "${1-}" in
     fetch "https://storage.googleapis.com/chrome-for-testing-public/${version}/linux64/chrome-linux64.zip" \
       "${download}/chrome.zip" "${sha256}"
     unzip -q "${download}/chrome.zip" -d "${download}"
+    mkdir -p "${HOME_DIR}"
     rm -rf "${HOME_DIR}/chrome"
     mv "${download}/chrome-linux64" "${HOME_DIR}/chrome"
     rm -rf "${download}"
